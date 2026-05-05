@@ -1538,6 +1538,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
             const custIdStr = String(customerId || '').trim();
             const custNameStr = String(customerName || '').trim();
+            const custNameLower = custNameStr.toLowerCase();
 
             for (const retBc of returnBarcodesUnique) {
               const retNorm = normalizeBarcode(retBc);
@@ -1549,8 +1550,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               if (!bottle) continue;
               const assignedTo = String(bottle.assigned_customer || '').trim();
               const assignedName = String(bottle.customer_name || '').trim();
-              const onBalance = (custIdStr && assignedTo === custIdStr) ||
-                (custNameStr && (assignedTo === custNameStr || assignedName === custNameStr));
+              const assignedToLower = assignedTo.toLowerCase();
+              const assignedNameLower = assignedName.toLowerCase();
+              const idMatch = custIdStr && (assignedTo === custIdStr || assignedToLower === custIdStr.toLowerCase());
+              const nameMatch = custNameLower && (assignedToLower === custNameLower || assignedNameLower === custNameLower);
+              const onBalance = idMatch || nameMatch;
               if (!onBalance) {
                 returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
               }

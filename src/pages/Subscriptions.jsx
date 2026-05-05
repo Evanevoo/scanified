@@ -7,6 +7,7 @@ import { createSubscription, generateInvoice } from '../services/subscriptionSer
 import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
+import { getNextInvoiceNumbers, resolveInvoiceNumberForRentalPdf } from '../utils/invoiceUtils';
 import { buildOpenAssetRowsForInvoice, fetchReturnsInInvoicePeriod } from '../utils/rentalInvoiceAssets';
 import {
   buildAssetPricingMap,
@@ -20,13 +21,14 @@ import {
 } from '../utils/rentalDisplayPricing';
 import { groupBillableUnitCountsByProductCode } from '../services/billingFromAssets';
 import { useDebounce } from '../utils/performance';
+import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip, IconButton,
   Button, TextField, InputAdornment, Tooltip, LinearProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
-  Select, MenuItem, Alert,
+  Select, MenuItem, Alert, TablePagination,
 } from '@mui/material';
 import {
   Search as SearchIcon, Add as AddIcon, Refresh as RefreshIcon,
@@ -38,13 +40,19 @@ import {
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
  * Returns net30 | credit_card | other | unknown (empty terms).
  */
+function isCodPaymentTerm(t) {
+  return t === 'cod' || t === 'cash on delivery' || t === 'c.o.d.';
+}
+
+function isCreditCardPaymentTerm(t) {
+  return isCodPaymentTerm(t) || /\bvisa\b|\bmastercard\b|\bmc\b|\bamex\b|american express|\bdiscover\b|credit\s*card|card\s*payment|\bdebit\s*card\b/.test(t);
+}
+
 function classifyInvoiceTermsForExport(paymentTermsRaw) {
   const t = String(paymentTermsRaw || '').trim().toLowerCase();
   if (!t) return 'unknown';
   if (t.includes('net') && t.includes('30')) return 'net30';
-  if (
-    /\bvisa\b|\bmastercard\b|\bmc\b|\bamex\b|american express|\bdiscover\b|credit\s*card|card\s*payment|\bdebit\s*card\b/.test(t)
-  ) return 'credit_card';
+  if (isCreditCardPaymentTerm(t)) return 'credit_card';
   return 'other';
 }
 
@@ -84,6 +92,8 @@ export default function Subscriptions() {
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
+  const [tablePage, setTablePage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
   /** Avoid re-filtering / full table work on every keystroke */
   const debouncedSearch = useDebounce(search, 280);
   const [createOpen, setCreateOpen] = useState(false);
@@ -94,21 +104,104 @@ export default function Subscriptions() {
   const [legacyRows, setLegacyRows] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
+  const [remitAddress, setRemitAddress] = useState(null);
   const [localRatesVersion, setLocalRatesVersion] = useState(0);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [senderOptions, setSenderOptions] = useState([]);
   const [emailRow, setEmailRow] = useState(null);
-  const [emailForm, setEmailForm] = useState({ to: '', from: '', subject: '', message: '' });
+  const [emailInitialForm, setEmailInitialForm] = useState({ to: '', from: '', subject: '', message: '' });
   const [termsFilter, setTermsFilter] = useState('all');
   /** Monthly QuickBooks CSV: all | net30 | credit_card */
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
   const [bulkEmailing, setBulkEmailing] = useState(false);
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
-  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
-  const [templateForm, setTemplateForm] = useState({ subject: '', body: '' });
-
+  const [cycleInvoiceByCustomer, setCycleInvoiceByCustomer] = useState({});
   const tabFilters = ['all', 'monthly', 'yearly', 'cancelled'];
+  const defaultTemplateBody = 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.';
+  const defaultTemplateSignature = 'Sincerely,\n{organization_name}';
+  const loadEmailTemplateSettings = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, [organization?.id]);
+  const withGlobalSignature = useCallback((message, signature) => {
+    const msg = String(message || '').trim();
+    const sig = String(signature || '').trim();
+    if (!sig) return msg;
+    if (!msg) return sig;
+    if (msg.includes(sig)) return msg;
+    return `${msg}\n\n${sig}`;
+  }, []);
+  const ensureInvoiceContext = useCallback((message, invoiceNumber, formattedAmount) => {
+    const msg = String(message || '').trim();
+    const invNo = String(invoiceNumber || '').trim();
+    const amount = String(formattedAmount || '').trim();
+    if (!invNo && !amount) return msg;
+    const hasInvoiceNumber = invNo ? msg.toLowerCase().includes(invNo.toLowerCase()) : true;
+    const hasAmount = amount ? msg.includes(`$${amount}`) : true;
+    if (hasInvoiceNumber && hasAmount) return msg;
+    const header = `Invoice ${invNo}${amount ? ` for $${amount}` : ''}`;
+    if (!msg) return header;
+    return `${header}\n\n${msg}`;
+  }, []);
+  const getCurrentCycleRange = useCallback(() => {
+    const now = new Date();
+    const toLocalYmd = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const periodStart = toLocalYmd(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    const periodEnd = toLocalYmd(new Date(now.getFullYear(), now.getMonth(), 0));
+    const dueDate = toLocalYmd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    return { periodStart, periodEnd, dueDate };
+  }, []);
+
+  /** Same period boundaries as rental PDF / line items (yearly subs use Stripe period when present). */
+  const getPdfBillingPeriodForSub = useCallback((sub) => {
+    const normPeriodDay = (v) => {
+      const s = String(v || '').trim().slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    };
+    const subStart = normPeriodDay(sub?.current_period_start);
+    const subEnd = normPeriodDay(sub?.current_period_end);
+    const fallback = getCurrentCycleRange();
+    const isYearly = String(sub?.billing_period || '').toLowerCase() === 'yearly';
+    const periodStart =
+      isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
+    const periodEnd =
+      isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
+    return { periodStart, periodEnd };
+  }, [getCurrentCycleRange]);
+
+  // Stable extraction of bottle-derived customer candidates; only recomputes
+  // when the actual set of unique (id, name) pairs changes, not on every
+  // bottles array reference change from realtime updates.
+  const bottleDerivedCandidatesRef = useRef([]);
+  const bottleDerivedCandidates = useMemo(() => {
+    const seen = new Map();
+    for (const b of (ctx.bottles || [])) {
+      const id = b.assigned_customer || b.customer_id;
+      const name = b.customer_name;
+      if (!id && !name) continue;
+      const key = `${normalize(id)}||${normalizeName(name)}`;
+      if (seen.has(key)) continue;
+      seen.set(key, { id: id || name, CustomerListID: id || name, name: name || id, Name: name || id });
+    }
+    const next = [...seen.values()];
+    // Structural equality check: skip update if content is identical
+    const prev = bottleDerivedCandidatesRef.current;
+    if (prev.length === next.length && prev.every((p, i) => p.id === next[i].id && p.name === next[i].name)) {
+      return prev;
+    }
+    bottleDerivedCandidatesRef.current = next;
+    return next;
+  }, [ctx.bottles]);
 
   const customerResolvers = useMemo(() => {
     const byId = new Map();
@@ -132,21 +225,12 @@ export default function Subscriptions() {
       addCandidate(c);
     }
 
-    // Fallback names from bottle assignments when customer table is incomplete.
-    for (const b of (ctx.bottles || [])) {
-      const id = b.assigned_customer || b.customer_id;
-      const name = b.customer_name;
-      if (!id && !name) continue;
-      addCandidate({
-        id: id || name,
-        CustomerListID: id || name,
-        name: name || id,
-        Name: name || id,
-      });
+    for (const c of bottleDerivedCandidates) {
+      addCandidate(c);
     }
 
     return { byId, byName };
-  }, [ctx.customers, fallbackResolverCustomers, ctx.bottles]);
+  }, [ctx.customers, fallbackResolverCustomers, bottleDerivedCandidates]);
 
   const resolveCustomer = useCallback((idOrName, fallbackName = '') => {
     const idKey = normalize(idOrName);
@@ -191,6 +275,7 @@ export default function Subscriptions() {
   useEffect(() => {
     if (!organization?.id) {
       setInvoiceTemplate(null);
+      setRemitAddress(null);
       return;
     }
     try {
@@ -199,6 +284,16 @@ export default function Subscriptions() {
     } catch {
       setInvoiceTemplate(null);
     }
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('invoice_settings')
+          .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
+          .eq('organization_id', organization.id)
+          .maybeSingle();
+        if (data) setRemitAddress(data);
+      } catch { /* columns may not exist yet */ }
+    })();
   }, [organization?.id]);
 
   useEffect(() => {
@@ -268,6 +363,8 @@ export default function Subscriptions() {
      */
     const bottlesByCustomerKey = new Map();
     const rentalsByCustomerKey = new Map();
+    /** One product class per billable rental row — avoids double-count when the same row is indexed under id + name keys. */
+    const rentalProductByBusinessKey = new Map();
     const ensureBottleBucket = (key) => {
       if (!key) return null;
       let b = bottlesByCustomerKey.get(key);
@@ -294,10 +391,8 @@ export default function Subscriptions() {
       const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
       const linkKeys = new Set();
       const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
-      const addName = (v) => { const n = normalizeName(v); if (n) linkKeys.add(n); };
       addId(bottle.assigned_customer);
       addId(bottle.customer_id);
-      addName(bottle.customer_name);
       for (const k of linkKeys) {
         const bucket = ensureBottleBucket(k);
         if (!bucket) continue;
@@ -329,6 +424,7 @@ export default function Subscriptions() {
       const addName = (v) => { const n = normalizeName(v); if (n) linkKeys.add(n); };
       addId(rental.customer_id);
       addName(rental.customer_name);
+      rentalProductByBusinessKey.set(businessKey, productKey);
       for (const k of linkKeys) {
         const bucket = ensureRentalBucket(k);
         if (!bucket) continue;
@@ -356,15 +452,16 @@ export default function Subscriptions() {
 
     const lookupBillableGroups = (sub, customer) => {
       const keys = customerKeysForSubscription(sub, customer);
-      const rentalProducts = new Map();
-      const seenBusinessKeys = new Set();
+      const matchedBusinessKeys = new Set();
       for (const k of keys) {
         const rb = rentalsByCustomerKey.get(k);
         if (!rb) continue;
-        for (const bk of rb.businessKeys) seenBusinessKeys.add(bk);
-        for (const [pc, count] of rb.byProduct.entries()) {
-          rentalProducts.set(pc, (rentalProducts.get(pc) || 0) + count);
-        }
+        for (const bk of rb.businessKeys) matchedBusinessKeys.add(bk);
+      }
+      const rentalProducts = new Map();
+      for (const bk of matchedBusinessKeys) {
+        const pc = rentalProductByBusinessKey.get(bk) || '__unclassified__';
+        rentalProducts.set(pc, (rentalProducts.get(pc) || 0) + 1);
       }
       const haveAnyRental = rentalProducts.size > 0;
       if (haveAnyRental) {
@@ -782,20 +879,30 @@ export default function Subscriptions() {
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
 
-    const ENABLE_LIVE_GROUP_RECALC = false;
-    const bottles = ctx.bottles || [];
-    const rentals = ctx.rentals || [];
-    const allCustomers = ctx.customers || [];
-    const billableGroupsCache = new Map();
-    if (ENABLE_LIVE_GROUP_RECALC) for (const row of combined) {
-      if (!row.isVirtual) continue;
-      const cacheKey = String(
-        row.customer_id || row.customer?.CustomerListID || row.customer?.id || row.customer?.name || row.customer?.Name || ''
+    // Pre-build lookup maps ONCE (outside the per-row loop) for O(1) access.
+    const byBottleId = new Map(
+      (ctx.bottles || []).map((b) => [String(b.id || '').trim(), b])
+    );
+    const bottleProductsByCustomerIdKey = new Map();
+    const bottleProductsByCustomerNameKey = new Map();
+    for (const bottle of (ctx.bottles || [])) {
+      const code = String(
+        bottle.product_code || bottle.product_type || bottle.asset_type
+        || bottle.cylinder_type || bottle.gas_type || bottle.sku || ''
       ).trim();
-      if (!cacheKey || billableGroupsCache.has(cacheKey)) continue;
-      billableGroupsCache.set(cacheKey, groupBillableUnitCountsByProductCode(
-        bottles, rentals, cacheKey, row.customer || null, { allCustomers }
-      ));
+      if (!code) continue;
+      const idKey = normalize(bottle.assigned_customer || bottle.customer_id);
+      if (idKey) {
+        const m = bottleProductsByCustomerIdKey.get(idKey) || {};
+        m[code] = (m[code] || 0) + 1;
+        bottleProductsByCustomerIdKey.set(idKey, m);
+      }
+      const nameKey = normalizeName(bottle.customer_name);
+      if (nameKey) {
+        const m = bottleProductsByCustomerNameKey.get(nameKey) || {};
+        m[code] = (m[code] || 0) + 1;
+        bottleProductsByCustomerNameKey.set(nameKey, m);
+      }
     }
 
     return combined.map((row) => {
@@ -808,46 +915,15 @@ export default function Subscriptions() {
         ? row.productCounts
         : null;
 
-      if (ENABLE_LIVE_GROUP_RECALC && row.isVirtual) {
-        const subscriptionMatchKey =
-          String(
-            row.customer_id ||
-              row.customer?.CustomerListID ||
-              row.customer?.id ||
-              row.customer?.name ||
-              row.customer?.Name ||
-              ''
-          ).trim();
-        const groups = billableGroupsCache.get(subscriptionMatchKey || row.customer_id) || [];
-        if (groups.length > 0) {
-          computedItemCount = groups.reduce((s, g) => s + (parseFloat(g.count) || 0), 0);
-          effectiveProductCounts = {};
-          for (const g of groups) {
-            if ((parseFloat(g.count) || 0) <= 0) continue;
-            const key = g.productCode || '__unclassified__';
-            effectiveProductCounts[key] = (effectiveProductCounts[key] || 0) + g.count;
-          }
-          if (Object.keys(effectiveProductCounts).length === 0) effectiveProductCounts = null;
-        }
-      }
-
       // For legacy virtual rows, derive product mix from linked bottle ids first.
       if (row.isVirtual && !effectiveProductCounts) {
-        const byBottleId = new Map(
-          (ctx.bottles || []).map((b) => [String(b.id || '').trim(), b])
-        );
         const derivedById = {};
         for (const bottleId of (row.bottleIds || [])) {
           const bottle = byBottleId.get(String(bottleId || '').trim());
           if (!bottle) continue;
           const code = String(
-            bottle.product_code
-            || bottle.product_type
-            || bottle.asset_type
-            || bottle.cylinder_type
-            || bottle.gas_type
-            || bottle.sku
-            || ''
+            bottle.product_code || bottle.product_type || bottle.asset_type
+            || bottle.cylinder_type || bottle.gas_type || bottle.sku || ''
           ).trim();
           if (!code) continue;
           derivedById[code] = (derivedById[code] || 0) + 1;
@@ -857,38 +933,24 @@ export default function Subscriptions() {
         }
       }
 
-      // Secondary fallback: derive by assigned customer matching when ids are unavailable.
+      // Secondary fallback: use pre-built customer-to-product maps for O(1) lookup.
       if (row.isVirtual && !effectiveProductCounts) {
-        const idKeys = new Set(
-          [row.customer_id, row.customer?.id, row.customer?.CustomerListID]
-            .map(normalize)
-            .filter(Boolean)
-        );
-        const nameKeys = new Set(
-          [row.customer?.name, row.customer?.Name]
-            .map(normalizeName)
-            .filter(Boolean)
-        );
-        const derived = {};
-        for (const bottle of (ctx.bottles || [])) {
-          const bottleIdKey = normalize(bottle.assigned_customer || bottle.customer_id);
-          const bottleNameKey = normalizeName(bottle.customer_name);
-          const matchesCustomer = (bottleIdKey && idKeys.has(bottleIdKey))
-            || (bottleNameKey && nameKeys.has(bottleNameKey));
-          if (!matchesCustomer) continue;
-          const code = String(
-            bottle.product_code
-            || bottle.product_type
-            || bottle.asset_type
-            || bottle.cylinder_type
-            || bottle.gas_type
-            || bottle.sku
-            || ''
-          ).trim();
-          if (!code) continue;
-          derived[code] = (derived[code] || 0) + 1;
+        const idKeys = [row.customer_id, row.customer?.id, row.customer?.CustomerListID]
+          .map(normalize).filter(Boolean);
+        const nameKeys = [row.customer?.name, row.customer?.Name]
+          .map(normalizeName).filter(Boolean);
+        let derived = null;
+        for (const k of idKeys) {
+          const m = bottleProductsByCustomerIdKey.get(k);
+          if (m) { derived = { ...m }; break; }
         }
-        if (Object.keys(derived).length > 0) effectiveProductCounts = derived;
+        if (!derived) {
+          for (const k of nameKeys) {
+            const m = bottleProductsByCustomerNameKey.get(k);
+            if (m) { derived = { ...m }; break; }
+          }
+        }
+        if (derived && Object.keys(derived).length > 0) effectiveProductCounts = derived;
       }
 
       // For bottle-derived rows, compute total from product mix + customer/base pricing.
@@ -1043,11 +1105,11 @@ export default function Subscriptions() {
   }, [allRows]);
 
   const termsCounts = useMemo(() => {
-    const counts = { net30: 0, cod: 0, other: 0 };
+    const counts = { net30: 0, credit_card: 0, other: 0 };
     for (const row of allRows) {
       const t = String(row.customer?.payment_terms || '').trim().toLowerCase();
       if (t.includes('net') && t.includes('30')) counts.net30 += 1;
-      else if (t === 'cod' || t === 'cash on delivery' || t === 'c.o.d.') counts.cod += 1;
+      else if (isCreditCardPaymentTerm(t)) counts.credit_card += 1;
       else counts.other += 1;
     }
     return counts;
@@ -1074,12 +1136,12 @@ export default function Subscriptions() {
       list = list.filter((s) => {
         const terms = String(s.customer?.payment_terms || '').trim().toLowerCase();
         if (termsFilter === 'net30') return terms.includes('net') && terms.includes('30');
-        if (termsFilter === 'cod') return terms === 'cod' || terms === 'cash on delivery' || terms === 'c.o.d.';
+        if (termsFilter === 'credit_card') return isCreditCardPaymentTerm(terms);
         if (termsFilter === 'other') {
           if (!terms) return true;
           const isNet30 = terms.includes('net') && terms.includes('30');
-          const isCod = terms === 'cod' || terms === 'cash on delivery' || terms === 'c.o.d.';
-          return !isNet30 && !isCod;
+          const isCreditCard = isCreditCardPaymentTerm(terms);
+          return !isNet30 && !isCreditCard;
         }
         return true;
       });
@@ -1095,6 +1157,102 @@ export default function Subscriptions() {
     }
     return list;
   }, [allRows, tab, debouncedSearch, termsFilter]);
+
+  const pagedFiltered = useMemo(() => {
+    const start = tablePage * rowsPerPage;
+    return filtered.slice(start, start + rowsPerPage);
+  }, [filtered, tablePage, rowsPerPage]);
+
+  useEffect(() => {
+    setTablePage(0);
+  }, [tab, termsFilter, debouncedSearch]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filtered.length / rowsPerPage) - 1);
+    if (tablePage > maxPage) setTablePage(maxPage);
+  }, [filtered.length, rowsPerPage, tablePage]);
+
+  useEffect(() => {
+    let active = true;
+    const loadCycleInvoiceStatus = async () => {
+      if (!organization?.id) {
+        if (active) setCycleInvoiceByCustomer({});
+        return;
+      }
+      const customerIds = [...new Set(
+        (allRows || [])
+          .map((r) => String(r.customer_id || '').trim())
+          .filter(Boolean)
+      )];
+      if (customerIds.length === 0) {
+        if (active) setCycleInvoiceByCustomer({});
+        return;
+      }
+      const { periodStart, periodEnd } = getCurrentCycleRange();
+      const { data } = await supabase
+        .from('invoices')
+        .select('customer_id, invoice_number, status, updated_at')
+        .eq('organization_id', organization.id)
+        .eq('period_start', periodStart)
+        .eq('period_end', periodEnd)
+        .in('customer_id', customerIds);
+      if (!active) return;
+      const map = {};
+      for (const row of (data || [])) {
+        const key = String(row.customer_id || '').trim();
+        if (!key) continue;
+        map[key] = {
+          invoice_number: row.invoice_number,
+          status: String(row.status || '').toLowerCase(),
+          updated_at: row.updated_at || null,
+        };
+      }
+
+      const mergeCycleEntry = (prev, incoming) => {
+        if (!prev) return incoming;
+        const pSent = prev.status === 'sent';
+        const iSent = incoming.status === 'sent';
+        if (iSent) return incoming;
+        if (pSent) return prev;
+        const pt = new Date(prev.updated_at || 0).getTime();
+        const it = new Date(incoming.updated_at || 0).getTime();
+        return it >= pt ? incoming : prev;
+      };
+
+      const subscriptionIds = [
+        ...new Set(
+          (allRows || [])
+            .filter((r) => !r.isVirtual && r.id && !String(r.id).startsWith('legacy-') && !String(r.id).startsWith('virtual-'))
+            .map((r) => r.id)
+            .filter(Boolean)
+        ),
+      ];
+      if (subscriptionIds.length > 0) {
+        const { data: subInvRows } = await supabase
+          .from('subscription_invoices')
+          .select('customer_id, invoice_number, status, updated_at')
+          .eq('organization_id', organization.id)
+          .in('subscription_id', subscriptionIds);
+        if (!active) return;
+        for (const row of (subInvRows || [])) {
+          const key = String(row.customer_id || '').trim();
+          if (!key) continue;
+          const incoming = {
+            invoice_number: row.invoice_number,
+            status: String(row.status || '').toLowerCase(),
+            updated_at: row.updated_at || null,
+          };
+          map[key] = mergeCycleEntry(map[key], incoming);
+        }
+      }
+
+      setCycleInvoiceByCustomer(map);
+    };
+    loadCycleInvoiceStatus().catch(() => {
+      if (active) setCycleInvoiceByCustomer({});
+    });
+    return () => { active = false; };
+  }, [organization?.id, allRows, getCurrentCycleRange]);
 
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
@@ -1156,22 +1314,9 @@ export default function Subscriptions() {
 
       let legacyCreated = 0;
       if (dedupedInvoiceableRows.length > 0) {
-        const { data: existingInvs } = await supabase
-          .from('invoices')
-          .select('invoice_number')
-          .eq('organization_id', organization.id);
-        let maxNum = 0;
-        for (const inv of existingInvs || []) {
-          const n = String(inv.invoice_number || '').match(/(\d+)/)?.[1];
-          if (!n) continue;
-          maxNum = Math.max(maxNum, parseInt(n, 10) || 0);
-        }
-
+        const { periodStart, periodEnd, dueDate } = getCurrentCycleRange();
         const today = new Date();
         const invoiceDate = today.toISOString().split('T')[0];
-        const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-        const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const periodEnd = dueDate;
 
         const customerIds = [...new Set(dedupedInvoiceableRows.map((r) => String(r.customer_id || '').trim()).filter(Boolean))];
         const { data: existingSamePeriod } = await supabase
@@ -1187,24 +1332,43 @@ export default function Subscriptions() {
         );
 
         if (filteredInvoiceableRows.length > 0) {
-          const rowsToInsert = filteredInvoiceableRows.map((row, idx) => ({
-            organization_id: organization.id,
-            invoice_number: formatLegacyInvoiceNumber(maxNum + idx + 1),
-            customer_id: row.customer_id,
-            customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
-            period_start: periodStart,
-            period_end: periodEnd,
-            invoice_date: invoiceDate,
-            due_date: dueDate,
-            subtotal: parseFloat(row.totalPerCycle) || 0,
-            tax_amount: 0,
-            total_amount: parseFloat(row.totalPerCycle) || 0,
-            status: 'pending',
-          }));
-
-          const { error: insErr } = await supabase.from('invoices').insert(rowsToInsert);
-          if (insErr) throw insErr;
-          legacyCreated = rowsToInsert.length;
+          for (const row of filteredInvoiceableRows) {
+            const basePayload = {
+              organization_id: organization.id,
+              customer_id: row.customer_id,
+              customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
+              period_start: periodStart,
+              period_end: periodEnd,
+              invoice_date: invoiceDate,
+              due_date: dueDate,
+              subtotal: parseFloat(row.totalPerCycle) || 0,
+              tax_amount: 0,
+              total_amount: parseFloat(row.totalPerCycle) || 0,
+              status: 'pending',
+            };
+            let inserted = false;
+            let lastErr = null;
+            for (let i = 0; i < 3; i++) {
+              const reserved = await getNextInvoiceNumbers(organization.id, 1);
+              const invoiceNumber = reserved?.[0];
+              if (!invoiceNumber) {
+                throw new Error('Failed to reserve a unique invoice number. Please retry.');
+              }
+              const payload = { ...basePayload, invoice_number: invoiceNumber };
+              const { error: insErr } = await supabase.from('invoices').insert(payload);
+              if (!insErr) {
+                inserted = true;
+                break;
+              }
+              lastErr = insErr;
+              const isDuplicateInvoiceNumber =
+                String(insErr?.code || '') === '23505'
+                && String(insErr?.message || '').includes('invoices_org_invoice_number_unique');
+              if (!isDuplicateInvoiceNumber) throw insErr;
+            }
+            if (!inserted && lastErr) throw lastErr;
+            legacyCreated += 1;
+          }
         }
       }
 
@@ -1250,13 +1414,17 @@ export default function Subscriptions() {
 
     const rows = activeRows.map((row, idx) => {
       const subtotal = parseFloat(row.totalPerCycle) || 0;
-      const tax = +(subtotal * 0.11).toFixed(2);
+      const gst = +(subtotal * 0.05).toFixed(2);
+      const pst = +(subtotal * 0.06).toFixed(2);
+      const tax = +(gst + pst).toFixed(2);
       const total = +(subtotal + tax).toFixed(2);
       return {
         'Invoice#': `W${String(startNumber + idx).padStart(5, '0')}`,
         'Customer Number': row.customer_id || '',
         'Total': total,
         'Date': invoiceDate,
+        'GST': gst,
+        'PST': pst,
         'TX': tax,
         'TX code': 'G',
         'Due date': dueDate,
@@ -1301,7 +1469,7 @@ export default function Subscriptions() {
         period === 'monthly' && cohort === 'net30'
           ? ' (NET 30 terms only — check customer payment terms on import)'
           : period === 'monthly' && cohort === 'credit_card'
-            ? ' (credit card terms — e.g. Visa, Mastercard in payment terms)'
+            ? ' (credit card terms, including COD aliases)'
             : '';
       setActionError(`No active ${period} rentals match this export${cohortHint}.`);
       return;
@@ -1317,89 +1485,90 @@ export default function Subscriptions() {
       period === 'monthly' && cohort === 'net30'
         ? ', NET 30 customers only'
         : period === 'monthly' && cohort === 'credit_card'
-          ? ', credit card customers only'
+          ? ', credit card customers only (includes COD)'
           : '';
     setActionSuccess(`Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}).`);
   };
 
-  const getNextLegacyInvoiceNumber = async () => {
-    const { data: existingInvs } = await supabase
+  const ensureVirtualInvoiceNumber = useCallback(async (row) => {
+    const { periodStart, periodEnd, dueDate } = getCurrentCycleRange();
+    const today = new Date();
+    const invoiceDate = today.toISOString().split('T')[0];
+    const total = parseFloat(row?.totalPerCycle) || 0;
+    const gstAmt = +(total * 0.05).toFixed(2);
+    const pstAmt = +(total * 0.06).toFixed(2);
+    const taxAmount = +(gstAmt + pstAmt).toFixed(2);
+    const totalAmount = +(total + taxAmount).toFixed(2);
+
+    const { data: existing } = await supabase
       .from('invoices')
-      .select('invoice_number')
-      .eq('organization_id', organization.id);
-    let maxNum = 0;
-    for (const inv of existingInvs || []) {
-      const n = String(inv.invoice_number || '').match(/(\d{1,})/)?.[1];
-      if (!n) continue;
-      maxNum = Math.max(maxNum, (parseInt(n, 10) || 0) % 100000);
+      .select('id, invoice_number')
+      .eq('organization_id', organization.id)
+      .eq('customer_id', row.customer_id)
+      .eq('period_start', periodStart)
+      .eq('period_end', periodEnd)
+      .limit(1)
+      .maybeSingle();
+    if (existing?.invoice_number) return existing.invoice_number;
+
+    const basePayload = {
+      organization_id: organization.id,
+      customer_id: row.customer_id,
+      customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
+      period_start: periodStart,
+      period_end: periodEnd,
+      invoice_date: invoiceDate,
+      due_date: dueDate,
+      subtotal: total,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+      status: 'pending',
+    };
+    let invoiceNumber = null;
+    let lastErr = null;
+    for (let i = 0; i < 3; i++) {
+      const reserved = await getNextInvoiceNumbers(organization.id, 1);
+      invoiceNumber = reserved?.[0];
+      if (!invoiceNumber) {
+        throw new Error('Failed to reserve a unique invoice number. Please retry.');
+      }
+      const payload = { ...basePayload, invoice_number: invoiceNumber };
+      const { error } = await supabase.from('invoices').insert(payload);
+      if (!error) {
+        lastErr = null;
+        break;
+      }
+      lastErr = error;
+      const isDuplicateInvoiceNumber =
+        String(error?.code || '') === '23505'
+        && String(error?.message || '').includes('invoices_org_invoice_number_unique');
+      if (!isDuplicateInvoiceNumber) throw error;
     }
-    return (maxNum + 1) % 100000;
-  };
+    if (lastErr) throw lastErr;
+    return invoiceNumber;
+  }, [organization?.id, getCurrentCycleRange]);
 
-  const formatLegacyInvoiceNumber = (n) => `W${String((n || 0) % 100000).padStart(5, '0')}`;
-
-  const handleGenerateInvoiceForRow = async (sub) => {
-    setSaving(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      const total = parseFloat(sub.totalPerCycle) || 0;
-      if (total <= 0) {
-        setActionError('Cannot generate invoice for a $0.00 rental.');
-        return;
+  /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
+  const resolveRentalInvoiceNumberForActions = useCallback(
+    async (sub) => {
+      if (sub?.isVirtual) {
+        return ensureVirtualInvoiceNumber(sub);
       }
-      if (!sub.customer_id) {
-        setActionError('No customer ID available for this rental.');
-        return;
-      }
-
-      if (!sub.isVirtual) {
-        await generateInvoice(organization.id, sub.id);
-      } else {
-        const nextNum = await getNextLegacyInvoiceNumber();
-        const today = new Date();
-        const invoiceDate = today.toISOString().split('T')[0];
-        const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-        const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const periodEnd = dueDate;
-        const { data: existingSamePeriod } = await supabase
-          .from('invoices')
-          .select('id')
-          .eq('organization_id', organization.id)
-          .eq('customer_id', sub.customer_id)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd)
-          .limit(1);
-        if ((existingSamePeriod || []).length > 0) {
-          setActionError('An invoice for this customer and period already exists.');
-          return;
-        }
-        const payload = {
-          organization_id: organization.id,
-          invoice_number: formatLegacyInvoiceNumber(nextNum),
-          customer_id: sub.customer_id,
-          customer_name: sub.customer?.name || sub.customer?.Name || sub.customer_id,
-          period_start: periodStart,
-          period_end: periodEnd,
-          invoice_date: invoiceDate,
-          due_date: dueDate,
-          subtotal: total,
-          tax_amount: 0,
-          total_amount: total,
-          status: 'pending',
-        };
-        const { error } = await supabase.from('invoices').insert(payload);
-        if (error) throw error;
-      }
-      const exported = downloadInvoiceCsv([sub]);
-      setActionSuccess(`Invoice generated for ${sub.customer?.name || sub.customer?.Name || sub.customer_id}${exported > 0 ? ' and CSV downloaded' : ''}.`);
-      ctx.refresh();
-    } catch (err) {
-      setActionError(err.message || 'Failed to generate invoice.');
-    } finally {
-      setSaving(false);
-    }
-  };
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      let invNo = String(sub?.invoice_number || '').trim();
+      if (invNo) return invNo;
+      invNo = await resolveInvoiceNumberForRentalPdf(
+        supabase,
+        organization.id,
+        sub,
+        periodStart,
+        periodEnd
+      );
+      if (invNo) return invNo;
+      return defaultInvoiceNumber(sub);
+    },
+    [ensureVirtualInvoiceNumber, getPdfBillingPeriodForSub, organization?.id]
+  );
 
   const getLineItemsForRow = useCallback((row) => {
     if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
@@ -1436,25 +1605,108 @@ export default function Subscriptions() {
     }];
   }, [defaultUnitRateByPeriod, resolveDisplayUnitPrice]);
 
-  const buildInvoicePdfForRow = useCallback(async (row) => {
-    const lineItems = getLineItemsForRow(row);
-    const hasDetail =
+  const buildInvoicePdfForRow = useCallback(async (row, invoiceNumberOverride = null) => {
+    const normPeriodDay = (v) => {
+      const s = String(v || '').trim().slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    };
+    const subStart = normPeriodDay(row?.current_period_start);
+    const subEnd = normPeriodDay(row?.current_period_end);
+    const fallback = getCurrentCycleRange();
+    const isYearly = String(row?.billing_period || '').toLowerCase() === 'yearly';
+    const periodStart =
+      isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
+    const periodEnd =
+      isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
+    const invoiceDate = periodEnd;
+    const dueDate = fallback.dueDate;
+
+    const customerRecord =
+      matchCustomerRecordBySubscriptionId(row.customer_id) ||
+      row?.customer ||
+      {
+        CustomerListID: row.customer_id,
+        id: row.customer_id,
+        name: row.customer_name || row.customer_id,
+        Name: row.customer_name,
+      };
+
+    let lineItems = getLineItemsForRow(row);
+    let hasDetail =
       (Array.isArray(row?.items) && row.items.length > 0) ||
       (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+
+    let rentalsForSnapshot = ctx.rentals || [];
+    const billingMode = String(customerRecord?.billing_mode || '').toLowerCase();
+    if (billingMode !== 'lease') {
+      try {
+        const { data: orgRentals, error: rErr } = await supabase
+          .from('rentals')
+          .select('*')
+          .eq('organization_id', organization.id);
+        if (!rErr && orgRentals?.length) {
+          rentalsForSnapshot = orgRentals;
+          const subscriptionMatchKey =
+            String(
+              row.customer_id ||
+                customerRecord?.CustomerListID ||
+                customerRecord?.id ||
+                customerRecord?.name ||
+                customerRecord?.Name ||
+                ''
+            ).trim() || row.customer_id;
+          const groups = groupBillableUnitCountsByProductCode(
+            ctx.bottles || [],
+            orgRentals,
+            subscriptionMatchKey,
+            customerRecord,
+            {
+              allCustomers: ctx.customers || [],
+              asOfPeriodEnd: periodEnd,
+              allowAssignedBottleRecovery: true,
+            }
+          );
+          if (groups.length > 0) {
+            const periodFallback =
+              row.billing_period === 'yearly'
+                ? defaultUnitRateByPeriod.yearly
+                : defaultUnitRateByPeriod.monthly;
+            lineItems = groups
+              .filter((g) => g.count > 0)
+              .map(({ productCode, count }) => {
+                const code = productCode || '__unclassified__';
+                const displayLabel = code === '__unclassified__' ? 'Unclassified' : code;
+                const qty = count;
+                const unitRaw = resolveDisplayUnitPrice(row, { product_code: code, description: displayLabel });
+                const unit = Number.isFinite(unitRaw) && unitRaw > 0 ? unitRaw : periodFallback;
+                return {
+                  description: displayLabel,
+                  product_code: code,
+                  qty,
+                  unit,
+                  amount: unit * qty,
+                };
+              });
+            hasDetail = lineItems.length > 0;
+          }
+        }
+      } catch (e) {
+        console.warn('Invoice PDF: could not load rentals for period snapshot', e);
+      }
+    }
+
     const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
     const total = hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
-    const today = new Date();
-    const periodStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-    const invoiceDate = periodEnd;
-    const dueBase = new Date(`${invoiceDate}T12:00:00`);
-    dueBase.setDate(dueBase.getDate() + 30);
-    const dueDate = dueBase.toISOString().split('T')[0];
-    const taxRate = 0.11;
-    const tax = +(total * taxRate).toFixed(2);
+    const gstRate = 0.05;
+    const pstRate = 0.06;
+    const gst = +(total * gstRate).toFixed(2);
+    const pst = +(total * pstRate).toFixed(2);
+    const tax = +(gst + pst).toFixed(2);
+    const taxRate = +(gstRate + pstRate).toFixed(2);
     const grandTotal = +(total + tax).toFixed(2);
-    const customerRecord = matchCustomerRecordBySubscriptionId(row.customer_id);
-    let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, ctx.rentals);
+    let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, rentalsForSnapshot, {
+      asOfPeriodEnd: periodEnd,
+    });
     if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
       const legacyExtras = row.bottleIdentifiers.map((label, idx) => ({
         id: `legacy-${idx}`,
@@ -1475,15 +1727,21 @@ export default function Subscriptions() {
       console.warn('Invoice PDF: could not load returns in period', e);
     }
     const bottlesForPdf = openAssets.map((b) => (b.display_label ? { ...b, description: b.display_label } : b));
+    const mergedTemplate = { ...invoiceTemplate };
+    if (remitAddress?.remit_name) mergedTemplate.remit_name = remitAddress.remit_name;
+    if (remitAddress?.remit_address_line1) mergedTemplate.remit_address_line1 = remitAddress.remit_address_line1;
+    if (remitAddress?.remit_address_line2) mergedTemplate.remit_address_line2 = remitAddress.remit_address_line2;
+    if (remitAddress?.remit_address_line3) mergedTemplate.remit_address_line3 = remitAddress.remit_address_line3;
+    if (remitAddress?.gst_number) mergedTemplate.gst_number = remitAddress.gst_number;
     return createRentalInvoicePdfDoc({
       organization,
-      invoiceTemplate,
+      invoiceTemplate: mergedTemplate,
       primaryColorFallback: primaryColor,
       row,
       customerRecord,
       lineItems,
-      invoiceNumber: defaultInvoiceNumber(row),
-      totals: { subtotal: total, tax, amountDue: grandTotal, taxRate },
+      invoiceNumber: invoiceNumberOverride || row?.invoice_number || 'W00000',
+      totals: { subtotal: total, gst, pst, tax, amountDue: grandTotal, gstRate, pstRate, taxRate },
       period: { start: periodStart, end: periodEnd },
       dates: { invoice: invoiceDate, due: dueDate },
       terms: customerRecord?.payment_terms || 'NET 30',
@@ -1493,27 +1751,33 @@ export default function Subscriptions() {
     });
   }, [
     getLineItemsForRow,
+    getCurrentCycleRange,
     matchCustomerRecordBySubscriptionId,
     ctx.bottles,
     ctx.rentals,
+    ctx.customers,
     organization,
     invoiceTemplate,
     primaryColor,
+    defaultUnitRateByPeriod,
+    resolveDisplayUnitPrice,
   ]);
 
-  const handleDownloadInvoicePdfForRow = useCallback((sub) => {
+  const handleDownloadInvoicePdfForRow = useCallback(async (sub) => {
     const total = parseFloat(sub.totalPerCycle) || 0;
     if (total <= 0) {
       setActionError('Cannot download a $0.00 invoice PDF.');
       return;
     }
-    buildInvoicePdfForRow(sub).then(({ doc, fileName, customerName }) => {
+    try {
+      const invNo = await resolveRentalInvoiceNumberForActions(sub);
+      const { doc, fileName, customerName } = await buildInvoicePdfForRow(sub, invNo);
       doc.save(fileName);
       setActionSuccess(`Invoice PDF downloaded for ${customerName}.`);
-    }).catch((err) => {
+    } catch (err) {
       setActionError(err.message || 'Failed to generate invoice PDF.');
-    });
-  }, [buildInvoicePdfForRow]);
+    }
+  }, [buildInvoicePdfForRow, organization?.id, resolveRentalInvoiceNumberForActions]);
 
   const openEmailDialogForRow = async (sub) => {
     setActionError(null);
@@ -1574,43 +1838,43 @@ export default function Subscriptions() {
       const orgWebsite = organization?.website || '';
 
       const total = parseFloat(sub.totalPerCycle) || 0;
-      const taxRate = 0.11;
-      const tax = +(total * taxRate).toFixed(2);
-      const amountDue = +(total + tax).toFixed(2);
-      const today = new Date();
-      const periodEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-      const dueBase = new Date(`${periodEnd}T12:00:00`);
-      dueBase.setDate(dueBase.getDate() + 30);
-      const invNo = defaultInvoiceNumber(sub);
+      const gst = +(total * 0.05).toFixed(2);
+      const pst = +(total * 0.06).toFixed(2);
+      const amountDue = +(total + gst + pst).toFixed(2);
+      const invNo = await resolveRentalInvoiceNumberForActions(sub);
       const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-      const savedEmailTemplate = (() => {
-        try {
-          const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
-          return raw ? JSON.parse(raw) : null;
-        } catch { return null; }
-      })();
+      const savedEmailTemplate = loadEmailTemplateSettings();
+      const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
+        .replace(/\{organization_name\}/gi, orgName)
+        .replace(/\{organization_website\}/gi, orgWebsite);
 
       let defaultMessage = savedEmailTemplate?.body
         ? savedEmailTemplate.body
             .replace(/\{invoice_number\}/gi, invNo)
             .replace(/\{amount\}/gi, `$${formattedAmount}`)
             .replace(/\{customer_name\}/gi, customerName)
+            .replace(/\{organization_name\}/gi, orgName)
+            .replace(/\{organization_website\}/gi, orgWebsite)
         : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
       if (savedEmailTemplate?.body && !defaultMessage.includes(invNo)) {
         defaultMessage = `Invoice ${invNo}\n\n${defaultMessage}`;
       }
+      defaultMessage = ensureInvoiceContext(defaultMessage, invNo, formattedAmount);
+      defaultMessage = withGlobalSignature(defaultMessage, renderedSignature);
 
       const defaultSubject = savedEmailTemplate?.subject
         ? savedEmailTemplate.subject
             .replace(/\{invoice_number\}/gi, invNo)
             .replace(/\{amount\}/gi, `$${formattedAmount}`)
             .replace(/\{customer_name\}/gi, customerName)
+            .replace(/\{organization_name\}/gi, orgName)
+            .replace(/\{organization_website\}/gi, orgWebsite)
         : `Invoice ${invNo} – ${customerName} – ${orgName}`;
 
       setSenderOptions(options);
-      setEmailRow(sub);
-      setEmailForm({
+      setEmailRow({ ...sub, invoice_number: invNo });
+      setEmailInitialForm({
         to: customerEmail,
         from: defaultFrom,
         subject: defaultSubject,
@@ -1622,9 +1886,9 @@ export default function Subscriptions() {
     }
   };
 
-  const handleSendInvoiceEmail = useCallback(async () => {
+  const handleSendInvoiceEmail = useCallback(async (formFromDialog) => {
     if (!emailRow) return;
-    if (!emailForm.to || !emailForm.from) {
+    if (!formFromDialog.to || !formFromDialog.from) {
       setActionError('Recipient and sender email are required.');
       return;
     }
@@ -1637,29 +1901,87 @@ export default function Subscriptions() {
     setActionError(null);
     setActionSuccess(null);
     try {
-      const { doc, customerName } = await buildInvoicePdfForRow(emailRow);
+      const invNo = emailRow.invoice_number || 'W00000';
+      const { doc, customerName } = await buildInvoicePdfForRow(emailRow, invNo);
       const pdfBase64 = doc.output('datauristring').split(',')[1];
       const pdfFileName = `Invoice_${String(customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-      const bodyHtml = (emailForm.message || '').replace(/\n/g, '<br/>');
+      const amountDue = +(total + total * 0.05 + total * 0.06).toFixed(2);
+      const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const savedEmailTemplate = loadEmailTemplateSettings();
+      const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
+        .replace(/\{organization_name\}/gi, organization?.name || 'your organization')
+        .replace(/\{organization_website\}/gi, organization?.website || '');
+      const withInvoiceContext = ensureInvoiceContext(formFromDialog.message || '', invNo, formattedAmount);
+      const finalMessage = withGlobalSignature(withInvoiceContext, renderedSignature);
+      const bodyHtml = finalMessage.replace(/\n/g, '<br/>');
       const response = await fetch('/.netlify/functions/send-invoice-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: emailForm.to,
-          from: emailForm.from,
+          to: formFromDialog.to,
+          from: formFromDialog.from,
           senderName: profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || '',
-          subject: emailForm.subject,
+          subject: formFromDialog.subject,
           body: bodyHtml,
           pdfBase64,
           pdfFileName,
-          invoiceNumber: defaultInvoiceNumber(emailRow),
+          invoiceNumber: invNo,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || payload?.details || `Email failed (${response.status})`);
       }
-      setActionSuccess(`Invoice emailed to ${emailForm.to}.`);
+      if (emailRow?.isVirtual && emailRow?.customer_id) {
+        const { periodStart, periodEnd } = getCurrentCycleRange();
+        await supabase
+          .from('invoices')
+          .update({ status: 'sent', updated_at: new Date().toISOString() })
+          .eq('organization_id', organization.id)
+          .eq('customer_id', emailRow.customer_id)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .eq('invoice_number', invNo);
+        setCycleInvoiceByCustomer((prev) => ({
+          ...prev,
+          [String(emailRow.customer_id).trim()]: {
+            invoice_number: invNo,
+            status: 'sent',
+            updated_at: new Date().toISOString(),
+          },
+        }));
+      } else if (emailRow?.id && !emailRow.isVirtual) {
+        const { data: latestSi } = await supabase
+          .from('subscription_invoices')
+          .select('id')
+          .eq('organization_id', organization.id)
+          .eq('subscription_id', emailRow.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const siId = latestSi?.[0]?.id;
+        if (siId) {
+          await supabase
+            .from('subscription_invoices')
+            .update({
+              status: 'sent',
+              invoice_number: invNo,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', siId);
+        }
+        const cid = String(emailRow.customer_id || '').trim();
+        if (cid) {
+          setCycleInvoiceByCustomer((prev) => ({
+            ...prev,
+            [cid]: {
+              invoice_number: invNo,
+              status: 'sent',
+              updated_at: new Date().toISOString(),
+            },
+          }));
+        }
+      }
+      setActionSuccess(`Invoice emailed to ${formFromDialog.to}.`);
       setEmailOpen(false);
       setEmailRow(null);
     } catch (err) {
@@ -1667,7 +1989,7 @@ export default function Subscriptions() {
     } finally {
       setEmailing(false);
     }
-  }, [emailRow, emailForm, buildInvoicePdfForRow, profile, user]);
+  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, loadEmailTemplateSettings, withGlobalSignature, ensureInvoiceContext, getCurrentCycleRange]);
 
   const handleBulkEmailInvoices = useCallback(async () => {
     const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
@@ -1697,12 +2019,7 @@ export default function Subscriptions() {
       defaultFrom = profile?.email?.trim() || user?.email?.trim() || '';
     }
 
-    const savedEmailTemplate = (() => {
-      try {
-        const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
-    })();
+    const savedEmailTemplate = loadEmailTemplateSettings();
 
     let sent = 0;
     let failed = 0;
@@ -1728,11 +2045,10 @@ export default function Subscriptions() {
           continue;
         }
 
-        const invNo = defaultInvoiceNumber(row);
+        const invNo = await resolveRentalInvoiceNumberForActions(row);
         const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
         const total = parseFloat(row.totalPerCycle) || 0;
-        const taxRate = 0.11;
-        const amountDue = +((total + total * taxRate)).toFixed(2);
+        const amountDue = +(total + total * 0.05 + total * 0.06).toFixed(2);
         const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
         let msgBody = savedEmailTemplate?.body
@@ -1740,15 +2056,27 @@ export default function Subscriptions() {
               .replace(/\{invoice_number\}/gi, invNo)
               .replace(/\{amount\}/gi, `$${formattedAmount}`)
               .replace(/\{customer_name\}/gi, customerName)
+              .replace(/\{organization_name\}/gi, orgName)
+              .replace(/\{organization_website\}/gi, orgWebsite)
           : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
         if (savedEmailTemplate?.body && !msgBody.includes(invNo)) {
           msgBody = `Invoice ${invNo}\n\n${msgBody}`;
         }
+        msgBody = ensureInvoiceContext(msgBody, invNo, formattedAmount);
+        const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
+          .replace(/\{organization_name\}/gi, orgName)
+          .replace(/\{organization_website\}/gi, orgWebsite);
+        msgBody = withGlobalSignature(msgBody, renderedSignature);
         const subject = savedEmailTemplate?.subject
-          ? savedEmailTemplate.subject.replace(/\{invoice_number\}/gi, invNo).replace(/\{customer_name\}/gi, customerName)
+          ? savedEmailTemplate.subject
+              .replace(/\{invoice_number\}/gi, invNo)
+              .replace(/\{amount\}/gi, `$${formattedAmount}`)
+              .replace(/\{customer_name\}/gi, customerName)
+              .replace(/\{organization_name\}/gi, orgName)
+              .replace(/\{organization_website\}/gi, orgWebsite)
           : `Invoice ${invNo} – ${customerName} – ${orgName}`;
 
-        const { doc, customerName: cn } = await buildInvoicePdfForRow(row);
+        const { doc, customerName: cn } = await buildInvoicePdfForRow(row, invNo);
         const pdfBase64 = doc.output('datauristring').split(',')[1];
         const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
         const bodyHtml = msgBody.replace(/\n/g, '<br/>');
@@ -1773,6 +2101,51 @@ export default function Subscriptions() {
         } else {
           sent += 1;
           setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
+          try {
+            if (row.isVirtual && row.customer_id) {
+              const { periodStart, periodEnd } = getCurrentCycleRange();
+              await supabase
+                .from('invoices')
+                .update({ status: 'sent', updated_at: new Date().toISOString() })
+                .eq('organization_id', organization.id)
+                .eq('customer_id', row.customer_id)
+                .eq('period_start', periodStart)
+                .eq('period_end', periodEnd)
+                .eq('invoice_number', invNo);
+            } else if (row.id && !row.isVirtual) {
+              const { data: latestSi } = await supabase
+                .from('subscription_invoices')
+                .select('id')
+                .eq('organization_id', organization.id)
+                .eq('subscription_id', row.id)
+                .order('created_at', { ascending: false })
+                .limit(1);
+              const siId = latestSi?.[0]?.id;
+              if (siId) {
+                await supabase
+                  .from('subscription_invoices')
+                  .update({
+                    status: 'sent',
+                    invoice_number: invNo,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', siId);
+              }
+            }
+            const cid = String(row.customer_id || '').trim();
+            if (cid) {
+              setCycleInvoiceByCustomer((prev) => ({
+                ...prev,
+                [cid]: {
+                  invoice_number: invNo,
+                  status: 'sent',
+                  updated_at: new Date().toISOString(),
+                },
+              }));
+            }
+          } catch {
+            /* status update best-effort; email already sent */
+          }
         }
       } catch {
         failed += 1;
@@ -1786,31 +2159,7 @@ export default function Subscriptions() {
     } else {
       setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
     }
-  }, [filtered, buildInvoicePdfForRow, organization, profile, user]);
-
-  const openTemplateDialog = useCallback(() => {
-    const saved = (() => {
-      try {
-        const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
-    })();
-    setTemplateForm({
-      subject: saved?.subject || 'Invoice {invoice_number} – {customer_name}',
-      body: saved?.body || 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.',
-    });
-    setTemplateDialogOpen(true);
-  }, [organization?.id]);
-
-  const handleSaveTemplate = useCallback(() => {
-    if (!organization?.id) return;
-    localStorage.setItem(
-      `invoiceEmailTemplate_${organization.id}`,
-      JSON.stringify(templateForm)
-    );
-    setTemplateDialogOpen(false);
-    setActionSuccess('Email template saved.');
-  }, [organization?.id, templateForm]);
+  }, [filtered, buildInvoicePdfForRow, organization, profile, user, loadEmailTemplateSettings, withGlobalSignature, ensureInvoiceContext, resolveRentalInvoiceNumberForActions]);
 
   const headerCards = useMemo(() => [
     { label: 'Active Rentals', value: activeRentalCount, icon: <People />, color: '#10B981' },
@@ -1856,18 +2205,18 @@ export default function Subscriptions() {
           >
             Invoice template
           </Button>
-          <Tooltip title="Set default email subject & message for all invoice emails">
+          <Tooltip title="Set default email subject, body, and signature in Settings">
             <Button
               size="small"
               variant="outlined"
               startIcon={<EditIcon sx={{ fontSize: 14 }} />}
-              onClick={openTemplateDialog}
+              onClick={() => navigate('/settings?tab=invoice-template')}
               sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
             >
               Email Template
             </Button>
           </Tooltip>
-          <Tooltip title="Filter by payment terms on the customer record (import or Customer detail). NET 30 = terms containing net and 30. Credit card = Visa, Mastercard, Amex, credit card, etc.">
+          <Tooltip title="Filter by payment terms on the customer record (import or Customer detail). NET 30 = terms containing net and 30. Credit card = Visa, Mastercard, Amex, credit card, COD, etc.">
             <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
               <FormControl size="small" sx={{ minWidth: 118 }}>
                 <InputLabel id="monthly-qb-cohort-label">Monthly</InputLabel>
@@ -1995,7 +2344,7 @@ export default function Subscriptions() {
             {[
               { key: 'all', label: 'All' },
               { key: 'net30', label: `NET 30 (${termsCounts.net30})` },
-              { key: 'cod', label: `COD (${termsCounts.cod})` },
+              { key: 'credit_card', label: `Credit Card (${termsCounts.credit_card})` },
               { key: 'other', label: `Other (${termsCounts.other})` },
             ].map((opt) => (
               <Chip
@@ -2033,7 +2382,7 @@ export default function Subscriptions() {
                 <TableCell>Terms</TableCell>
                 <TableCell align="center">Items</TableCell>
                 <TableCell align="right">Total / Cycle</TableCell>
-                <TableCell>Next Billing</TableCell>
+                <TableCell>Invoice #</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -2079,7 +2428,7 @@ export default function Subscriptions() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((sub) => (
+                pagedFiltered.map((sub, pageIdx) => (
                   <TableRow
                     key={sub.id}
                     hover
@@ -2097,13 +2446,14 @@ export default function Subscriptions() {
                         const t = String(sub.customer?.payment_terms || '').trim();
                         if (!t) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>;
                         const lower = t.toLowerCase();
-                        const isCod = lower === 'cod' || lower === 'cash on delivery' || lower === 'c.o.d.';
+                        const isCreditCard = isCreditCardPaymentTerm(lower);
+                        const displayTerms = isCodPaymentTerm(lower) ? 'CREDIT CARD' : t.toUpperCase();
                         return (
                           <Chip
-                            label={t.toUpperCase()}
+                            label={displayTerms}
                             size="small"
                             variant="outlined"
-                            color={isCod ? 'warning' : 'default'}
+                            color={isCreditCard ? 'warning' : 'default'}
                             sx={{ fontWeight: 600, fontSize: '0.68rem' }}
                           />
                         );
@@ -2111,7 +2461,29 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
-                    <TableCell>{formatDate(sub.next_billing_date)}</TableCell>
+                    <TableCell>
+                      {(() => {
+                        const cid = String(sub.customer_id || '').trim();
+                        const cycleInv = cid ? cycleInvoiceByCustomer[cid] : null;
+                        const issued =
+                          String(cycleInv?.status || '').toLowerCase() === 'sent'
+                          && String(cycleInv?.invoice_number || '').trim()
+                            ? String(cycleInv.invoice_number).trim()
+                            : null;
+                        return (
+                          <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
+                            {issued ? (
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{issued}</Typography>
+                            ) : (
+                              <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not issued</Typography>
+                            )}
+                            {cycleInv?.status === 'sent' && (
+                              <Chip label="Emailed" size="small" color="success" sx={{ height: 20, fontSize: '0.65rem' }} />
+                            )}
+                          </Stack>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell>
                       <Chip
                         label={sub.status}
@@ -2122,23 +2494,6 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                       <Stack direction="row" spacing={1} justifyContent="flex-end">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleGenerateInvoiceForRow(sub)}
-                          disabled={saving || (parseFloat(sub.totalPerCycle) || 0) <= 0}
-                          sx={{
-                            textTransform: 'none',
-                            minWidth: 'auto',
-                            px: 0.75,
-                            py: 0.25,
-                            fontSize: '0.7rem',
-                            lineHeight: 1.2,
-                            borderRadius: 1.5,
-                          }}
-                        >
-                          Invoice
-                        </Button>
                         <Button
                           size="small"
                           variant="text"
@@ -2237,6 +2592,20 @@ export default function Subscriptions() {
             </TableBody>
           </Table>
         </TableContainer>
+        {filtered.length > 0 && (
+          <TablePagination
+            component="div"
+            count={filtered.length}
+            page={tablePage}
+            onPageChange={(_, nextPage) => setTablePage(nextPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => {
+              setRowsPerPage(parseInt(e.target.value, 10));
+              setTablePage(0);
+            }}
+            rowsPerPageOptions={[25, 50, 100, 250]}
+          />
+        )}
       </Paper>
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
@@ -2277,97 +2646,16 @@ export default function Subscriptions() {
           </Button>
         </DialogActions>
       </Dialog>
-      <Dialog open={emailOpen} onClose={() => setEmailOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Email Invoice</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Customer: {emailRow?.customer?.name || emailRow?.customer?.Name || emailRow?.customer_id || '—'}
-            </Typography>
-            <TextField
-              size="small"
-              label="Recipient (To)"
-              type="email"
-              value={emailForm.to}
-              onChange={(e) => setEmailForm((p) => ({ ...p, to: e.target.value }))}
-              required
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel>Sender (From)</InputLabel>
-              <Select
-                value={emailForm.from}
-                label="Sender (From)"
-                onChange={(e) => setEmailForm((p) => ({ ...p, from: e.target.value }))}
-              >
-                {senderOptions.map((email) => (
-                  <MenuItem key={email} value={email}>{email}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              label="Subject"
-              value={emailForm.subject}
-              onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))}
-            />
-            <TextField
-              size="small"
-              label="Message"
-              value={emailForm.message}
-              onChange={(e) => setEmailForm((p) => ({ ...p, message: e.target.value }))}
-              multiline
-              rows={10}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setEmailOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleSendInvoiceEmail}
-            disabled={emailing || !emailForm.to || !emailForm.from}
-            sx={{ textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
-          >
-            {emailing ? 'Sending...' : 'Send Invoice'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Edit Email Template</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              size="small"
-              label="Subject"
-              value={templateForm.subject}
-              onChange={(e) => setTemplateForm((p) => ({ ...p, subject: e.target.value }))}
-              fullWidth
-            />
-            <TextField
-              size="small"
-              label="Message Body"
-              value={templateForm.body}
-              onChange={(e) => setTemplateForm((p) => ({ ...p, body: e.target.value }))}
-              multiline
-              rows={8}
-              fullWidth
-            />
-            <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
-              Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>
-            </Alert>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setTemplateDialogOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleSaveTemplate}
-            sx={{ textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
-          >
-            Save Template
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <EmailInvoiceDialog
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        onSend={handleSendInvoiceEmail}
+        sending={emailing}
+        emailRow={emailRow}
+        senderOptions={senderOptions}
+        initialForm={emailInitialForm}
+        primaryColor={primaryColor}
+      />
     </Box>
   );
 }

@@ -209,7 +209,6 @@ function looksLikeAddress(str) {
 /** Payment terms: shared between Overview edit and Rental settings dialog */
 const CUSTOMER_PAYMENT_TERM_OPTIONS = [
   { value: '', label: 'Not set' },
-  { value: 'COD', label: 'COD' },
   { value: 'CREDIT CARD', label: 'Credit card' },
   { value: 'Net 15', label: 'Net 15' },
   { value: 'Net 30', label: 'Net 30' },
@@ -221,6 +220,7 @@ function canonicalPaymentTermValue(raw) {
   if (raw == null || raw === '') return '';
   const t = String(raw).trim();
   const lower = t.toLowerCase();
+  if (lower === 'cod' || lower === 'cash on delivery' || lower === 'c.o.d.') return 'CREDIT CARD';
   const hit = CUSTOMER_PAYMENT_TERM_OPTIONS.find((o) => o.value && o.value.toLowerCase() === lower);
   return hit ? hit.value : t;
 }
@@ -370,30 +370,27 @@ export default function CustomerDetail() {
         if (b?.id) map.set(b.id, b);
       });
     });
-    if (map.size > 0) return Array.from(map.values());
 
-    // Legacy fallback only when strict CustomerListID matching returns nothing.
-    const legacyRuns = await Promise.all([
-      customerName
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName)
-        : Promise.resolve({ data: [], error: null }),
-      customerName
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', customerName)
-        : Promise.resolve({ data: [], error: null }),
-      customerName
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName)
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-    legacyRuns.forEach(({ data, error }) => {
-      if (error) return;
-      (data || []).forEach((b) => {
-        if (b?.id) map.set(b.id, b);
+    // Legacy name-keyed rows: merge even when listId already matched bottles, so mixed assignments
+    // (84 on CustomerListID + 1 only on display name) still show the full 85.
+    if (customerName) {
+      const legacyRuns = await Promise.all([
+        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName),
+        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', customerName),
+        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName),
+      ]);
+      legacyRuns.forEach(({ data, error }) => {
+        if (error) return;
+        (data || []).forEach((b) => {
+          if (b?.id) map.set(b.id, b);
+        });
       });
-    });
+    }
+
     return Array.from(map.values());
   }, [id]);
 
-  /** Open rentals: strict customer_id (CustomerListID) match; legacy name fallback only when none found. */
+  /** Open rentals: CustomerListID match, merged with legacy rows keyed by display name (same customer can have both). */
   const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId) => {
     const listId = (customerListId || id || '').toString().trim();
     let rentalById = [];
@@ -412,7 +409,7 @@ export default function CustomerDetail() {
     let rentalByNameAsId = [];
     let rentalByNameError = null;
     let rentalByNameAsIdError = null;
-    if (rentalById.length === 0 && customerName) {
+    if (customerName) {
       const byNameResp = await supabase
         .from('rentals')
         .select('*')
@@ -450,7 +447,7 @@ export default function CustomerDetail() {
     const byKey = new Map();
     const dedupeKey = (r) => {
       if (r?.is_dns === true) {
-        return `dns:${r?.dns_product_code || r?.product_code || ''}:${r?.bottle_barcode || ''}:${r?.customer_id || ''}`;
+        return `dns:${r?.dns_product_code || r?.product_code || ''}:${String(r?.bottle_barcode || '').trim().toUpperCase()}:${r?.customer_id || ''}`;
       }
       if (r?.bottle_id) return `bottle_id:${r.bottle_id}`;
       if (r?.bottle_barcode) return `barcode:${String(r.bottle_barcode).trim().toUpperCase()}`;
@@ -529,6 +526,18 @@ export default function CustomerDetail() {
     }));
     return [...physical, ...dnsRows];
   }, [customerAssets, dnsOnlyRentals, rnbRentals]);
+  const openRentalBottleKeys = useMemo(() => {
+    const bottleIds = new Set();
+    const barcodes = new Set();
+    for (const r of (locationAssets || [])) {
+      if (!r || r.is_dns) continue;
+      const bid = r.bottle_id == null ? '' : String(r.bottle_id).trim();
+      if (bid) bottleIds.add(bid);
+      const bc = String(r.bottle_barcode || '').trim().toUpperCase();
+      if (bc) barcodes.add(bc);
+    }
+    return { bottleIds, barcodes };
+  }, [locationAssets]);
   // Total = physical + DNS only, minus RNS (return not scanned). RNB is exception — not added.
   const totalBottleCount = Math.max(0, (customerAssets?.length || 0) + dnsOnlyRentals.length - rnsRentals.length);
 
@@ -3038,7 +3047,20 @@ export default function CustomerDetail() {
               <TableBody>
                 {displayBottleList
                   .filter(asset => asset.isDns || locationFilter === 'all' || normalizeLocationKey(asset.location) === normalizeLocationKey(locationFilter))
-                  .map((asset) => (
+                  .map((asset) => {
+                  const assetIdKey = asset?.id == null ? '' : String(asset.id).trim();
+                  const assetBarcodeKey = String(asset?.barcode_number || asset?.barcode || '').trim().toUpperCase();
+                  const assetSerialKey = String(asset?.serial_number || '').trim().toUpperCase();
+                  const hasOpenRental =
+                    (!asset.isDns) &&
+                    (
+                      (assetIdKey && openRentalBottleKeys.bottleIds.has(assetIdKey)) ||
+                      (assetBarcodeKey && openRentalBottleKeys.barcodes.has(assetBarcodeKey)) ||
+                      (assetSerialKey && openRentalBottleKeys.barcodes.has(assetSerialKey))
+                    );
+                  const statusIsRented =
+                    hasOpenRental || asset.status === 'rented' || asset.status === 'RENTED';
+                  return (
                   <TableRow key={asset.id} hover selected={!asset.isDns && selectedAssets.includes(asset.id)} sx={asset.isDns ? { backgroundColor: 'action.hover' } : undefined}>
                     <TableCell padding="checkbox">
                       {asset.isDns ? (
@@ -3086,14 +3108,14 @@ export default function CustomerDetail() {
                               ? "In-house (no charge)" 
                               : customer?.customer_type === 'TEMPORARY'
                               ? "Rented (temp - needs setup)"
-                              : (asset.status === 'rented' || asset.status === 'RENTED') 
+                              : statusIsRented
                                 ? "Rented" 
                                 : asset.status || "Rented"
                           }
                           color={
                             customer?.customer_type === 'VENDOR' ? 'default' : 
                             customer?.customer_type === 'TEMPORARY' ? 'warning' : 
-                            (asset.status === 'rented' || asset.status === 'RENTED') ? 'success' : 'warning'
+                            statusIsRented ? 'success' : 'warning'
                           }
                           size="small"
                           icon={customer?.customer_type === 'VENDOR' ? <HomeIcon /> : null}
@@ -3101,7 +3123,7 @@ export default function CustomerDetail() {
                       )}
                     </TableCell>
                   </TableRow>
-                ))}
+                )})}
               </TableBody>
             </Table>
           </TableContainer>

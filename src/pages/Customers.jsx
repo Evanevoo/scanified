@@ -141,6 +141,7 @@ function Customers({ profile }) {
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [locationFilter, setLocationFilter] = useState('All');
   const [withAssignedAssetsOnly, setWithAssignedAssetsOnly] = useState(false);
+  const [noPaymentTermsOnly, setNoPaymentTermsOnly] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -153,7 +154,11 @@ function Customers({ profile }) {
   const navigate = useNavigate();
   const { organization, profile: authProfile } = useAuth();
   const effectiveProfile = profile || authProfile;
-  const canEdit = effectiveProfile?.role === 'admin' || effectiveProfile?.role === 'manager';
+  /** Match Sidebar "Customer List" access: admin, manager, user (and owner aliases). */
+  const canEdit = (() => {
+    const r = String(effectiveProfile?.role || '').toLowerCase();
+    return r === 'admin' || r === 'manager' || r === 'user' || r === 'owner' || r === 'orgowner';
+  })();
   const initialLoadDone = useRef(false);
 
   // Reset initial-load flag when organization changes so we show spinner for the new org's first fetch
@@ -175,6 +180,11 @@ function Customers({ profile }) {
         return q.or(
           `name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%,contact_details.ilike.%${searchLower}%,phone.ilike.%${searchLower}%,city.ilike.%${searchLower}%,postal_code.ilike.%${searchLower}%`
         );
+      };
+
+      const applyNoPaymentTermsFilter = (q) => {
+        if (!noPaymentTermsOnly) return q;
+        return q.or('payment_terms.is.null,payment_terms.eq.');
       };
 
       let data;
@@ -207,11 +217,12 @@ function Customers({ profile }) {
               .in('CustomerListID', chunk);
             if (locationFilter !== 'All') q = q.eq('location', locationFilter);
             q = applySearchOr(q);
+            q = applyNoPaymentTermsFilter(q);
             return q;
           })
         );
         const seen = new Set();
-        const merged = [];
+        let merged = [];
         for (const res of chunkResults) {
           if (res.error) {
             error = res.error;
@@ -227,6 +238,9 @@ function Customers({ profile }) {
         if (error) {
           logger.error('Error fetching customers (with assets filter):', error);
           throw error;
+        }
+        if (noPaymentTermsOnly) {
+          merged = merged.filter((c) => !String(c.payment_terms || '').trim());
         }
         merged.sort((a, b) => compareCustomerRows(a, b, sortField, sortDirection));
         count = merged.length;
@@ -247,6 +261,7 @@ function Customers({ profile }) {
         }
 
         query = applySearchOr(query);
+        query = applyNoPaymentTermsFilter(query);
         query = query.order(sortField, { ascending: sortDirection === 'asc' });
 
         if (searchTerm.trim()) {
@@ -348,7 +363,7 @@ function Customers({ profile }) {
   // Initial load and pagination changes - use debouncedSearch instead of empty string
   useEffect(() => {
     fetchCustomers(debouncedSearch);
-  }, [organization, locationFilter, withAssignedAssetsOnly, page, rowsPerPage, sortField, sortDirection, debouncedSearch]);
+  }, [organization, locationFilter, withAssignedAssetsOnly, noPaymentTermsOnly, page, rowsPerPage, sortField, sortDirection, debouncedSearch]);
 
   // Load parent customer options when Add dialog opens (for "Under parent" selector)
   useEffect(() => {
@@ -809,6 +824,20 @@ function Customers({ profile }) {
               label={<Typography variant="body2">With assigned assets only</Typography>}
               sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={noPaymentTermsOnly}
+                  onChange={(e) => {
+                    setNoPaymentTermsOnly(e.target.checked);
+                    setPage(1);
+                  }}
+                  color="primary"
+                />
+              }
+              label={<Typography variant="body2">No payment terms only</Typography>}
+              sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
+            />
             <TextField
               select
               size="small"
@@ -835,6 +864,7 @@ function Customers({ profile }) {
             }
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
             {withAssignedAssetsOnly && ' · showing customers with at least one bottle assigned'}
+            {noPaymentTermsOnly && ' · payment terms blank or not set'}
           </Typography>
         </Box>
         </Paper>

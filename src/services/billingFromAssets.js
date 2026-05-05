@@ -26,6 +26,28 @@ function normName(v) {
   return String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function clipYmd(v) {
+  const s = String(v || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/**
+ * Rental was still on rent to the customer on the last day of the invoice period (date-only).
+ * Used so April invoices still bill units returned in May, etc.
+ * @param {string} periodEndYmd - YYYY-MM-DD (invoice period end)
+ */
+export function rentalWasBillableAsOfPeriodEnd(rental, periodEndYmd) {
+  const pe = clipYmd(periodEndYmd);
+  if (!pe) return false;
+  const rs = clipYmd(rental?.rental_start_date);
+  if (rs && rs > pe) return false;
+  const endRaw = rental?.rental_end_date;
+  const hasEnd = endRaw != null && String(endRaw).trim() !== '';
+  const re = hasEnd ? clipYmd(endRaw) : null;
+  if (re && re <= pe) return false;
+  return true;
+}
+
 /**
  * Direct/indirect child customers under `parentRecord.id` (public.customers.parent_customer_id).
  */
@@ -252,8 +274,10 @@ function isRentalOpen(rental) {
   return end == null || String(end).trim() === '';
 }
 
-function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecord, options = {}) {
-  if (!isRentalOpen(rental)) return false;
+/**
+ * Customer / hierarchy match for a rental row (open or closed). Used for billing and invoices.
+ */
+function rentalMatchesCustomerBillable(rental, subscriptionCustomerId, customerRecord, options = {}) {
   const descendants = options.descendantCustomers || [];
   const { allCustomers } = options;
   const assignedBottleIds = options.assignedBottleIds || new Set();
@@ -279,6 +303,11 @@ function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecor
     if (matchOne(kidKey, d)) return true;
   }
   return false;
+}
+
+function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecord, options = {}) {
+  if (!isRentalOpen(rental)) return false;
+  return rentalMatchesCustomerBillable(rental, subscriptionCustomerId, customerRecord, options);
 }
 
 function openRentalBusinessKey(rental) {
@@ -310,10 +339,12 @@ export function rentalProductCode(rental) {
 /**
  * Billable units for rental-mode billing.
  * Prefer open rental rows, then fall back to assigned bottles when rentals are missing.
+ * @param {object} options
+ * @param {string} [options.asOfPeriodEnd] - YYYY-MM-DD: count rentals still active on this date (includes closed rentals whose return is after this day). Omit for current open rentals only.
  * @returns {Array<{ productCode: string, count: number }>}
  */
 export function groupBillableUnitCountsByProductCode(bottles, rentals, subscriptionCustomerId, customerRecord, options = {}) {
-  const { allCustomers } = options;
+  const { allCustomers, asOfPeriodEnd } = options;
   const allowAssignedBottleRecovery = options.allowAssignedBottleRecovery === true;
   const root = resolveCustomerRowForHierarchy(customerRecord, allCustomers);
   const descendants =
@@ -349,7 +380,12 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
   const seenRentalKeys = new Set();
 
   for (const r of rentals || []) {
-    if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+    if (asOfPeriodEnd) {
+      if (!rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd)) continue;
+      if (!rentalMatchesCustomerBillable(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+    } else if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) {
+      continue;
+    }
     const businessKey = openRentalBusinessKey(r);
     if (seenRentalKeys.has(businessKey)) continue;
     seenRentalKeys.add(businessKey);
@@ -357,6 +393,30 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     const key = raw ? normalizePricingKey(raw) : '__unclassified__';
     if (!key) continue;
     map.set(key, (map.get(key) || 0) + 1);
+  }
+
+  // As-of billing: add assigned bottles not already represented by a rental row (many orgs track custody on bottles only).
+  if (asOfPeriodEnd) {
+    const pe = clipYmd(asOfPeriodEnd);
+    for (const b of bottles || []) {
+      if (
+        !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
+          descendantCustomers: descendants,
+          allCustomers,
+        })
+      )
+        continue;
+      const del = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
+      if (pe && del && del > pe) continue;
+      const bid = b?.id != null ? String(b.id).trim() : '';
+      const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+      if (bid && seenRentalKeys.has(`bottle_id:${bid}`)) continue;
+      if (bc && seenRentalKeys.has(`barcode:${bc}`)) continue;
+      const raw = bottleProductCode(b);
+      const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
+      if (!pkey) continue;
+      map.set(pkey, (map.get(pkey) || 0) + 1);
+    }
   }
 
   if (map.size === 0) {

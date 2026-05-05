@@ -16,7 +16,7 @@ import {
 import {
   Search as SearchIcon, Refresh as RefreshIcon, Payment as PaymentIcon,
   Visibility as ViewIcon, Email as EmailIcon, Download as DownloadIcon,
-  AccountBalance, CheckCircle, Warning, ExpandMore, ExpandLess,
+  AccountBalance, CheckCircle, Warning, ExpandMore, ExpandLess, Edit as EditIcon,
 } from '@mui/icons-material';
 
 export default function Invoices() {
@@ -45,6 +45,10 @@ export default function Invoices() {
   const [bulkSelectedInvoiceIds, setBulkSelectedInvoiceIds] = useState([]);
   const [bulkEmailForm, setBulkEmailForm] = useState({ from: '', subjectTemplate: 'Invoice {invoice_number} from {organization}', message: 'Hello {customer_name},\n\nPlease find your invoice attached.\n\nThank you.' });
   const [bulkResults, setBulkResults] = useState([]);
+  const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
+  const [editInvoice, setEditInvoice] = useState(null);
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState('');
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -238,6 +242,62 @@ export default function Invoices() {
       ctx.refresh();
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const openEditInvoiceDialog = (inv) => {
+    setError(null);
+    setSuccess(null);
+    setEditInvoice(inv);
+    setEditInvoiceNumber(String(inv?.invoice_number || ''));
+    setEditInvoiceOpen(true);
+  };
+
+  const handleUpdateInvoiceNumber = async () => {
+    if (!editInvoice) return;
+    const nextNumber = String(editInvoiceNumber || '').trim();
+    if (!nextNumber) {
+      setError('Invoice number is required.');
+      return;
+    }
+    if (nextNumber === String(editInvoice.invoice_number || '').trim()) {
+      setEditInvoiceOpen(false);
+      return;
+    }
+
+    setEditingInvoiceNumber(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const targetTable = editInvoice?._sourceTable === 'invoices' ? 'invoices' : 'subscription_invoices';
+      let updateQuery = supabase
+        .from(targetTable)
+        .update({ invoice_number: nextNumber })
+        .eq('id', editInvoice.id);
+      if (organization?.id) updateQuery = updateQuery.eq('organization_id', organization.id);
+
+      const { data, error: updateError } = await updateQuery.select('id, invoice_number').maybeSingle();
+      if (updateError) throw updateError;
+      if (!data) throw new Error('Invoice not found for this organization.');
+
+      if (targetTable === 'invoices') {
+        applyLegacyInvoicePatch(editInvoice.id, { invoice_number: nextNumber });
+      }
+      setSuccess(`Invoice number updated to ${nextNumber}.`);
+      setEditInvoiceOpen(false);
+      setEditInvoice(null);
+      ctx.refresh();
+    } catch (err) {
+      const isDuplicate =
+        String(err?.code || '') === '23505'
+        || /duplicate key|unique constraint/i.test(String(err?.message || ''));
+      if (isDuplicate) {
+        setError(`Invoice number "${nextNumber}" already exists. Choose a different number.`);
+      } else {
+        setError(err.message || 'Failed to update invoice number.');
+      }
+    } finally {
+      setEditingInvoiceNumber(false);
     }
   };
 
@@ -578,6 +638,11 @@ export default function Invoices() {
                               <EmailIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          <Tooltip title="Edit Invoice #">
+                            <IconButton size="small" onClick={() => openEditInvoiceDialog(inv)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           {inv.status === 'draft' && (
                             <Tooltip title="Mark Sent"><IconButton size="small" onClick={() => handleMarkSent(inv.id)}><CheckCircle fontSize="small" /></IconButton></Tooltip>
                           )}
@@ -790,6 +855,39 @@ export default function Invoices() {
             sx={{ textTransform: 'none', bgcolor: primaryColor }}
           >
             {bulkEmailing ? 'Sending...' : `Send ${bulkSelectedInvoiceIds.length} Emails`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Invoice Number Dialog */}
+      <Dialog open={editInvoiceOpen} onClose={() => setEditInvoiceOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Edit Invoice Number</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Customer: {editInvoice ? getCustomerDisplayName(editInvoice) : '—'}
+            </Typography>
+            <TextField
+              size="small"
+              label="Invoice Number"
+              value={editInvoiceNumber}
+              onChange={(e) => setEditInvoiceNumber(e.target.value)}
+              autoFocus
+              required
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setEditInvoiceOpen(false)} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleUpdateInvoiceNumber}
+            disabled={editingInvoiceNumber || !String(editInvoiceNumber || '').trim()}
+            sx={{ textTransform: 'none', bgcolor: primaryColor }}
+          >
+            {editingInvoiceNumber ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>
