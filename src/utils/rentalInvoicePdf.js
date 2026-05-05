@@ -143,6 +143,13 @@ function lineProductKeys(line) {
   return keys;
 }
 
+/** Billable quantity on the line (STRT column); matches PDF row. */
+function lineQuantityForInvoice(line) {
+  const n = Number(line?.qty ?? line?.quantity);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n);
+}
+
 /**
  * Exact SKU or hyphenated family only (e.g. bcs68-300 vs bcs68-300-16pack).
  * Avoids parent codes like "bchemtane" matching every bchemtane240 / bchemtane260 line.
@@ -215,17 +222,16 @@ function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, g
   if (genericSingle) {
     return { ship: globalShip, rtn: globalRtn, end: globalOnHand };
   }
-  const q = Math.round(Number(line?.qty) || 0);
+  const q = lineQuantityForInvoice(line);
   const anyBottleMatch = inPeriodBottles.some((b) => bottleMatchesLineItem(b, line));
   const endOut = endN > 0 ? endN : (!anyBottleMatch && q > 0 ? q : endN);
 
-  let ship = shipN;
-  let rtn = rtnN;
-  // Serialized rows rarely have delivery inside the invoice month; infer movement from STRT vs END when both raw counts are zero.
-  if (ship === 0 && rtn === 0) {
-    if (endOut > q) ship = endOut - q;
-    else if (q > endOut) rtn = q - endOut;
-  }
+  // STRT + SHIP - RTN = END. Observed in-period movement may be incomplete; add remainder to SHIP or RTN.
+  const delta = endOut - q;
+  const obsNet = shipN - rtnN;
+  const rem = delta - obsNet;
+  const ship = shipN + (rem > 0 ? rem : 0);
+  const rtn = rtnN + (rem < 0 ? -rem : 0);
 
   return { ship, rtn, end: endOut };
 }
@@ -604,8 +610,10 @@ export async function createRentalInvoicePdfDoc(params) {
     const rowH = Math.max(4.5, descLines.length * 3.2);
     y = ensureY(y, rowH + 3);
     doc.text(descLines, colItem, y);
-    const qty = line.qty != null ? String(line.qty) : '—';
-    doc.text(qty, colShip - 1, y, { align: 'right' });
+    const hasQtyField = line?.qty != null || line?.quantity != null;
+    const qDisp = lineQuantityForInvoice(line);
+    const qtyLabel = hasQtyField || qDisp > 0 ? String(qDisp) : '—';
+    doc.text(qtyLabel, colShip - 1, y, { align: 'right' });
     const { ship, rtn, end } = movementCountsForLine(
       line,
       ps,
