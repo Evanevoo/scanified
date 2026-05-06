@@ -4,6 +4,7 @@
  */
 
 import {
+  bottleDisplayProductLabel,
   buildBottleLookupMaps,
   rentalWasBillableAsOfPeriodEnd,
   resolvedRentalProductCode,
@@ -123,19 +124,28 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
     }
 
     const rentalDelivered = earliestDeliveryYmd(r.rental_start_date);
-    const resolvedProduct = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
+    const resolvedStrict = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
+    const linkedBottle =
+      (bid && bottleById.get(bid))
+      || (r.bottle_barcode != null
+        ? bottleByBarcode.get(String(r.bottle_barcode).trim().toUpperCase())
+        : null);
+    const displayLine =
+      resolvedStrict
+      || (linkedBottle ? bottleDisplayProductLabel(linkedBottle) : '')
+      || String(
+        r.product_code
+          || r.product_type
+          || r.dns_product_code
+          || r.asset_type
+          || ''
+      ).trim();
 
     out.push({
       id: r.id || `rental-${r.bottle_barcode || Math.random()}`,
-      product_code: resolvedProduct || r.product_code || null,
+      product_code: resolvedStrict || r.product_code || null,
       rental_class: r.asset_type || r.product_type || 'Industrial Cylinders',
-      description:
-        resolvedProduct ||
-        r.product_code ||
-        r.product_type ||
-        r.dns_product_code ||
-        r.asset_type ||
-        '—',
+      description: displayLine || '—',
       rental_start_date: rentalDelivered,
       delivery_date: rentalDelivered,
       barcode_number: r.bottle_barcode,
