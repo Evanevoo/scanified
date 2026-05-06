@@ -19,7 +19,12 @@ import {
   defaultUnitRatesFromAssetPricingTable,
   computeSubscriptionBillingCycleTotal,
 } from '../utils/rentalDisplayPricing';
-import { groupBillableUnitCountsByProductCode } from '../services/billingFromAssets';
+import {
+  bottleProductCode,
+  buildBottleLookupMaps,
+  groupBillableUnitCountsByProductCode,
+  resolvedRentalProductCode,
+} from '../services/billingFromAssets';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import { findActiveLeaseContract } from '../services/leaseBilling';
@@ -72,6 +77,25 @@ function canonicalBillingPeriod(raw) {
   return p || 'monthly';
 }
 
+/** Short label for lease agreement end date (matches common Jan 1 renewal wording). */
+function formatLeaseAgreementExpiry(endDateStr) {
+  if (!endDateStr) return '';
+  const s = String(endDateStr).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const [, m, d] = s.split('-').map((x) => parseInt(x, 10));
+  if (m === 1 && d === 1) return 'Yearly lease · renews Jan 1';
+  try {
+    const shown = new Date(`${s}T12:00:00`).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    return shown ? `Lease ends ${shown}` : '';
+  } catch {
+    return '';
+  }
+}
+
 const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
 const isActiveCustomer = (customer) => {
@@ -117,7 +141,7 @@ export default function Subscriptions() {
   const [bulkEmailing, setBulkEmailing] = useState(false);
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
   const [cycleInvoiceByCustomer, setCycleInvoiceByCustomer] = useState({});
-  const tabFilters = ['all', 'monthly', 'yearly', 'cancelled'];
+  const tabFilters = ['all', 'monthly', 'lease', 'cancelled'];
   const defaultTemplateBody = 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.';
   const defaultTemplateSignature = 'Sincerely,\n{organization_name}';
   const loadEmailTemplateSettings = useCallback(() => {
@@ -378,16 +402,10 @@ export default function Subscriptions() {
       return r;
     };
 
+    const { byId: invBottleById, byBarcode: invBottleByBarcode } = buildBottleLookupMaps(ctx.bottles || []);
+
     for (const bottle of (ctx.bottles || [])) {
-      const productRaw = String(
-        bottle?.product_code
-        || bottle?.product_type
-        || bottle?.asset_type
-        || bottle?.cylinder_type
-        || bottle?.gas_type
-        || bottle?.sku
-        || ''
-      ).trim();
+      const productRaw = bottleProductCode(bottle);
       const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
       const linkKeys = new Set();
       const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
@@ -401,13 +419,7 @@ export default function Subscriptions() {
     }
 
     for (const rental of (ctx.rentals || [])) {
-      const productRaw = String(
-        rental?.dns_product_code
-        || rental?.product_code
-        || rental?.product_type
-        || rental?.asset_type
-        || ''
-      ).trim();
+      const productRaw = resolvedRentalProductCode(rental, invBottleById, invBottleByBarcode);
       const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
       let businessKey;
       if (rental?.is_dns === true) {
@@ -690,6 +702,7 @@ export default function Subscriptions() {
 
         // Same spirit as pre-consolidation Rentals.jsx + billingWorkspace: keep rows even when
         // customer directory lookup misses (QuickBooks ID drift, timing). Fall back to rental row IDs/names.
+        const legacyBottleMaps = buildBottleLookupMaps(ctx.bottles || []);
         const grouped = (data || [])
           .filter((r) => !r.is_dns)
           .reduce((acc, row) => {
@@ -727,15 +740,9 @@ export default function Subscriptions() {
             if (bottleLabel) cur.bottleIdentifiers.push(bottleLabel);
             const bottleId = String(row.bottle_id || '').trim();
             if (bottleId) cur.bottleIds.push(bottleId);
-            const rentalProductCode = String(
-              row.product_code
-              || row.product_type
-              || row.asset_type
-              || ''
-            ).trim();
-            if (rentalProductCode) {
-              cur.productCounts[rentalProductCode] = (cur.productCounts[rentalProductCode] || 0) + 1;
-            }
+            const codeRaw = resolvedRentalProductCode(row, legacyBottleMaps.byId, legacyBottleMaps.byBarcode);
+            const productKey = codeRaw ? normalize(codeRaw) : '__unclassified__';
+            cur.productCounts[productKey] = (cur.productCounts[productKey] || 0) + 1;
             acc.set(key, cur);
             return acc;
           }, new Map());
@@ -768,10 +775,10 @@ export default function Subscriptions() {
         const { data: leaseData, error: leaseErr } = await supabase
           .from('lease_agreements')
           .select(
-            'id, customer_id, customer_name, agreement_number, assets_on_agreement, max_asset_count, annual_amount, next_billing_date, end_date, status'
+            'id, customer_id, customer_name, agreement_number, bottle_id, max_asset_count, annual_amount, billing_frequency, next_billing_date, start_date, end_date, status'
           )
           .eq('organization_id', organization.id)
-          .in('status', ['active', 'paused']);
+          .not('status', 'in', '("cancelled","expired","renewed")');
         if (leaseErr) throw leaseErr;
         if (!active) return;
 
@@ -785,17 +792,19 @@ export default function Subscriptions() {
             'Assigned customer';
           const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
           const agreementCode = String(a.agreement_number || '').trim();
-          const productCode = String(a.assets_on_agreement || '').trim();
           const productCounts = {};
-          if (productCode) productCounts[productCode] = Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1;
 
+          const baseAnnual = parseFloat(a.annual_amount) || 0;
           return {
             id: `lease-agreement-${a.id}`,
             customer: resolvedCustomer || { name: displayName, Name: displayName },
             customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name,
             billing_period: 'yearly',
             itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
-            totalPerCycle: parseFloat(a.annual_amount) || 0,
+            totalPerCycle: baseAnnual,
+            lease_agreement_annual: baseAnnual,
+            lease_bottle_id: a.bottle_id || null,
+            lease_end_date: a.end_date || null,
             bottleIdentifiers: [],
             bottleIds: [],
             productCounts,
@@ -806,7 +815,8 @@ export default function Subscriptions() {
             notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
           };
         });
-      } catch {
+      } catch (err) {
+        console.warn('Error loading lease agreements for rentals page:', err);
         leaseRows = [];
       }
 
@@ -814,7 +824,7 @@ export default function Subscriptions() {
     };
     loadLegacyActiveRentals();
     return () => { active = false; };
-  }, [organization?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [organization?.id, ctx.bottles]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -886,26 +896,52 @@ export default function Subscriptions() {
     const bottleProductsByCustomerIdKey = new Map();
     const bottleProductsByCustomerNameKey = new Map();
     for (const bottle of (ctx.bottles || [])) {
-      const code = String(
-        bottle.product_code || bottle.product_type || bottle.asset_type
-        || bottle.cylinder_type || bottle.gas_type || bottle.sku || ''
-      ).trim();
+      const code = bottleProductCode(bottle);
       if (!code) continue;
       const idKey = normalize(bottle.assigned_customer || bottle.customer_id);
+      const nk = normalize(code);
       if (idKey) {
         const m = bottleProductsByCustomerIdKey.get(idKey) || {};
-        m[code] = (m[code] || 0) + 1;
+        m[nk] = (m[nk] || 0) + 1;
         bottleProductsByCustomerIdKey.set(idKey, m);
       }
       const nameKey = normalizeName(bottle.customer_name);
       if (nameKey) {
         const m = bottleProductsByCustomerNameKey.get(nameKey) || {};
-        m[code] = (m[code] || 0) + 1;
+        m[nk] = (m[nk] || 0) + 1;
         bottleProductsByCustomerNameKey.set(nameKey, m);
       }
     }
 
     return combined.map((row) => {
+      if (row.legacySource === 'lease_agreements') {
+        const baseAnnual = parseFloat(row.lease_agreement_annual);
+        const safeBase = Number.isFinite(baseAnnual) ? baseAnnual : (parseFloat(row.totalPerCycle) || 0);
+        let displayedAnnual = safeBase;
+        let displayItems = parseFloat(row.itemCount) || 1;
+        if (!row.lease_bottle_id) {
+          const cid = normalize(row.customer_id);
+          let n = 0;
+          for (const b of ctx.bottles || []) {
+            const bk = normalize(b.assigned_customer || b.customer_id);
+            if (bk && bk === cid) n += 1;
+          }
+          const effective = n > 0 ? n : 1;
+          displayedAnnual = safeBase * effective;
+          displayItems = effective;
+        } else {
+          displayItems = 1;
+        }
+        const rounded = Math.round(displayedAnnual * 100) / 100;
+        const expiryLabel = formatLeaseAgreementExpiry(row.lease_end_date);
+        return {
+          ...row,
+          totalPerCycle: rounded,
+          itemCount: displayItems,
+          lease_expiry_label: expiryLabel || undefined,
+        };
+      }
+
       const customerKey = normalize(row.customer_id);
       const allProductsOverride = findAllProductsOverrideMultiKey(customerOverrideMap, row);
       const period = String(row.billing_period || 'monthly').toLowerCase();
@@ -921,12 +957,10 @@ export default function Subscriptions() {
         for (const bottleId of (row.bottleIds || [])) {
           const bottle = byBottleId.get(String(bottleId || '').trim());
           if (!bottle) continue;
-          const code = String(
-            bottle.product_code || bottle.product_type || bottle.asset_type
-            || bottle.cylinder_type || bottle.gas_type || bottle.sku || ''
-          ).trim();
+          const code = bottleProductCode(bottle);
           if (!code) continue;
-          derivedById[code] = (derivedById[code] || 0) + 1;
+          const nk = normalize(code);
+          derivedById[nk] = (derivedById[nk] || 0) + 1;
         }
         if (Object.keys(derivedById).length > 0) {
           effectiveProductCounts = derivedById;
@@ -1088,6 +1122,35 @@ export default function Subscriptions() {
       .reduce((sum, r) => sum + (parseFloat(r.itemCount) || 0), 0);
   }, [allRows]);
 
+  const leaseCustomerIds = useMemo(() => {
+    const ids = new Set();
+    for (const r of (legacyRows || [])) {
+      if (r.legacySource === 'lease_agreements') {
+        const k = normalize(r.customer_id);
+        if (k) ids.add(k);
+      }
+    }
+    for (const c of (ctx.leaseContracts || [])) {
+      const k = normalize(c.customer_id);
+      if (k) ids.add(k);
+    }
+    for (const row of enriched) {
+      if (row.customer?.billing_mode === 'lease') {
+        const k = normalize(row.customer_id);
+        if (k) ids.add(k);
+      }
+    }
+    return ids;
+  }, [legacyRows, ctx.leaseContracts, enriched]);
+
+  const isLeaseRow = useCallback((row) => {
+    if (row.legacySource === 'lease_agreements') return true;
+    if (row.customer?.billing_mode === 'lease') return true;
+    const k = normalize(row.customer_id);
+    if (k && leaseCustomerIds.has(k)) return true;
+    return false;
+  }, [leaseCustomerIds]);
+
   const tabRowCounts = useMemo(() => {
     const isNotTerminalRow = (s) => {
       const st = String(s.status || '').toLowerCase();
@@ -1095,14 +1158,14 @@ export default function Subscriptions() {
     };
     return {
       monthly: allRows.filter(
-        (s) => canonicalBillingPeriod(s.billing_period) === 'monthly' && isNotTerminalRow(s)
+        (s) => !isLeaseRow(s) && isNotTerminalRow(s)
       ).length,
-      yearly: allRows.filter(
-        (s) => canonicalBillingPeriod(s.billing_period) === 'yearly' && isNotTerminalRow(s)
+      lease: allRows.filter(
+        (s) => s.legacySource === 'lease_agreements' && isNotTerminalRow(s)
       ).length,
       cancelled: allRows.filter((s) => s.status === 'cancelled').length,
     };
-  }, [allRows]);
+  }, [allRows, isLeaseRow]);
 
   const termsCounts = useMemo(() => {
     const counts = { net30: 0, credit_card: 0, other: 0 };
@@ -1124,11 +1187,11 @@ export default function Subscriptions() {
     };
     if (filter === 'monthly') {
       list = list.filter(
-        (s) => canonicalBillingPeriod(s.billing_period) === 'monthly' && isNotTerminal(s)
+        (s) => !isLeaseRow(s) && isNotTerminal(s)
       );
-    } else if (filter === 'yearly') {
+    } else if (filter === 'lease') {
       list = list.filter(
-        (s) => canonicalBillingPeriod(s.billing_period) === 'yearly' && isNotTerminal(s)
+        (s) => s.legacySource === 'lease_agreements' && isNotTerminal(s)
       );
     } else if (filter === 'cancelled') list = list.filter((s) => s.status === 'cancelled');
 
@@ -1156,7 +1219,7 @@ export default function Subscriptions() {
       });
     }
     return list;
-  }, [allRows, tab, debouncedSearch, termsFilter]);
+  }, [allRows, tab, debouncedSearch, termsFilter, isLeaseRow]);
 
   const pagedFiltered = useMemo(() => {
     const start = tablePage * rowsPerPage;
@@ -2338,7 +2401,7 @@ export default function Subscriptions() {
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' } }}>
             <Tab label={`All (${allRows.length})`} />
             <Tab label={`Monthly (${tabRowCounts.monthly})`} />
-            <Tab label={`Yearly (${tabRowCounts.yearly})`} />
+            <Tab label={`Lease Agreements (${tabRowCounts.lease})`} />
             <Tab label={`Cancelled (${tabRowCounts.cancelled})`} />
           </Tabs>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1 }}>
@@ -2368,6 +2431,16 @@ export default function Subscriptions() {
             sx={{ ml: 'auto', minWidth: 240, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
             InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
           />
+          {tabFilters[tab] === 'lease' && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate('/lease-agreements')}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.5, whiteSpace: 'nowrap' }}
+            >
+              Manage Lease Agreements
+            </Button>
+          )}
         </Box>
 
         <TableContainer
@@ -2401,7 +2474,7 @@ export default function Subscriptions() {
                           No rows match this tab or search ({allRows.length} total in list).
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-                          Lease-style accounts and yearly rentals appear under Yearly, not Monthly. Try the All or Yearly tab, or clear the search box.
+                          Lease customers appear under the Lease Agreements tab. Try the All tab, or clear the search box.
                         </Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center">
                           {search.trim() !== '' && (
@@ -2414,9 +2487,9 @@ export default function Subscriptions() {
                               All ({allRows.length})
                             </Button>
                           )}
-                          {tabRowCounts.yearly > 0 && tab !== 2 && (
+                          {tabRowCounts.lease > 0 && tab !== 2 && (
                             <Button size="small" variant="outlined" onClick={() => setTab(2)}>
-                              Yearly ({tabRowCounts.yearly})
+                              Lease Agreements ({tabRowCounts.lease})
                             </Button>
                           )}
                           {tabRowCounts.monthly > 0 && tab !== 1 && (
@@ -2438,10 +2511,29 @@ export default function Subscriptions() {
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
                     <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
+                        {isLeaseRow(sub) && (
+                          <Chip label="Lease" size="small" color="info" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
+                        )}
+                      </Stack>
+                      {sub.legacySource === 'lease_agreements' && sub.notes && (
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>{sub.notes}</Typography>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
+                      {sub.legacySource === 'lease_agreements' ? (
+                        <Stack spacing={0.35} alignItems="flex-start">
+                          <Chip label="Yearly" size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
+                          {sub.lease_expiry_label && (
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, lineHeight: 1.35 }}>
+                              {sub.lease_expiry_label}
+                            </Typography>
+                          )}
+                        </Stack>
+                      ) : (
+                        <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
+                      )}
                     </TableCell>
                     <TableCell>
                       {(() => {
@@ -2549,6 +2641,17 @@ export default function Subscriptions() {
                             sx={{ textTransform: 'none' }}
                           >
                             Customer
+                          </Button>
+                        )}
+                        {isLeaseRow(sub) && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="info"
+                            onClick={() => navigate('/lease-agreements')}
+                            sx={{ textTransform: 'none', fontSize: '0.72rem' }}
+                          >
+                            View Lease
                           </Button>
                         )}
                         {sub.isVirtual ? (

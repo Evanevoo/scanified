@@ -248,21 +248,6 @@ function daysBetween(startIso, endIso) {
 }
 
 /**
- * Days on rent during [periodStart, periodEnd] for the asset grid.
- * If delivery predates the invoice period, counts from period start (full month on hand).
- */
-function daysOnRentInInvoicePeriod(deliveredRaw, periodStartRaw, periodEndRaw) {
-  const pe = clipYmd(periodEndRaw);
-  const ps = clipYmd(periodStartRaw);
-  const d = clipYmd(deliveredRaw);
-  if (!pe || !ps) return null;
-  if (!d) return null;
-  if (d > pe) return 0;
-  const effectiveStart = d < ps ? ps : d;
-  return inclusiveDaysBetweenYmd(effectiveStart, pe);
-}
-
-/**
  * @param {object} params
  * @param {object} params.organization
  * @param {object} [params.invoiceTemplate]
@@ -557,26 +542,45 @@ export async function createRentalInvoicePdfDoc(params) {
   const colRate = colDays + 14;
   const colDescMaxW = Math.max(18, colStart - colItem - 3);
 
-  const sumHeaderH = 5.5;
+  const sumHeaderH = 6;
   const summaryTableTop = y;
+  // Column bands (shared by header + body). jsPDF align:'center' is unreliable; use getTextWidth.
+  const wItem = colStart - colItem - 2;
+  const wStrt = colShip - colStart - 1;
+  const wShip = colRtn - colShip - 1;
+  const wRtn = colEnd - colRtn - 1;
+  const wEnd = colDays - colEnd - 1;
+  const wDays = colRate - colDays - 1;
+  const wRate = splitAmt - colRate - 1;
+  const drawCenteredInBand = (str, bandLeft, bandW, yRow) => {
+    const s = String(str);
+    const tw = doc.getTextWidth(s);
+    const x = bandLeft + Math.max(0, (bandW - tw) / 2);
+    doc.text(s, x, yRow);
+  };
+  const drawRightEdgeAt = (str, rightX, yRow) => {
+    const s = String(str);
+    const tw = doc.getTextWidth(s);
+    doc.text(s, rightX - tw, yRow);
+  };
   doc.setFillColor(0, 0, 0);
   doc.rect(tableLeft, y, tableW, sumHeaderH, 'F');
   doc.setFont(fontFamily, 'bold');
   doc.setFontSize(4.8);
   doc.setTextColor(255, 255, 255);
-  const headY = y + 3.8;
-  const headCell = (label, left, width) => {
-    doc.text(label, left + width / 2, headY, { align: 'center', maxWidth: Math.max(4, width - 1) });
-  };
-  headCell('ITEM', colItem, colStart - colItem - 2);
-  headCell('STRT', colStart, colShip - colStart - 1);
-  headCell('SHIP', colShip, colRtn - colShip - 1);
-  headCell('RTN', colRtn, colEnd - colRtn - 1);
-  headCell('END', colEnd, colDays - colEnd - 1);
-  headCell('DAYS', colDays, colRate - colDays - 1);
-  headCell('RATE', colRate, splitAmt - colRate - 1);
-  doc.text('TOTAL', colTot, headY, { align: 'right' });
+  const headY = y + 4.1;
+  drawCenteredInBand('ITEM', colItem, wItem, headY);
+  drawCenteredInBand('STRT', colStart, wStrt, headY);
+  drawCenteredInBand('SHIP', colShip, wShip, headY);
+  drawCenteredInBand('RTN', colRtn, wRtn, headY);
+  drawCenteredInBand('END', colEnd, wEnd, headY);
+  drawCenteredInBand('DAYS', colDays, wDays, headY);
+  drawCenteredInBand('RATE', colRate, wRate, headY);
+  drawRightEdgeAt('TOTAL', colTot, headY);
   y += sumHeaderH;
+  // Body baseline must clear header ascenders (jsPDF y = baseline).
+  const summaryBodyPad = 6.5;
+  y += summaryBodyPad;
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.2);
 
@@ -604,8 +608,10 @@ export async function createRentalInvoicePdfDoc(params) {
   const periodBillDays = ps && pe ? inclusiveDaysBetweenYmd(ps, pe) : null;
   const rentDaysStr =
     periodBillDays != null && periodBillDays > 0 ? String(periodBillDays) : '—';
+
   lineItems.forEach((line) => {
-    const desc = String(line.description || '—');
+    const rawLabel = line.description || line.product_code || '—';
+    const desc = String(rawLabel).toUpperCase();
     const descLines = doc.splitTextToSize(desc, colDescMaxW);
     const rowH = Math.max(4.5, descLines.length * 3.2);
     y = ensureY(y, rowH + 3);
@@ -613,7 +619,6 @@ export async function createRentalInvoicePdfDoc(params) {
     const hasQtyField = line?.qty != null || line?.quantity != null;
     const qDisp = lineQuantityForInvoice(line);
     const qtyLabel = hasQtyField || qDisp > 0 ? String(qDisp) : '—';
-    doc.text(qtyLabel, colShip - 1, y, { align: 'right' });
     const { ship, rtn, end } = movementCountsForLine(
       line,
       ps,
@@ -625,12 +630,13 @@ export async function createRentalInvoicePdfDoc(params) {
       onHandCount,
       lineCount
     );
-    doc.text(String(ship), colRtn - 1, y, { align: 'right' });
-    doc.text(String(rtn), colEnd - 1, y, { align: 'right' });
-    doc.text(String(end), colDays - 1, y, { align: 'right' });
-    doc.text(rentDaysStr, colRate - 1, y, { align: 'right' });
-    doc.text(formatMoneyRate3(line.unit || 0), splitAmt - 1, y, { align: 'right' });
-    doc.text(formatCurrency(line.amount || 0), colTot, y, { align: 'right' });
+    drawCenteredInBand(qtyLabel, colStart, wStrt, y);
+    drawCenteredInBand(ship, colShip, wShip, y);
+    drawCenteredInBand(rtn, colRtn, wRtn, y);
+    drawCenteredInBand(end, colEnd, wEnd, y);
+    drawCenteredInBand(rentDaysStr, colDays, wDays, y);
+    drawCenteredInBand(formatMoneyRate3(line.unit || 0), colRate, wRate, y);
+    drawRightEdgeAt(formatCurrency(line.amount || 0), colTot, y);
     y += rowH;
     doc.setDrawColor(200, 200, 200);
     doc.line(tableLeft, y, tableLeft + tableW, y);
@@ -698,12 +704,10 @@ export async function createRentalInvoicePdfDoc(params) {
   } else {
     const a1 = left;
     const a2 = left + 26;
-    const a3 = left + 52;
-    const a5 = left + 76;
-    const a6 = left + 96;
-    const a7 = left + 124;
+    const aBarcode = left + 82;
+    const aSerial = left + 112;
     const classColW = Math.max(8, a2 - a1 - 2);
-    const assetColW = Math.max(8, a3 - a2 - 2);
+    const assetColW = Math.max(8, aBarcode - a2 - 4);
     doc.setFillColor(0, 0, 0);
     doc.rect(left, y - 3.5, contentW, 6, 'F');
     doc.setFont(fontFamily, 'bold');
@@ -711,20 +715,26 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.setFontSize(5.5);
     doc.text('CLASS', a1, y);
     doc.text('ASSET / TYPE', a2, y);
-    doc.text('DELIVERED', a3, y);
-    doc.text('DAYS', a5, y);
-    doc.text('BARCODE', a6, y);
-    doc.text('SERIAL', a7, y);
+    doc.text('BARCODE', aBarcode, y);
+    doc.text('SERIAL', aSerial, y);
     y += 6;
     doc.setFont(fontFamily, 'normal');
     doc.setFontSize(5.5);
     doc.setTextColor(35, 35, 35);
 
     inPeriodBottles.forEach((b) => {
-      const rentalClass = b.product_code || b.rental_class || b.type || 'Industrial Cylinders';
+      const pcRaw = String(b.product_code || '').trim();
+      const rentalClass =
+        (pcRaw && pcRaw !== '__unclassified__'
+          ? pcRaw
+          : null)
+        || b.rental_class
+        || b.type
+        || b.description
+        || b.display_label
+        || b.gas_type
+        || 'Industrial Cylinders';
       const assetType = b.description || b.display_label || b.gas_type || b.product_code || '—';
-      const delivered = b.rental_start_date || b.delivery_date || b.purchase_date;
-      const held = daysOnRentInInvoicePeriod(delivered, period?.start, period?.end);
       const barcode = b.barcode_number || b.barcode || b.bottle_barcode || b.asset_tag || '—';
       const rawSerial = b.serial_number || b.cylinder_number || b._serial_display || '';
       const serial = rawSerial && rawSerial !== 'Not Set' ? rawSerial : '—';
@@ -735,10 +745,8 @@ export async function createRentalInvoicePdfDoc(params) {
       y = ensureY(y, h + 2);
       doc.text(rcLines, a1, y);
       doc.text(atLines, a2, y);
-      doc.text(delivered ? formatUsDate(delivered) : '—', a3, y);
-      doc.text(held != null ? String(held) : '—', a5, y);
-      doc.text(String(barcode), a6, y);
-      doc.text(String(serial), a7, y);
+      doc.text(String(barcode), aBarcode, y);
+      doc.text(String(serial), aSerial, y);
       y += h;
     });
   }
