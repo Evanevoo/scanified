@@ -4,9 +4,8 @@ function normalizePricingKey(v) {
 }
 
 /**
- * Canonical product key for a bottle row (matches subscription / pricing SKU resolution).
- * Includes common display fields so assets are not billed or labeled "Unclassified" when only
- * description/display_label/name are populated.
+ * Canonical **pricing / SKU** key for a bottle row — must match `asset_type_pricing.product_code`
+ * and customer override keys. Do not use free-text description here (breaks rate lookup).
  */
 export function bottleProductCode(bottle) {
   return String(
@@ -16,7 +15,18 @@ export function bottleProductCode(bottle) {
       || bottle?.cylinder_type
       || bottle?.gas_type
       || bottle?.sku
-      || bottle?.display_label
+      || ''
+  ).trim();
+}
+
+/**
+ * Human-facing asset type when SKU fields are empty (PDF asset table, rental-only rows).
+ */
+export function bottleDisplayProductLabel(bottle) {
+  const strict = bottleProductCode(bottle);
+  if (strict) return strict;
+  return String(
+    bottle?.display_label
       || bottle?.description
       || bottle?.name
       || bottle?.asset_name
