@@ -5,6 +5,8 @@ function normalizePricingKey(v) {
 
 /**
  * Canonical product key for a bottle row (matches subscription / pricing SKU resolution).
+ * Includes common display fields so assets are not billed or labeled "Unclassified" when only
+ * description/display_label/name are populated.
  */
 export function bottleProductCode(bottle) {
   return String(
@@ -14,8 +16,26 @@ export function bottleProductCode(bottle) {
       || bottle?.cylinder_type
       || bottle?.gas_type
       || bottle?.sku
+      || bottle?.display_label
+      || bottle?.description
+      || bottle?.name
+      || bottle?.asset_name
       || ''
   ).trim();
+}
+
+/** O(1) bottle lookups for resolving rental rows that omit product fields but link to a bottle. */
+export function buildBottleLookupMaps(bottles) {
+  const byId = new Map();
+  const byBarcode = new Map();
+  for (const b of bottles || []) {
+    if (b?.id != null && String(b.id).trim() !== '') {
+      byId.set(String(b.id).trim(), b);
+    }
+    const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+    if (bc) byBarcode.set(bc, b);
+  }
+  return { byId, byBarcode };
 }
 
 function norm(v) {
@@ -337,6 +357,31 @@ export function rentalProductCode(rental) {
 }
 
 /**
+ * Product/SKU string for billing: rental row fields, then linked bottle (by id or barcode).
+ */
+export function resolvedRentalProductCode(rental, bottleById, bottleByBarcode) {
+  const fromRental = rentalProductCode(rental);
+  if (fromRental) return fromRental;
+  const bid = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
+  if (bid) {
+    const b = bottleById.get(bid);
+    if (b) {
+      const fromBottle = bottleProductCode(b);
+      if (fromBottle) return fromBottle;
+    }
+  }
+  const rb = rental?.bottle_barcode != null ? String(rental.bottle_barcode).trim().toUpperCase() : '';
+  if (rb) {
+    const b = bottleByBarcode.get(rb);
+    if (b) {
+      const fromBottle = bottleProductCode(b);
+      if (fromBottle) return fromBottle;
+    }
+  }
+  return '';
+}
+
+/**
  * Billable units for rental-mode billing.
  * Prefer open rental rows, then fall back to assigned bottles when rentals are missing.
  * @param {object} options
@@ -378,6 +423,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
 
   const map = new Map();
   const seenRentalKeys = new Set();
+  const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottles);
 
   for (const r of rentals || []) {
     if (asOfPeriodEnd) {
@@ -389,7 +435,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     const businessKey = openRentalBusinessKey(r);
     if (seenRentalKeys.has(businessKey)) continue;
     seenRentalKeys.add(businessKey);
-    const raw = rentalProductCode(r);
+    const raw = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
     const key = raw ? normalizePricingKey(raw) : '__unclassified__';
     if (!key) continue;
     map.set(key, (map.get(key) || 0) + 1);

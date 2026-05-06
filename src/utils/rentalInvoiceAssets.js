@@ -3,7 +3,11 @@
  * (same spirit as CustomerDetail / billing) so DNS-only and timing gaps still appear.
  */
 
-import { rentalWasBillableAsOfPeriodEnd } from '../services/billingFromAssets';
+import {
+  buildBottleLookupMaps,
+  rentalWasBillableAsOfPeriodEnd,
+  resolvedRentalProductCode,
+} from '../services/billingFromAssets';
 
 function norm(v) {
   return String(v || '').trim().toLowerCase();
@@ -73,6 +77,7 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
   const { asOfPeriodEnd } = options;
   const bottlesArr = Array.isArray(bottles) ? bottles : [];
   const rentalsArr = Array.isArray(openRentals) ? openRentals : [];
+  const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottlesArr);
 
   const customerBottles = bottlesArr.filter((b) => bottleRowMatchesInvoiceCustomer(b, row));
   let customerRentals = rentalsArr.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
@@ -118,11 +123,14 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
     }
 
     const rentalDelivered = earliestDeliveryYmd(r.rental_start_date);
+    const resolvedProduct = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
 
     out.push({
       id: r.id || `rental-${r.bottle_barcode || Math.random()}`,
+      product_code: resolvedProduct || r.product_code || null,
       rental_class: r.asset_type || r.product_type || 'Industrial Cylinders',
       description:
+        resolvedProduct ||
         r.product_code ||
         r.product_type ||
         r.dns_product_code ||
