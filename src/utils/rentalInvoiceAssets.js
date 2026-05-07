@@ -6,6 +6,7 @@
 import {
   bottleDisplayProductLabel,
   buildBottleLookupMaps,
+  isCustomerOwnedForBilling,
   rentalWasBillableAsOfPeriodEnd,
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
@@ -80,7 +81,9 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
   const rentalsArr = Array.isArray(openRentals) ? openRentals : [];
   const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottlesArr);
 
-  const customerBottles = bottlesArr.filter((b) => bottleRowMatchesInvoiceCustomer(b, row));
+  const customerBottles = bottlesArr.filter(
+    (b) => bottleRowMatchesInvoiceCustomer(b, row) && !isCustomerOwnedForBilling(b)
+  );
   let customerRentals = rentalsArr.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
   if (asOfPeriodEnd) {
     customerRentals = customerRentals.filter((r) => rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd));
@@ -130,6 +133,7 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
       || (r.bottle_barcode != null
         ? bottleByBarcode.get(String(r.bottle_barcode).trim().toUpperCase())
         : null);
+    if (isCustomerOwnedForBilling(linkedBottle)) continue;
     const displayLine =
       resolvedStrict
       || (linkedBottle ? bottleDisplayProductLabel(linkedBottle) : '')
@@ -158,6 +162,30 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
   }
 
   return out;
+}
+
+/**
+ * Cache key for bulk-fetched returns (ZIP / batch PDF): one query per org + period, not per invoice.
+ */
+export function invoiceReturnsCacheKey(periodStart, periodEnd) {
+  return `${String(periodStart || '').trim()}|${String(periodEnd || '').trim()}`;
+}
+
+/**
+ * All closed rentals in [periodStart, periodEnd] for the org, bottle-enriched once.
+ * Caller filters with `rentalRowMatchesInvoiceCustomer` per subscription row.
+ */
+export async function fetchAllReturnsInInvoicePeriodForOrg(supabase, organizationId, periodStart, periodEnd) {
+  const { data, error } = await supabase
+    .from('rentals')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .not('rental_end_date', 'is', null)
+    .gte('rental_end_date', periodStart)
+    .lte('rental_end_date', periodEnd);
+
+  if (error) throw error;
+  return enrichReturnsWithBottleDetails(supabase, organizationId, data || []);
 }
 
 /**

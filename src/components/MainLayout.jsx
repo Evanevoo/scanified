@@ -219,8 +219,22 @@ export default function MainLayout({ children }) {
     setLogoutLoading(true);
     
     try {
-      // Clear all storage immediately
+      // Clear storage but keep org-scoped invoice templates (otherwise logout wipes Settings
+      // → Email Message Template and PDF branding stored in localStorage).
+      const preservedLocal = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (
+          key
+          && (key.startsWith('invoiceEmailTemplate_') || key.startsWith('invoiceTemplate_'))
+        ) {
+          preservedLocal.push([key, localStorage.getItem(key)]);
+        }
+      }
       localStorage.clear();
+      preservedLocal.forEach(([key, val]) => {
+        if (val != null) localStorage.setItem(key, val);
+      });
       sessionStorage.clear();
       
       // Clear any cached data

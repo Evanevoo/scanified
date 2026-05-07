@@ -27,6 +27,7 @@ import {
   Assessment as AssessmentIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { clearRentalsBottleLinksForBottleIds } from '../utils/bottleDeleteHelpers';
 import { useAuth } from '../hooks/useAuth';
 import * as XLSX from 'xlsx';
 
@@ -480,10 +481,18 @@ export default function OrganizationTools() {
 
       // Delete invalid bottles
       const bottleIds = invalidBottles.map(bottle => bottle.id);
+      const { error: detachErr } = await clearRentalsBottleLinksForBottleIds(
+        supabase,
+        organization.id,
+        bottleIds
+      );
+      if (detachErr) throw detachErr;
+
       const { error } = await supabase
         .from('bottles')
         .delete()
-        .in('id', bottleIds);
+        .in('id', bottleIds)
+        .eq('organization_id', organization.id);
 
       if (error) throw error;
 

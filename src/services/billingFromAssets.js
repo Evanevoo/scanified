@@ -4,10 +4,9 @@ function normalizePricingKey(v) {
 }
 
 /**
- * Canonical **pricing / SKU** key for a bottle row — must match `asset_type_pricing.product_code`
- * and customer override keys. Do not use free-text description here (breaks rate lookup).
+ * Structured SKU fields only (matches `asset_type_pricing.product_code` when present).
  */
-export function bottleProductCode(bottle) {
+export function bottleStrictProductCode(bottle) {
   return String(
     bottle?.product_code
       || bottle?.product_type
@@ -20,10 +19,11 @@ export function bottleProductCode(bottle) {
 }
 
 /**
- * Human-facing asset type when SKU fields are empty (PDF asset table, rental-only rows).
+ * Canonical **pricing / SKU** key for a bottle row — prefers structured codes;
+ * falls back to display/description when imports omit SKU columns (avoids everything showing as Unclassified).
  */
-export function bottleDisplayProductLabel(bottle) {
-  const strict = bottleProductCode(bottle);
+export function bottleProductCode(bottle) {
+  const strict = bottleStrictProductCode(bottle);
   if (strict) return strict;
   return String(
     bottle?.display_label
@@ -32,6 +32,13 @@ export function bottleDisplayProductLabel(bottle) {
       || bottle?.asset_name
       || ''
   ).trim();
+}
+
+/**
+ * Human-facing asset type label (same resolution order as {@link bottleProductCode}).
+ */
+export function bottleDisplayProductLabel(bottle) {
+  return bottleProductCode(bottle);
 }
 
 /** O(1) bottle lookups for resolving rental rows that omit product fields but link to a bottle. */
@@ -54,6 +61,52 @@ function norm(v) {
 
 function normName(v) {
   return String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * Display names like "Parent LP – Field Division" often appear on subscriptions while DNS rows
+ * only carry a segment ("Field Division"). Adds the full normalized name plus each dash-separated
+ * segment as lookup keys so both sides intersect.
+ */
+export function expandBillingNameLookupKeys(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return [];
+  const keys = [];
+  const full = normName(raw);
+  if (full) keys.push(full);
+  const parts = raw.split(/\s*[-–—]\s+/).map((p) => p.trim()).filter(Boolean);
+  for (const p of parts) {
+    const seg = normName(p);
+    if (seg && !keys.includes(seg)) keys.push(seg);
+  }
+  return keys;
+}
+
+/**
+ * Customer-owned / customer-property cylinders should not generate monthly rental charges
+ * (they are not company fleet on rent). Uses the same ownership hints as AssetDetail / imports.
+ */
+export function isCustomerOwnedForBilling(bottle) {
+  if (!bottle) return false;
+  const o = String(bottle.ownership || '').trim().toLowerCase();
+  if (!o) return false;
+  if (o === 'customer owned' || o.includes('customer-owned')) return true;
+  if (o.includes('customer') && (o.includes('owned') || /\bown(ed)?\b/.test(o))) return true;
+  return false;
+}
+
+/** Linked bottle row for a rental when bottle_id / barcode resolves in inventory. */
+export function resolveBottleForRental(rental, bottleById, bottleByBarcode) {
+  const bid = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
+  if (bid) {
+    const b = bottleById.get(bid);
+    if (b) return b;
+  }
+  const rb = rental?.bottle_barcode != null ? String(rental.bottle_barcode).trim().toUpperCase() : '';
+  if (rb) {
+    return bottleByBarcode.get(rb) || null;
+  }
+  return null;
 }
 
 function clipYmd(v) {
@@ -280,6 +333,7 @@ export function groupAssignedBottleCountsByProductCode(bottles, subscriptionCust
 
   const map = new Map();
   for (const b of bottles || []) {
+    if (isCustomerOwnedForBilling(b)) continue;
     if (
       !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
         descendantCustomers: descendants,
@@ -299,9 +353,79 @@ export function groupAssignedBottleCountsByProductCode(bottles, subscriptionCust
   return out;
 }
 
-function isRentalOpen(rental) {
+export function isRentalOpen(rental) {
   const end = rental?.rental_end_date;
   return end == null || String(end).trim() === '';
+}
+
+/**
+ * DNS check aligned with CustomerDetail (`r.is_dns` truthy).
+ * Tolerates Postgres boolean variants ('t', 'true'), 1/'1', 'yes'/'y' so
+ * subscription totals match the on-hand roll-up shown on the customer page.
+ */
+export function rentalIsDnsForBilling(rental) {
+  if (!rental) return false;
+  const v = rental?.is_dns;
+  // Align with CustomerDetail: `locationAssets.filter(r => r.is_dns)` (any truthy counts as DNS).
+  if (v === false || v === 0 || v === null || v === undefined || v === '') return false;
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    if (s === 'false' || s === '0' || s === 'f' || s === 'no' || s === 'n') return false;
+    return s.length > 0;
+  }
+  if (typeof v === 'number') return v !== 0;
+  return Boolean(v);
+}
+
+/**
+ * Normalized id/name keys for subscription billing lookup: the customer row, parent chain,
+ * and descendant locations — so rentals/DNS keyed under parent or child both match (e.g. LP vs Field Division).
+ */
+export function subscriptionBillingLookupKeys(customerRecord, allCustomers) {
+  const keys = new Set();
+  const addId = (v) => {
+    const n = norm(v);
+    if (n) keys.add(n);
+  };
+  const addNm = (v) => {
+    const n = normName(v);
+    if (n) keys.add(n);
+  };
+
+  const root = resolveCustomerRowForHierarchy(customerRecord, allCustomers);
+  if (!root) {
+    addId(customerRecord?.id);
+    addId(customerRecord?.CustomerListID);
+    for (const nk of expandBillingNameLookupKeys(customerRecord?.name || customerRecord?.Name)) {
+      keys.add(nk);
+    }
+    return keys;
+  }
+
+  const descendants =
+    root.id && Array.isArray(allCustomers) ? getDescendantCustomerRecords(root, allCustomers) : [];
+
+  const lineage = [];
+  let cur = root;
+  const seenAnc = new Set();
+  while (cur && cur.id && !seenAnc.has(cur.id)) {
+    seenAnc.add(cur.id);
+    lineage.push(cur);
+    const pid = cur.parent_customer_id;
+    if (!pid || !Array.isArray(allCustomers)) break;
+    cur = allCustomers.find((c) => c.id === pid);
+  }
+
+  for (const c of [...lineage, ...descendants]) {
+    if (!c) continue;
+    addId(c.id);
+    addId(c.CustomerListID);
+    addId(c.customer_id);
+    for (const nk of expandBillingNameLookupKeys(c.name || c.Name)) {
+      keys.add(nk);
+    }
+  }
+  return keys;
 }
 
 /**
@@ -335,22 +459,171 @@ function rentalMatchesCustomerBillable(rental, subscriptionCustomerId, customerR
   return false;
 }
 
-function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecord, options = {}) {
+export function openRentalMatchesCustomer(rental, subscriptionCustomerId, customerRecord, options = {}) {
   if (!isRentalOpen(rental)) return false;
   return rentalMatchesCustomerBillable(rental, subscriptionCustomerId, customerRecord, options);
 }
 
-function openRentalBusinessKey(rental) {
-  if (rental?.is_dns === true) {
+/**
+ * Options for {@link openRentalMatchesCustomer} with assigned-bottle recovery enabled
+ * (matches CustomerDetail / groupBillableUnitCountsByProductCode when recovery is on).
+ */
+export function buildOpenRentalMatchOptionsForSubscription(
+  bottles,
+  subscriptionCustomerId,
+  customerRecord,
+  allCustomers,
+) {
+  const root = resolveCustomerRowForHierarchy(customerRecord, allCustomers);
+  const descendants =
+    root?.id && Array.isArray(allCustomers)
+      ? getDescendantCustomerRecords(root, allCustomers)
+      : [];
+  const assignedBottleIds = new Set();
+  const assignedBarcodes = new Set();
+  for (const b of bottles || []) {
+    if (isCustomerOwnedForBilling(b)) continue;
+    if (
+      !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
+        descendantCustomers: descendants,
+        allCustomers,
+      })
+    )
+      continue;
+    if (b?.id != null && String(b.id).trim() !== '') {
+      assignedBottleIds.add(String(b.id).trim());
+    }
+    const barcode = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+    if (barcode) assignedBarcodes.add(barcode);
+  }
+  return {
+    descendantCustomers: descendants,
+    allCustomers,
+    assignedBottleIds,
+    assignedBarcodes,
+    allowAssignedBottleRecovery: true,
+  };
+}
+
+/**
+ * RNB/RNS DNS rows are shown on the customer profile but should not add billable units
+ * (aligned with CustomerDetail "dns only" vs return-exception rows).
+ */
+export function isDnsRentalExcludedFromBillableCount(rental) {
+  if (!rental || !rentalIsDnsForBilling(rental)) return false;
+  const d = String(rental.dns_description || '');
+  if (d.includes('Return not on balance')) return true;
+  if (d.includes('Return not scanned')) return true;
+  return false;
+}
+
+/**
+ * Bucket keys for indexing a rental under `rentalsByCustomerKey` on the Rentals page.
+ * Expands `customer_id` / `customer_name` through the customer directory so DNS and legacy
+ * rows still match subscription lookups keyed by UUID, CustomerListID, or display name.
+ *
+ * When `bottleById` / `bottleByBarcode` are provided, also index under the assigned bottle's
+ * customer keys (stale rental.customer_id on DNS rows) so counts match CustomerDetail open rows.
+ */
+export function rentalCustomerIndexKeys(rental, allCustomers, bottleById = null, bottleByBarcode = null) {
+  const keys = new Set();
+  const add = (v) => {
+    const n = norm(v);
+    if (n) keys.add(n);
+  };
+
+  add(rental?.customer_id);
+  for (const nk of expandBillingNameLookupKeys(rental?.customer_name)) {
+    keys.add(nk);
+  }
+
+  if (Array.isArray(allCustomers) && allCustomers.length > 0) {
+    const rId = String(rental?.customer_id ?? '').trim();
+    const rIdNorm = norm(rId);
+    const rNameNorm = normName(rental?.customer_name || '');
+
+    for (const c of allCustomers) {
+      const list = String(c.CustomerListID ?? '').trim();
+      const cid = String(c.id ?? '').trim();
+      const cname = normName(c.name || c.Name || '');
+
+      let linked = false;
+      if (
+        rId &&
+        (rId === list || rId === cid || rIdNorm === norm(list) || rIdNorm === norm(cid))
+      ) {
+        linked = true;
+      }
+      if (rNameNorm && cname && rNameNorm === cname) {
+        linked = true;
+      }
+      if (!linked && rNameNorm) {
+        for (const nk of expandBillingNameLookupKeys(c.name || c.Name)) {
+          if (nk && nk === rNameNorm) {
+            linked = true;
+            break;
+          }
+        }
+      }
+      if (!linked) continue;
+
+      for (const k of subscriptionBillingLookupKeys(c, allCustomers)) {
+        keys.add(k);
+      }
+    }
+  }
+
+  const hasMaps = bottleById instanceof Map && bottleByBarcode instanceof Map;
+  if (hasMaps) {
+    const b = resolveBottleForRental(rental, bottleById, bottleByBarcode);
+    if (b && !isCustomerOwnedForBilling(b)) {
+      const ac = String(b.assigned_customer ?? '').trim();
+      const bcust = String(b.customer_id ?? '').trim();
+      const bname = String(b.customer_name ?? '').trim();
+      const primary = norm(ac || bcust) || normName(bname);
+      if (primary) keys.add(primary);
+      for (const nk of expandBillingNameLookupKeys(bname)) {
+        keys.add(nk);
+      }
+      if (Array.isArray(allCustomers) && allCustomers.length > 0) {
+        for (const c of allCustomers) {
+          const list = String(c.CustomerListID ?? '').trim();
+          const cid = String(c.id ?? '').trim();
+          const hit =
+            (ac && (norm(ac) === norm(list) || norm(ac) === norm(cid)))
+            || (bcust && (norm(bcust) === norm(list) || norm(bcust) === norm(cid)));
+          if (!hit) continue;
+          for (const k of subscriptionBillingLookupKeys(c, allCustomers)) {
+            keys.add(k);
+          }
+        }
+      }
+    }
+  }
+
+  return keys;
+}
+
+/**
+ * One open rental → one physical billable unit key, aligned with CustomerDetail rental dedupe:
+ * prefer bottle_id; resolve barcode to inventory bottle id when possible (avoids double-counting
+ * duplicate rental rows that use id on one row and barcode on another).
+ */
+export function openRentalBillableUnitKey(rental, bottleById, bottleByBarcode) {
+  const byId = bottleById || new Map();
+  const byBc = bottleByBarcode || new Map();
+  if (rentalIsDnsForBilling(rental)) {
     return `dns:${String(rental?.dns_product_code || rental?.product_code || '').trim()}:${String(
       rental?.bottle_barcode || ''
     ).trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}`;
   }
-  if (rental?.bottle_id != null && String(rental.bottle_id).trim() !== '') {
-    return `bottle_id:${String(rental.bottle_id).trim()}`;
-  }
-  if (rental?.bottle_barcode != null && String(rental.bottle_barcode).trim() !== '') {
-    return `barcode:${String(rental.bottle_barcode).trim().toUpperCase()}`;
+  const bid = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
+  if (bid) return `bottle:${bid}`;
+  const bc = rental?.bottle_barcode != null ? String(rental.bottle_barcode).trim().toUpperCase() : '';
+  if (bc) {
+    const hit = byBc.get(bc);
+    if (hit?.id != null && String(hit.id).trim() !== '') return `bottle:${String(hit.id).trim()}`;
+    return `barcode:${bc}`;
   }
   return `row:${String(rental?.id || '').trim()}`;
 }
@@ -410,6 +683,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
   const assignedBarcodes = new Set();
   if (allowAssignedBottleRecovery) {
     for (const b of bottles || []) {
+      if (isCustomerOwnedForBilling(b)) continue;
       if (
         !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
           descendantCustomers: descendants,
@@ -435,26 +709,19 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
   const seenRentalKeys = new Set();
   const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottles);
 
-  for (const r of rentals || []) {
-    if (asOfPeriodEnd) {
-      if (!rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd)) continue;
-      if (!rentalMatchesCustomerBillable(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
-    } else if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) {
-      continue;
-    }
-    const businessKey = openRentalBusinessKey(r);
-    if (seenRentalKeys.has(businessKey)) continue;
-    seenRentalKeys.add(businessKey);
-    const raw = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
-    const key = raw ? normalizePricingKey(raw) : '__unclassified__';
-    if (!key) continue;
-    map.set(key, (map.get(key) || 0) + 1);
-  }
+  const canonicalUnitKeyFromBottle = (b) => {
+    if (b?.id != null && String(b.id).trim() !== '') return `bottle:${String(b.id).trim()}`;
+    const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+    return bc ? `barcode:${bc}` : null;
+  };
 
-  // As-of billing: add assigned bottles not already represented by a rental row (many orgs track custody on bottles only).
   if (asOfPeriodEnd) {
     const pe = clipYmd(asOfPeriodEnd);
+    const unitToProduct = new Map();
+
+    // Prefer bottle rows first (custody + SKU are authoritative); then rental-only units (DNS, etc.).
     for (const b of bottles || []) {
+      if (isCustomerOwnedForBilling(b)) continue;
       if (
         !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
           descendantCustomers: descendants,
@@ -464,14 +731,50 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
         continue;
       const del = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
       if (pe && del && del > pe) continue;
-      const bid = b?.id != null ? String(b.id).trim() : '';
-      const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
-      if (bid && seenRentalKeys.has(`bottle_id:${bid}`)) continue;
-      if (bc && seenRentalKeys.has(`barcode:${bc}`)) continue;
+      const uk = canonicalUnitKeyFromBottle(b);
+      if (!uk) continue;
       const raw = bottleProductCode(b);
       const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
       if (!pkey) continue;
+      unitToProduct.set(uk, pkey);
+    }
+
+    for (const r of rentals || []) {
+      if (isDnsRentalExcludedFromBillableCount(r)) continue;
+      if (!rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd)) continue;
+      if (!rentalMatchesCustomerBillable(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+      if (
+        !rentalIsDnsForBilling(r)
+        && isCustomerOwnedForBilling(resolveBottleForRental(r, bottleById, bottleByBarcode))
+      )
+        continue;
+      const uk = openRentalBillableUnitKey(r, bottleById, bottleByBarcode);
+      if (!uk || unitToProduct.has(uk)) continue;
+      const raw = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
+      const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
+      if (!pkey) continue;
+      unitToProduct.set(uk, pkey);
+    }
+
+    for (const pkey of unitToProduct.values()) {
       map.set(pkey, (map.get(pkey) || 0) + 1);
+    }
+  } else {
+    for (const r of rentals || []) {
+      if (isDnsRentalExcludedFromBillableCount(r)) continue;
+      if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+      if (
+        !rentalIsDnsForBilling(r)
+        && isCustomerOwnedForBilling(resolveBottleForRental(r, bottleById, bottleByBarcode))
+      )
+        continue;
+      const businessKey = openRentalBillableUnitKey(r, bottleById, bottleByBarcode);
+      if (seenRentalKeys.has(businessKey)) continue;
+      seenRentalKeys.add(businessKey);
+      const raw = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
+      const key = raw ? normalizePricingKey(raw) : '__unclassified__';
+      if (!key) continue;
+      map.set(key, (map.get(key) || 0) + 1);
     }
   }
 

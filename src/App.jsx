@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AuthProvider } from './hooks/useAuth';
@@ -20,83 +20,16 @@ import { initializeDisasterRecovery } from './utils/disasterRecovery';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import './styles/responsive.css';
 import './styles/accessibility.css';
-import Subscriptions from './pages/Subscriptions';
-import SubscriptionDetail from './pages/SubscriptionDetail';
-import AssetTypePricing from './pages/AssetTypePricing';
-import CustomerPricingOverrides from './pages/CustomerPricingOverrides';
-import QuickBooksExport from './pages/QuickBooksExport';
-import TaxRegionsPage from './pages/TaxRegions';
-import OwnerDashboard from './pages/OwnerDashboard';
-import CustomerPortal from './pages/CustomerPortal';
-import BarcodeGenerator from './pages/BarcodeGenerator';
-import LandingPage from './pages/LandingPage';
-import ModernLandingPage from './pages/ModernLandingPage';
-import FixOrganizationLink from './pages/FixOrganizationLink';
-import OAuthOrganizationLink from './pages/OAuthOrganizationLink';
-
-import ResetPassword from './pages/ResetPassword';
-import ContactUs from './pages/ContactUs';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import TermsOfService from './pages/TermsOfService';
-import Documentation from './pages/Documentation';
-import CustomPageViewer from './pages/CustomPageViewer';
-import ImportApprovals from './pages/ImportApprovals';
-import ImportApprovalDetail from './pages/ImportApprovalDetail';
-import VerifiedOrders from './pages/VerifiedOrders';
-import Home from './pages/Home';
-import DataUtilities from './pages/OwnerPortal/DataUtilities';
-import OwnerPortalLanding from './pages/OwnerPortalLanding';
-import Analytics from './pages/OwnerPortal/Analytics';
-import SupportTickets from './pages/OwnerPortal/SupportTickets';
-import SystemHealth from './pages/OwnerPortal/SystemHealth';
-import SecurityEvents from './pages/OwnerPortal/SecurityEvents';
-import UserManagementAllOrgs from './pages/OwnerPortal/UserManagementAllOrgs';
-import OwnerCustomers from './pages/OwnerPortal/OwnerCustomers';
-import AuditLog from './pages/OwnerPortal/AuditLog';
-import Impersonation from './pages/OwnerPortal/Impersonation';
-import PlanManagement from './pages/OwnerPortal/PlanManagement';
-import AssetTypeDemo from './components/AssetTypeDemo';
-import AssetConfigurationManager from './pages/OwnerPortal/AssetConfigurationManager';
-import FormatConfigurationManager from './pages/OwnerPortal/FormatConfigurationManager';
-import RoleManagement from './pages/OwnerPortal/RoleManagement';
-import ComprehensiveRoleManager from './pages/ComprehensiveRoleManager';
-import OrganizationJoinCodes from './pages/OrganizationJoinCodes';
-import PageBuilder from './pages/OwnerPortal/PageBuilder';
-import ContactManagement from './pages/OwnerPortal/ContactManagement';
-import OwnerCommandCenter from './pages/OwnerPortal/OwnerCommandCenter';
-import LandingPageEditor from './pages/OwnerPortal/LandingPageEditor';
-import ReviewManagement from './pages/OwnerPortal/ReviewManagement';
-import WebsiteManagement from './pages/OwnerPortal/WebsiteManagement';
-import VisualPageBuilder from './pages/OwnerPortal/VisualPageBuilder';
-import DisasterRecoveryDashboard from './components/admin/DisasterRecoveryDashboard';
-
-import MainLayout from './components/MainLayout';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import { supabase } from './supabase/client';
-import CustomerSelfService from './pages/CustomerSelfService';
-import ThemeShowcase from './pages/ThemeShowcase';
-import FAQ from './pages/FAQ';
-import Reviews from './pages/Reviews';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
 import SessionTimeoutWarning from './components/SessionTimeoutWarning';
 import NotificationLayer from './components/NotificationLayer';
 import RedirectIfInApp from './components/RedirectIfInApp';
-import Demo from './pages/Demo';
-import ParticleTextDemo from './pages/ParticleTextDemo';
-import Features from './pages/Features';
-import About from './pages/About';
-import CaseStudies from './pages/CaseStudies';
-import OwnerCMS from './pages/OwnerCMS';
-import CompetitorAnalysis from './pages/CompetitorAnalysis';
-import Blog from './pages/Blog';
-import Security from './pages/Security';
-import OwnershipManagement from './pages/OwnershipManagement';
-import CaseStudiesPage from './pages/CaseStudiesPage';
-import KnowledgeBase from './pages/KnowledgeBase';
 
-// Lazy load all page components
+// Lazy load all page components (eager App imports were inflating the main chunk to several MB)
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const CreateOrganization = lazy(() => import('./pages/CreateOrganization'));
 const VerifyOrganization = lazy(() => import('./pages/VerifyOrganization'));
@@ -158,6 +91,70 @@ const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
 const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
+
+const Subscriptions = lazy(() => import('./pages/Subscriptions'));
+const SubscriptionDetail = lazy(() => import('./pages/SubscriptionDetail'));
+const CustomerRentalHistory = lazy(() => import('./pages/CustomerRentalHistory'));
+const AssetTypePricing = lazy(() => import('./pages/AssetTypePricing'));
+const CustomerPricingOverrides = lazy(() => import('./pages/CustomerPricingOverrides'));
+const QuickBooksExport = lazy(() => import('./pages/QuickBooksExport'));
+const TaxRegionsPage = lazy(() => import('./pages/TaxRegions'));
+const CustomerPortal = lazy(() => import('./pages/CustomerPortal'));
+const BarcodeGenerator = lazy(() => import('./pages/BarcodeGenerator'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const ModernLandingPage = lazy(() => import('./pages/ModernLandingPage'));
+const FixOrganizationLink = lazy(() => import('./pages/FixOrganizationLink'));
+const OAuthOrganizationLink = lazy(() => import('./pages/OAuthOrganizationLink'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const ContactUs = lazy(() => import('./pages/ContactUs'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const Documentation = lazy(() => import('./pages/Documentation'));
+const CustomPageViewer = lazy(() => import('./pages/CustomPageViewer'));
+const ImportApprovals = lazy(() => import('./pages/ImportApprovals'));
+const ImportApprovalDetail = lazy(() => import('./pages/ImportApprovalDetail'));
+const VerifiedOrders = lazy(() => import('./pages/VerifiedOrders'));
+const Home = lazy(() => import('./pages/Home'));
+const DataUtilities = lazy(() => import('./pages/OwnerPortal/DataUtilities'));
+const OwnerPortalLanding = lazy(() => import('./pages/OwnerPortalLanding'));
+const OwnerPortalAnalytics = lazy(() => import('./pages/OwnerPortal/Analytics'));
+const SupportTickets = lazy(() => import('./pages/OwnerPortal/SupportTickets'));
+const SystemHealth = lazy(() => import('./pages/OwnerPortal/SystemHealth'));
+const SecurityEvents = lazy(() => import('./pages/OwnerPortal/SecurityEvents'));
+const UserManagementAllOrgs = lazy(() => import('./pages/OwnerPortal/UserManagementAllOrgs'));
+const OwnerCustomers = lazy(() => import('./pages/OwnerPortal/OwnerCustomers'));
+const AuditLog = lazy(() => import('./pages/OwnerPortal/AuditLog'));
+const Impersonation = lazy(() => import('./pages/OwnerPortal/Impersonation'));
+const PlanManagement = lazy(() => import('./pages/OwnerPortal/PlanManagement'));
+const AssetTypeDemo = lazy(() => import('./components/AssetTypeDemo'));
+const AssetConfigurationManager = lazy(() => import('./pages/OwnerPortal/AssetConfigurationManager'));
+const FormatConfigurationManager = lazy(() => import('./pages/OwnerPortal/FormatConfigurationManager'));
+const RoleManagement = lazy(() => import('./pages/OwnerPortal/RoleManagement'));
+const ComprehensiveRoleManager = lazy(() => import('./pages/ComprehensiveRoleManager'));
+const OrganizationJoinCodes = lazy(() => import('./pages/OrganizationJoinCodes'));
+const PageBuilder = lazy(() => import('./pages/OwnerPortal/PageBuilder'));
+const ContactManagement = lazy(() => import('./pages/OwnerPortal/ContactManagement'));
+const OwnerCommandCenter = lazy(() => import('./pages/OwnerPortal/OwnerCommandCenter'));
+const LandingPageEditor = lazy(() => import('./pages/OwnerPortal/LandingPageEditor'));
+const ReviewManagement = lazy(() => import('./pages/OwnerPortal/ReviewManagement'));
+const WebsiteManagement = lazy(() => import('./pages/OwnerPortal/WebsiteManagement'));
+const VisualPageBuilder = lazy(() => import('./pages/OwnerPortal/VisualPageBuilder'));
+const DisasterRecoveryDashboard = lazy(() => import('./components/admin/DisasterRecoveryDashboard'));
+const CustomerSelfService = lazy(() => import('./pages/CustomerSelfService'));
+const ThemeShowcase = lazy(() => import('./pages/ThemeShowcase'));
+const FAQ = lazy(() => import('./pages/FAQ'));
+const Reviews = lazy(() => import('./pages/Reviews'));
+const Demo = lazy(() => import('./pages/Demo'));
+const ParticleTextDemo = lazy(() => import('./pages/ParticleTextDemo'));
+const Features = lazy(() => import('./pages/Features'));
+const About = lazy(() => import('./pages/About'));
+const OwnerCMS = lazy(() => import('./pages/OwnerCMS'));
+const CompetitorAnalysis = lazy(() => import('./pages/CompetitorAnalysis'));
+const Blog = lazy(() => import('./pages/Blog'));
+const Security = lazy(() => import('./pages/Security'));
+const OwnershipManagement = lazy(() => import('./pages/OwnershipManagement'));
+const CaseStudiesPage = lazy(() => import('./pages/CaseStudiesPage'));
+const KnowledgeBase = lazy(() => import('./pages/KnowledgeBase'));
 
 // Analytics tracking component
 function AnalyticsTracker() {
@@ -321,6 +318,7 @@ function AppContent() {
                     } />
                     <Route path="/rentals" element={<Subscriptions />} />
                     <Route path="/rentals/:id" element={<SubscriptionDetail />} />
+                    <Route path="/rentals/customer-history" element={<CustomerRentalHistory />} />
                     <Route path="/subscriptions" element={<Navigate to="/rentals" replace />} />
                     <Route path="/subscriptions/:id" element={<SubscriptionsIdLegacyRedirect />} />
                     <Route path="/pricing/asset-types" element={<AssetTypePricing />} />
@@ -431,7 +429,7 @@ function AppContent() {
                         </RoleProtectedRoute>
                       } />
                       <Route path="/owner-portal" element={<OwnerPortalLanding />} />
-                      <Route path="/owner-portal/analytics" element={<Analytics />} />
+                      <Route path="/owner-portal/analytics" element={<OwnerPortalAnalytics />} />
                       <Route path="/owner-portal/tools" element={<DataUtilities />} />
                       <Route path="/owner-portal/support" element={<SupportTickets />} />
                       <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />

@@ -516,7 +516,7 @@ function Customers({ profile }) {
       // First, unassign any bottles from this customer
       const { error: unassignError } = await supabase
         .from('bottles')
-        .update({ assigned_customer: null })
+        .update({ assigned_customer: null, customer_name: null })
         .eq('assigned_customer', id)
         .eq('organization_id', organization.id);
       
@@ -585,7 +585,7 @@ function Customers({ profile }) {
       // First, unassign any bottles from these customers
       const { error: unassignError } = await supabase
         .from('bottles')
-        .update({ assigned_customer: null })
+        .update({ assigned_customer: null, customer_name: null })
         .in('assigned_customer', selected)
         .eq('organization_id', organization.id);
       

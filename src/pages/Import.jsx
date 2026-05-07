@@ -650,9 +650,16 @@ export default function Import() {
     return s;
   }
 
+  // Match the Import Approvals page: case-insensitive, whitespace-stripped product code key.
   function normalizeProductCode(code) {
     if (code == null || code === '') return '';
-    return String(code).trim();
+    return String(code).trim().replace(/\s+/g, '').toUpperCase();
+  }
+
+  function normalizeBarcodeForMatch(b) {
+    if (b == null || b === '') return '';
+    const s = String(b).trim();
+    return s.replace(/^0+/, '') || s;
   }
 
   function getOrderVariants(orderNumber) {
@@ -679,13 +686,42 @@ export default function Import() {
     return String(firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number || '').trim();
   }
 
+  // Mirrors firstNumericValue + getShippedQuantity / getReturnedQuantity from ImportApprovals.jsx
+  // so the same imported value that displays as "Inv" on Import Approvals is what drives auto-approve.
+  function firstNumericValue(...values) {
+    for (const value of values) {
+      if (value == null) continue;
+      const str = String(value).trim();
+      if (str === '') continue;
+      const num = Number(str);
+      if (!Number.isNaN(num)) return num;
+    }
+    return 0;
+  }
+
+  function getRowShippedQty(row) {
+    return firstNumericValue(row.qty_out, row.QtyOut, row.shipped, row.Shipped, row.quantity);
+  }
+
+  function getRowReturnedQty(row) {
+    return firstNumericValue(row.qty_in, row.QtyIn, row.returned, row.Returned, row.return_qty, row.ReturnQty);
+  }
+
+  // Treat empty / available / filled / in-house as "at home"; everything else is "at customer".
+  function isBottleAtCustomerByStatus(status) {
+    const s = (status == null ? '' : String(status)).trim().toLowerCase();
+    if (!s) return false;
+    if (s === 'empty' || s === 'available' || s === 'filled' || s === 'in-house' || s === 'in_house') return false;
+    return true;
+  }
+
   function buildInvoiceQtyByProduct(rows) {
     const qtyByProduct = new Map();
     (rows || []).forEach((row) => {
-      const product = normalizeProductCode(row.product_code || row.ProductCode || row.item || row.Item);
+      const product = normalizeProductCode(row.product_code || row.ProductCode || row.productCode || row.item || row.Item);
       if (!product) return;
-      const shipped = parseInt(row.shipped || row.Shipped || row.quantity || row.qty_out || row.QtyOut || 0, 10) || 0;
-      const returned = parseInt(row.returned || row.Returned || row.return_qty || row.ReturnQty || row.qty_in || row.QtyIn || 0, 10) || 0;
+      const shipped = getRowShippedQty(row);
+      const returned = getRowReturnedQty(row);
       const prev = qtyByProduct.get(product) || { shipped: 0, returned: 0 };
       prev.shipped += shipped;
       prev.returned += returned;
@@ -694,6 +730,9 @@ export default function Import() {
     return qtyByProduct;
   }
 
+  // Mirrors Import Approvals' getScannedQty / getInvoiceQuantitiesForProduct logic so that
+  // any record that displays as "no issues" on the Import Approvals page (Inv == Trk for every
+  // product line) auto-approves at upload time.
   async function checkTrackedMatchesInvoiceForRecord({ recordId, table, organizationId }) {
     const { data: record, error: recordError } = await supabase
       .from(table)
@@ -723,34 +762,53 @@ export default function Import() {
     if (scansError) return false;
 
     const scanRows = scans || [];
-    const barcodes = [...new Set(scanRows.map(s => (s.bottle_barcode || s.barcode_number || '').toString().trim()).filter(Boolean))];
-    let barcodeToProduct = {};
+    // Use both raw and leading-zero-stripped barcodes when looking up product codes from bottles
+    // (matches Import Approvals' barcode normalization in productCodeToAssetInfo).
+    const barcodeLookupSet = new Set();
+    scanRows.forEach((s) => {
+      const raw = (s.bottle_barcode || s.barcode_number || '').toString().trim();
+      if (!raw) return;
+      barcodeLookupSet.add(raw);
+      const norm = normalizeBarcodeForMatch(raw);
+      if (norm && norm !== raw) barcodeLookupSet.add(norm);
+    });
+    const barcodes = [...barcodeLookupSet];
+    const barcodeToProduct = {};
     if (barcodes.length > 0) {
       const { data: bottles } = await supabase
         .from('bottles')
-        .select('barcode_number, product_code')
+        .select('barcode_number, product_code, type')
         .eq('organization_id', organizationId)
         .in('barcode_number', barcodes);
       (bottles || []).forEach((b) => {
         const bc = (b.barcode_number || '').toString().trim();
-        if (bc) barcodeToProduct[bc] = normalizeProductCode(b.product_code);
+        if (!bc) return;
+        const product = normalizeProductCode(b.type || b.product_code);
+        if (!product) return;
+        barcodeToProduct[bc] = product;
+        const norm = normalizeBarcodeForMatch(bc);
+        if (norm && norm !== bc) barcodeToProduct[norm] = product;
       });
     }
 
-    // Most recent scan wins per barcode for the selected order.
+    // Most recent scan wins per (normalized) barcode for the selected order.
     const latestByBarcode = new Map();
     scanRows.forEach((scan) => {
-      const bc = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
-      if (!bc) return;
+      const bcRaw = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
+      if (!bcRaw) return;
+      const bcNorm = normalizeBarcodeForMatch(bcRaw) || bcRaw;
       const time = new Date(scan.created_at || scan.timestamp || 0).getTime();
-      const existing = latestByBarcode.get(bc);
-      if (!existing || time >= existing.time) latestByBarcode.set(bc, { scan, time });
+      const existing = latestByBarcode.get(bcNorm);
+      if (!existing || time >= existing.time) latestByBarcode.set(bcNorm, { scan, time, bcRaw });
     });
 
     const trackedQtyByProduct = new Map();
-    latestByBarcode.forEach(({ scan }) => {
-      const bc = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
-      const product = normalizeProductCode(scan.product_code) || barcodeToProduct[bc];
+    latestByBarcode.forEach(({ scan, bcRaw }) => {
+      const bcNorm = normalizeBarcodeForMatch(bcRaw) || bcRaw;
+      const product =
+        normalizeProductCode(scan.product_code) ||
+        barcodeToProduct[bcRaw] ||
+        barcodeToProduct[bcNorm];
       if (!product) return;
       const type = toScanType(scan);
       const prev = trackedQtyByProduct.get(product) || { shipped: 0, returned: 0 };
@@ -766,7 +824,7 @@ export default function Import() {
       }
     }
 
-    // "No issues" means there are no extra tracked product quantities
+    // "No issues" also means there are no extra tracked product quantities
     // for this order that do not exist in the imported invoice rows.
     for (const [product, trackedQty] of trackedQtyByProduct.entries()) {
       const invoiceQty = invoiceQtyByProduct.get(product);
@@ -776,6 +834,77 @@ export default function Import() {
     }
 
     return true;
+  }
+
+  // Block auto-approval if any bottle that was shipped on this order is currently at a
+  // (different) customer. This mirrors Import Approvals' checkBottlesAtCustomers guard so the
+  // upload flow doesn't silently re-assign bottles that are still out with someone else.
+  async function checkOrderHasBottlesAtCustomer({ recordId, table, organizationId }) {
+    try {
+      const { data: record } = await supabase
+        .from(table)
+        .select('id, data')
+        .eq('id', recordId)
+        .eq('organization_id', organizationId)
+        .single();
+      if (!record) return false;
+
+      const data = typeof record.data === 'string' ? JSON.parse(record.data) : record.data;
+      const orderNumber = getOrderNumberFromImportData(data);
+      if (!orderNumber) return false;
+
+      const orderVariants = getOrderVariants(orderNumber);
+      const { data: shipScans } = await supabase
+        .from('bottle_scans')
+        .select('bottle_barcode, barcode_number, mode, action, scan_type, created_at, timestamp')
+        .in('order_number', orderVariants)
+        .eq('organization_id', organizationId);
+
+      // Collect barcodes whose latest scan on this order was a SHIP/DELIVERY (i.e. went out).
+      const latestByBarcode = new Map();
+      (shipScans || []).forEach((scan) => {
+        const bcRaw = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
+        if (!bcRaw) return;
+        const bcNorm = normalizeBarcodeForMatch(bcRaw) || bcRaw;
+        const time = new Date(scan.created_at || scan.timestamp || 0).getTime();
+        const existing = latestByBarcode.get(bcNorm);
+        if (!existing || time >= existing.time) latestByBarcode.set(bcNorm, { scan, time, bcRaw });
+      });
+
+      const shippedBarcodes = [];
+      latestByBarcode.forEach(({ scan, bcRaw }) => {
+        if (toScanType(scan) === 'out') shippedBarcodes.push(bcRaw);
+      });
+      if (shippedBarcodes.length === 0) return false;
+
+      const lookupBarcodes = new Set();
+      shippedBarcodes.forEach((bc) => {
+        lookupBarcodes.add(bc);
+        const norm = normalizeBarcodeForMatch(bc);
+        if (norm && norm !== bc) lookupBarcodes.add(norm);
+      });
+
+      const { data: bottles } = await supabase
+        .from('bottles')
+        .select('barcode_number, status, customer_name, assigned_customer')
+        .eq('organization_id', organizationId)
+        .in('barcode_number', [...lookupBarcodes]);
+
+      for (const bottle of bottles || []) {
+        const customerName = bottle.customer_name || bottle.assigned_customer;
+        const hasCustomer = customerName != null && String(customerName).trim() !== '';
+        if (hasCustomer && isBottleAtCustomerByStatus(bottle.status)) {
+          logger.warn(
+            `Auto-approve blocked for order ${orderNumber}: bottle ${bottle.barcode_number} is currently at customer "${customerName}" (status=${bottle.status})`
+          );
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      logger.error('checkOrderHasBottlesAtCustomer failed; blocking auto-approve to be safe:', err);
+      return true;
+    }
   }
 
   function getCustomerInfoFromImportData(data) {
@@ -893,12 +1022,25 @@ export default function Import() {
     }
     if (!ids.length) return 0;
     let approvedCount = 0;
+    let blockedAtCustomerCount = 0;
     for (const id of ids) {
       const matches = await checkTrackedMatchesInvoiceForRecord({ recordId: id, table, organizationId });
       if (!matches) continue;
+
+      const blocked = await checkOrderHasBottlesAtCustomer({ recordId: id, table, organizationId });
+      if (blocked) {
+        blockedAtCustomerCount += 1;
+        continue;
+      }
+
       const { data: updatedRows, error } = await supabase
         .from(table)
-        .update({ approved_at: new Date().toISOString(), status: 'approved', auto_approved: true })
+        .update({
+          approved_at: new Date().toISOString(),
+          status: 'approved',
+          auto_approved: true,
+          auto_approval_reason: 'Quantities match between invoice and scanned data, and shipped bottles are at home'
+        })
         .eq('id', id)
         .eq('organization_id', organizationId)
         .eq('status', 'pending')
@@ -907,6 +1049,9 @@ export default function Import() {
         approvedCount += 1;
         await assignBottlesForAutoApprovedRecord(id, table, organizationId);
       }
+    }
+    if (blockedAtCustomerCount > 0) {
+      logger.log(`Auto-approve: ${blockedAtCustomerCount} record(s) skipped because shipped bottles are still at another customer`);
     }
     return approvedCount;
   }
@@ -1051,11 +1196,12 @@ export default function Import() {
 
       // Re-import: update existing records with new rows so RTN Inv / SHP Inv etc. reflect the new file
       let updated = 0;
+      let skippedApproved = 0;
       const updatedIds = [];
       const updateIds = [...new Set(groupsToUpdate.flatMap(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.ids || []))];
       const { data: existingRows } = await supabase
         .from('imported_invoices')
-        .select('id, data')
+        .select('id, data, status')
         .eq('organization_id', userProfile.organization_id)
         .in('id', updateIds);
       const existingById = new Map((existingRows || []).map(r => [r.id, r]));
@@ -1065,6 +1211,10 @@ export default function Import() {
         const targetIds = existing?.ids || (existing?.id ? [existing.id] : []);
         for (const targetId of targetIds) {
           const prev = existingById.get(targetId);
+          if (prev?.status === 'approved') {
+            skippedApproved++;
+            continue;
+          }
           const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
           const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
           const newData = {
@@ -1139,6 +1289,7 @@ export default function Import() {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new invoice(s) added`);
         if (updated > 0) parts.push(`${updated} existing order(s) updated`);
+        if (skippedApproved > 0) parts.push(`${skippedApproved} approved order(s) skipped`);
         if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
@@ -1149,7 +1300,7 @@ export default function Import() {
         status: 'pending_approval',
         invoices_submitted: inserted,
         invoices_updated: updated,
-        invoices_skipped: 0
+        invoices_skipped: skippedApproved
       });
     } catch (error) {
       logger.error('Invoice import error:', error);
@@ -1240,11 +1391,12 @@ export default function Import() {
 
       // Re-import: update existing records with new rows (preserve verified_order_numbers etc.)
       let updated = 0;
+      let skippedApproved = 0;
       const updatedIds = [];
       const updateReceiptIds = [...new Set(groupsToUpdate.flatMap(({ refNumber }) => existingRecords.get(normalizeOrderNum(refNumber))?.ids || []))];
       const { data: existingReceiptRows } = await supabase
         .from('imported_sales_receipts')
-        .select('id, data')
+        .select('id, data, status')
         .eq('organization_id', userProfile.organization_id)
         .in('id', updateReceiptIds);
       const existingReceiptById = new Map((existingReceiptRows || []).map(r => [r.id, r]));
@@ -1254,6 +1406,10 @@ export default function Import() {
         const targetIds = existing?.ids || (existing?.id ? [existing.id] : []);
         for (const targetId of targetIds) {
           const prev = existingReceiptById.get(targetId);
+          if (prev?.status === 'approved') {
+            skippedApproved++;
+            continue;
+          }
           const prevData = prev?.data ? (typeof prev.data === 'string' ? JSON.parse(prev.data) : prev.data) : {};
           const actualRef = refNumber !== 'UNKNOWN' ? refNumber : (prevData.order_number || prevData.reference_number || refNumber);
           const newData = {
@@ -1297,6 +1453,7 @@ export default function Import() {
         const parts = [];
         if (inserted > 0) parts.push(`${inserted} new receipt(s) added`);
         if (updated > 0) parts.push(`${updated} existing order(s) updated`);
+        if (skippedApproved > 0) parts.push(`${skippedApproved} approved order(s) skipped`);
         if (autoApproved > 0) parts.push(`${autoApproved} auto-approved (Inv matches Trk)`);
         if (parts.length === 0) return 'No new imports. All orders already exist (updated or already verified).';
         return `Import submitted. ${parts.join('. ')}`;
@@ -1307,7 +1464,7 @@ export default function Import() {
         status: 'pending_approval',
         receipts_submitted: inserted,
         receipts_updated: updated,
-        receipts_skipped: 0
+        receipts_skipped: skippedApproved
       });
     } catch (error) {
       logger.error('Sales receipt import error:', error);

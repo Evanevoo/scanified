@@ -331,8 +331,10 @@ export function defaultUnitRatesFromAssetPricingTable(assetTypePricingRows) {
   const yearlyCandidates = rows
     .map((p) => parseFloat(p?.yearly_price))
     .filter((n) => Number.isFinite(n) && n > 0);
-  const monthly = monthlyCandidates.length > 0 ? monthlyCandidates[0] : 12;
-  const yearly = yearlyCandidates.length > 0 ? yearlyCandidates[0] : monthly * 12;
+  // For unknown SKU buckets (e.g. UNCLASSIFIED), use the lowest configured positive rate
+  // so fallback pricing does not overcharge compared to known SKU rows.
+  const monthly = monthlyCandidates.length > 0 ? Math.min(...monthlyCandidates) : 12;
+  const yearly = yearlyCandidates.length > 0 ? Math.min(...yearlyCandidates) : monthly * 12;
   return { monthly, yearly };
 }
 
@@ -341,20 +343,29 @@ export function defaultUnitRatesFromAssetPricingTable(assetTypePricingRows) {
  * units = assigned bottles + open rentals (incl. DNS), see groupBillableUnitCountsByProductCode.
  * lease = contract annual total mapped to this subscription's billing_period (monthly → ÷12).
  * Does not use subscription_items.quantity for rental mode.
+ *
+ * @param {object} [billingData.useLeaseContractIfPresent] - When true, use active lease contract totals if
+ *   `customer.billing_mode` is not already `lease`. When false/omitted, only `billing_mode === 'lease'`
+ *   triggers lease pricing (rental customers with a stray lease record keep per-SKU / override pricing).
+ * @param {string} [billingData.asOfPeriodEnd] - `YYYY-MM-DD`: billable rental units as of this date (month-end snapshots).
+ * @param {boolean} [billingData.allowAssignedBottleRecovery] - Forwarded to unit grouping (match invoice PDF / Subscriptions).
+ * @param {Array<{ productCode: string, count: number }>} [billingData.precomputedGroups] - Skip re-scanning all bottles/rentals when already computed (e.g. QB CSV batch export).
  */
 export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, billingData = {}) {
   const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly } = ctx;
   const cust =
     customerRecord || { CustomerListID: sub.customer_id, id: sub.customer_id, billing_mode: 'rental' };
-  const mode = cust.billing_mode === 'lease' ? 'lease' : 'rental';
+  const contract = findActiveLeaseContract(
+    billingData.leaseContracts || [],
+    sub.customer_id,
+    sub.organization_id
+  );
+  const useLeaseContract = billingData.useLeaseContractIfPresent === true;
+  const mode =
+    cust.billing_mode === 'lease' || (useLeaseContract && !!contract) ? 'lease' : 'rental';
   const rowForPricing = { ...sub, customer: cust };
 
   if (mode === 'lease') {
-    const contract = findActiveLeaseContract(
-      billingData.leaseContracts || [],
-      sub.customer_id,
-      sub.organization_id
-    );
     if (!contract) return 0;
     const items = (billingData.leaseContractItems || []).filter((i) => i.contract_id === contract.id);
     const annual = sumLeaseContractAnnualTotal(items);
@@ -371,13 +382,23 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
         ''
     ).trim() || sub.customer_id;
 
-  const groups = groupBillableUnitCountsByProductCode(
-    billingData.bottles || [],
-    billingData.rentals || [],
-    subscriptionMatchKey,
-    cust,
-    { allCustomers: billingData.customers }
-  );
+  const groups = Array.isArray(billingData.precomputedGroups)
+    ? billingData.precomputedGroups
+    : groupBillableUnitCountsByProductCode(
+        billingData.bottles || [],
+        billingData.rentals || [],
+        subscriptionMatchKey,
+        cust,
+        {
+          allCustomers: billingData.customers,
+          ...(billingData.asOfPeriodEnd
+            ? { asOfPeriodEnd: billingData.asOfPeriodEnd }
+            : {}),
+          ...(billingData.allowAssignedBottleRecovery === true
+            ? { allowAssignedBottleRecovery: true }
+            : {}),
+        }
+      );
   let sum = 0;
   for (const { productCode, count } of groups) {
     if (count <= 0) continue;

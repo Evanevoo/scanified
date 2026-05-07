@@ -289,11 +289,26 @@ function TabPanel({ children, value, index, ...other }) {
 
 export default function Settings() {
   const { user, profile, organization, reloadOrganization, reloadUserData } = useAuth();
-  const { isOrgAdmin } = usePermissions();
+  const { actualRole } = usePermissions();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(0);
+
+  /** Matches PermissionsContext admin/owner/orgowner when profile.role is a UUID */
+  const resolvedRoleName = useMemo(() => {
+    if (actualRole) return String(actualRole);
+    const pr = profile?.role;
+    if (typeof pr === 'string' && !pr.includes('-')) return pr;
+    return '';
+  }, [actualRole, profile?.role]);
+
+  const hasElevatedSettingsAccess = useMemo(() => {
+    const r = resolvedRoleName.toLowerCase();
+    return r === 'admin' || r === 'owner' || r === 'orgowner';
+  }, [resolvedRoleName]);
+
+  const isPlatformOwner = useMemo(() => resolvedRoleName.toLowerCase() === 'owner', [resolvedRoleName]);
 
   // Support ticket history
   const [supportTickets, setSupportTickets] = useState([]);
@@ -437,6 +452,10 @@ export default function Settings() {
     subject: 'Invoice {invoice_number} – {customer_name}',
     body: 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.',
     signature: 'Sincerely,\n{organization_name}',
+    /** Interac / E-transfer deposit email (often accounting@), separate from the mailbox you send from */
+    e_transfer_email: '',
+    /** Short list of accepted payment types; use with {payment_methods} in the body */
+    payment_methods: '',
   });
   const [invoiceEmailTemplateMsg, setInvoiceEmailTemplateMsg] = useState('');
 
@@ -451,7 +470,7 @@ export default function Settings() {
     ];
 
     const adminTabs = [];
-    if (profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') {
+    if (hasElevatedSettingsAccess) {
       adminTabs.push(
         { label: 'Invoice Template', icon: <ReceiptIcon />, id: 'invoice-template' },
         { label: 'Team', icon: <PeopleIcon />, id: 'team' },
@@ -461,7 +480,7 @@ export default function Settings() {
     }
 
     return [...baseTabs, ...adminTabs];
-  }, [profile?.role]);
+  }, [hasElevatedSettingsAccess]);
 
   // Initialize data
   useEffect(() => {
@@ -595,6 +614,8 @@ export default function Settings() {
             .from('invoice_settings')
             .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
             .eq('organization_id', organization.id)
+            .order('updated_at', { ascending: false })
+            .limit(1)
             .maybeSingle();
           if (data) {
             setRemitAddress({
@@ -604,36 +625,63 @@ export default function Settings() {
               remit_address_line3: data.remit_address_line3 || '',
               gst_number: data.gst_number || '',
             });
+          } else {
+            setRemitAddress({
+              remit_name: '',
+              remit_address_line1: '',
+              remit_address_line2: '',
+              remit_address_line3: '',
+              gst_number: '',
+            });
           }
         } catch { /* columns may not exist yet */ }
       })();
 
-      // Load invoice emails
+      // Load invoice emails + rental invoice email template (DB: shared by all org users; survives logout)
       const loadInvoiceEmails = async () => {
+        const applyTemplateMerge = (templateSource) => {
+          if (!templateSource || typeof templateSource !== 'object') return;
+          setInvoiceEmailTemplate((prev) => ({
+            ...prev,
+            subject: templateSource.subject ?? prev.subject,
+            body: templateSource.body ?? prev.body,
+            signature: templateSource.signature ?? prev.signature,
+            e_transfer_email: templateSource.e_transfer_email ?? prev.e_transfer_email ?? '',
+            payment_methods: templateSource.payment_methods ?? prev.payment_methods ?? '',
+          }));
+        };
+
+        let orgData = null;
         try {
-          // Try to select the new columns, but handle if they don't exist
-          const { data: orgData, error: orgError } = await supabase
+          let res = await supabase
             .from('organizations')
-            .select('invoice_emails, default_invoice_email, email')
+            .select('invoice_emails, default_invoice_email, email, rental_invoice_email_template')
             .eq('id', organization.id)
             .single();
 
+          if (res.error?.message?.includes('rental_invoice_email_template')) {
+            res = await supabase
+              .from('organizations')
+              .select('invoice_emails, default_invoice_email, email')
+              .eq('id', organization.id)
+              .single();
+          }
+
+          const orgError = res.error;
+          orgData = res.data;
+
           if (orgError) {
-            // If error is about missing columns, show helpful message
             if (orgError.message?.includes('invoice_emails') || orgError.message?.includes('default_invoice_email') || orgError.message?.includes('schema cache')) {
               logger.warn('Invoice email columns may not exist. Migration may need to be run.');
               setInvoiceEmailMsg('⚠️ Invoice email feature requires database migration. Please run VERIFY_AND_FIX_INVOICE_EMAILS.sql in Supabase SQL Editor, then wait 30 seconds and refresh this page.');
-              // Fallback to using organization.email
               if (organization?.email) {
                 setInvoiceEmails([organization.email]);
                 setDefaultInvoiceEmail(organization.email);
               }
-              return;
+            } else {
+              throw orgError;
             }
-            throw orgError;
-          }
-
-          if (orgData) {
+          } else if (orgData) {
             let emails = [];
             if (orgData.invoice_emails && Array.isArray(orgData.invoice_emails)) {
               emails = orgData.invoice_emails;
@@ -643,33 +691,41 @@ export default function Settings() {
             setInvoiceEmails(emails);
             setDefaultInvoiceEmail(orgData.default_invoice_email || orgData.email || '');
           }
+
+          const dbTpl = orgData?.rental_invoice_email_template;
+          const dbHas =
+            dbTpl
+            && typeof dbTpl === 'object'
+            && (
+              String(dbTpl.body || '').trim()
+              || String(dbTpl.subject || '').trim()
+              || String(dbTpl.signature || '').trim()
+              || String(dbTpl.payment_methods || '').trim()
+              || String(dbTpl.e_transfer_email || '').trim()
+            );
+          if (dbHas) {
+            applyTemplateMerge(dbTpl);
+            return;
+          }
         } catch (error) {
           logger.error('Error loading invoice emails:', error);
-          // Fallback to using organization.email
           if (organization?.email) {
             setInvoiceEmails([organization.email]);
             setDefaultInvoiceEmail(organization.email);
           }
         }
-      };
-      
-      loadInvoiceEmails();
 
-      // Load invoice email template/signature (used by Rentals single + bulk send)
-      try {
-        const savedEmailTemplate = localStorage.getItem(`invoiceEmailTemplate_${organization.id}`);
-        if (savedEmailTemplate) {
-          const parsed = JSON.parse(savedEmailTemplate);
-          setInvoiceEmailTemplate((prev) => ({
-            ...prev,
-            subject: parsed?.subject || prev.subject,
-            body: parsed?.body || prev.body,
-            signature: parsed?.signature || prev.signature,
-          }));
+        try {
+          const savedEmailTemplate = localStorage.getItem(`invoiceEmailTemplate_${organization.id}`);
+          if (savedEmailTemplate) {
+            applyTemplateMerge(JSON.parse(savedEmailTemplate));
+          }
+        } catch (error) {
+          logger.error('Error loading invoice email template from localStorage:', error);
         }
-      } catch (error) {
-        logger.error('Error loading invoice email template:', error);
-      }
+      };
+
+      loadInvoiceEmails();
     }
   }, [barcodeConfig, organization]);
 
@@ -1007,7 +1063,7 @@ export default function Settings() {
   };
 
   // Sync URL tab param for all tabs (bookmarkable). Re-run when tabsConfig updates so ?tab=barcodes
-  // works after profile loads (admin tabs are absent until profile.role is known).
+  // works after permissions resolve (admin tabs are absent until actualRole is known for UUID roles).
   useEffect(() => {
     const tabParam = searchParams.get('tab');
     if (!tabParam) return;
@@ -1237,7 +1293,7 @@ export default function Settings() {
             <Box>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
                 <Chip
-                  label={profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner' ? 'Admin workspace' : 'Personal workspace'}
+                  label={hasElevatedSettingsAccess ? 'Admin workspace' : 'Personal workspace'}
                   size="small"
                   color="primary"
                   sx={{ borderRadius: 999, fontWeight: 700 }}
@@ -1798,7 +1854,7 @@ export default function Settings() {
                 </Button>
               </Paper>
 
-              {isOrgAdmin && (
+              {hasElevatedSettingsAccess && (
                 <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2 }}>
                   <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>Organization Logo</Typography>
                   {logoUrl && (
@@ -1845,7 +1901,7 @@ export default function Settings() {
             <Typography variant="h5" fontWeight={600} gutterBottom sx={{ mb: 3 }}>
               Billing
             </Typography>
-            {profile?.role === 'owner' ? (
+            {isPlatformOwner ? (
               <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, textAlign: 'center', borderRadius: 2 }}>
                 <Alert severity="info" sx={{ mb: 2 }}>
                   <Typography variant="h6" gutterBottom>
@@ -1886,7 +1942,7 @@ export default function Settings() {
           </TabPanel>
 
           {/* Invoice Template Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
+          {hasElevatedSettingsAccess && (
             <TabPanel value={activeTab} index={5}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom>
@@ -2054,22 +2110,59 @@ export default function Settings() {
                       setRemitAddressLoading(true);
                       setRemitAddressMsg('');
                       try {
-                        const { error } = await supabase
+                        const payload = {
+                          organization_id: organization.id,
+                          remit_name: remitAddress.remit_name || null,
+                          remit_address_line1: remitAddress.remit_address_line1 || null,
+                          remit_address_line2: remitAddress.remit_address_line2 || null,
+                          remit_address_line3: remitAddress.remit_address_line3 || null,
+                          gst_number: remitAddress.gst_number || null,
+                          updated_at: new Date().toISOString(),
+                        };
+
+                        // Prefer upsert, but fall back to update/insert in environments
+                        // where organization_id is not uniquely constrained yet.
+                        const { error: upsertError } = await supabase
                           .from('invoice_settings')
-                          .update({
-                            remit_name: remitAddress.remit_name || null,
-                            remit_address_line1: remitAddress.remit_address_line1 || null,
-                            remit_address_line2: remitAddress.remit_address_line2 || null,
-                            remit_address_line3: remitAddress.remit_address_line3 || null,
-                            gst_number: remitAddress.gst_number || null,
-                            updated_at: new Date().toISOString(),
-                          })
-                          .eq('organization_id', organization.id);
-                        if (error) throw error;
+                          .upsert(payload, { onConflict: 'organization_id' });
+
+                        if (upsertError) {
+                          const { data: updatedRows, error: updateError } = await supabase
+                            .from('invoice_settings')
+                            .update(payload)
+                            .eq('organization_id', organization.id)
+                            .select('organization_id')
+                            .limit(1);
+                          if (updateError) throw updateError;
+                          if (!updatedRows || updatedRows.length === 0) {
+                            const { error: insertError } = await supabase
+                              .from('invoice_settings')
+                              .insert(payload);
+                            if (insertError) throw insertError;
+                          }
+                        }
+
+                        const { data: latest, error: readBackError } = await supabase
+                          .from('invoice_settings')
+                          .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
+                          .eq('organization_id', organization.id)
+                          .order('updated_at', { ascending: false })
+                          .limit(1)
+                          .maybeSingle();
+                        if (readBackError) throw readBackError;
+                        if (latest) {
+                          setRemitAddress({
+                            remit_name: latest.remit_name || '',
+                            remit_address_line1: latest.remit_address_line1 || '',
+                            remit_address_line2: latest.remit_address_line2 || '',
+                            remit_address_line3: latest.remit_address_line3 || '',
+                            gst_number: latest.gst_number || '',
+                          });
+                        }
                         setRemitAddressMsg('Bill-to address saved successfully.');
                       } catch (err) {
                         logger.error('Error saving remit address:', err);
-                        setRemitAddressMsg('Failed to save address. The remit address columns may need to be added to invoice_settings.');
+                        setRemitAddressMsg('Failed to save address. Please run invoice_settings migration and try again.');
                       } finally {
                         setRemitAddressLoading(false);
                       }
@@ -2085,7 +2178,7 @@ export default function Settings() {
                     Email Message Template
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    This template and signature are applied to all invoice emails from Rentals (single-send and bulk-send).
+                    This template is saved with your organization in the database so every user (e.g. owner and accounting) sees the same text. It is applied to all invoice emails from Rentals (single-send and bulk-send).
                   </Typography>
                   <Stack spacing={2} sx={{ mb: 3 }}>
                     <TextField
@@ -2110,8 +2203,26 @@ export default function Settings() {
                       multiline
                       rows={4}
                     />
+                    <TextField
+                      fullWidth
+                      label="E-transfer / deposit email (optional)"
+                      type="email"
+                      value={invoiceEmailTemplate.e_transfer_email}
+                      onChange={(e) => setInvoiceEmailTemplate((p) => ({ ...p, e_transfer_email: e.target.value }))}
+                      helperText="Shown where the body uses {e_transfer_email} (e.g. accounting@ for Interac, not necessarily the same as the From: address)."
+                    />
+                    <TextField
+                      fullWidth
+                      label="Accepted payment methods (optional)"
+                      value={invoiceEmailTemplate.payment_methods}
+                      onChange={(e) => setInvoiceEmailTemplate((p) => ({ ...p, payment_methods: e.target.value }))}
+                      multiline
+                      rows={2}
+                      helperText='Use {payment_methods} in the email body. You may include {e_transfer_email} inside this field too — it will be filled in automatically.'
+                      placeholder="Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA"
+                    />
                     <Alert severity="info">
-                      Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>, <strong>{'{organization_name}'}</strong>, <strong>{'{organization_website}'}</strong>
+                      Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>, <strong>{'{purchase_order}'}</strong> (customer P.O. when set; empty otherwise), <strong>{'{organization_name}'}</strong>, <strong>{'{organization_website}'}</strong>, remit <strong>{'{remit_address}'}</strong> / line fields, <strong>{'{payment_methods}'}</strong>, <strong>{'{e_transfer_email}'}</strong>, <strong>{'{billing_inquiry_email}'}</strong> (default invoice / org email for billing replies)
                     </Alert>
                     {invoiceEmailTemplateMsg && (
                       <Alert
@@ -2124,15 +2235,39 @@ export default function Settings() {
                     <Box>
                       <Button
                         variant="contained"
-                        onClick={() => {
+                        onClick={async () => {
                           if (!organization?.id) {
                             setInvoiceEmailTemplateMsg('Organization not found. Please refresh and try again.');
                             return;
                           }
+                          setInvoiceEmailTemplateMsg('');
                           try {
+                            const payload = {
+                              subject: invoiceEmailTemplate.subject ?? '',
+                              body: invoiceEmailTemplate.body ?? '',
+                              signature: invoiceEmailTemplate.signature ?? '',
+                              e_transfer_email: invoiceEmailTemplate.e_transfer_email ?? '',
+                              payment_methods: invoiceEmailTemplate.payment_methods ?? '',
+                            };
+                            const { error } = await supabase
+                              .from('organizations')
+                              .update({ rental_invoice_email_template: payload })
+                              .eq('id', organization.id);
+                            if (error) {
+                              if (
+                                String(error.message || '').includes('rental_invoice_email_template')
+                                || String(error.message || '').includes('schema cache')
+                              ) {
+                                setInvoiceEmailTemplateMsg(
+                                  'Database column missing. Run sql/add_rental_invoice_email_template.sql in the Supabase SQL Editor, wait ~30s, refresh, and try again.'
+                                );
+                                return;
+                              }
+                              throw error;
+                            }
                             localStorage.setItem(
                               `invoiceEmailTemplate_${organization.id}`,
-                              JSON.stringify(invoiceEmailTemplate)
+                              JSON.stringify(payload)
                             );
                             setInvoiceEmailTemplateMsg('Email template saved successfully.');
                           } catch (error) {
@@ -2403,7 +2538,7 @@ export default function Settings() {
           )}
 
           {/* Team Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
+          {hasElevatedSettingsAccess && (
             <TabPanel value={activeTab} index={6}>
               <UserManagement />
             </TabPanel>
@@ -2411,7 +2546,7 @@ export default function Settings() {
 
 
           {/* Assets Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
+          {hasElevatedSettingsAccess && (
             <TabPanel value={activeTab} index={7}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom>
@@ -2571,7 +2706,7 @@ export default function Settings() {
           )}
 
           {/* Barcodes Tab (Admin/Owner only) */}
-          {(profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner') && (
+          {hasElevatedSettingsAccess && (
             <TabPanel value={activeTab} index={8}>
               <Box sx={{ width: '100%' }}>
                 <Typography variant="h4" gutterBottom sx={{ color: 'primary', fontWeight: 600 }}>

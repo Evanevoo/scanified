@@ -8,7 +8,19 @@ import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
 import { getNextInvoiceNumbers, resolveInvoiceNumberForRentalPdf } from '../utils/invoiceUtils';
-import { buildOpenAssetRowsForInvoice, fetchReturnsInInvoicePeriod } from '../utils/rentalInvoiceAssets';
+import {
+  applyInvoiceEmailTemplateVars,
+  buildRentalInvoiceEmailVarMap,
+  mergePaymentMethodsIntoInvoiceEmailBody,
+  stripRemitInstructionsFromInvoiceEmailBody,
+} from '../utils/invoiceEmailTemplateVars';
+import {
+  buildOpenAssetRowsForInvoice,
+  fetchReturnsInInvoicePeriod,
+  fetchAllReturnsInInvoicePeriodForOrg,
+  invoiceReturnsCacheKey,
+  rentalRowMatchesInvoiceCustomer,
+} from '../utils/rentalInvoiceAssets';
 import {
   buildAssetPricingMap,
   buildCustomerOverrideMap,
@@ -22,11 +34,28 @@ import {
 import {
   bottleProductCode,
   buildBottleLookupMaps,
-  groupBillableUnitCountsByProductCode,
+  buildOpenRentalMatchOptionsForSubscription,
+  expandBillingNameLookupKeys,
+  isCustomerOwnedForBilling,
+  isDnsRentalExcludedFromBillableCount,
+  isRentalOpen,
+  openRentalMatchesCustomer,
+  rentalIsDnsForBilling,
+  openRentalBillableUnitKey,
+  rentalCustomerIndexKeys,
+  resolveBottleForRental,
   resolvedRentalProductCode,
+  subscriptionBillingLookupKeys,
 } from '../services/billingFromAssets';
+import {
+  computeCustomerRentalHistory,
+  firstDayOfMonth as ymFirstDay,
+} from '../services/customerRentalHistory';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import * as XLSX from 'xlsx';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
@@ -39,6 +68,7 @@ import {
   Search as SearchIcon, Add as AddIcon, Refresh as RefreshIcon,
   Visibility as ViewIcon, Edit as EditIcon, Cancel as CancelIcon, Email as EmailIcon,
   Receipt as InvoiceIcon, TrendingUp, People, Schedule, AccountBalance, Download as DownloadIcon,
+  FolderZip as FolderZipIcon, HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 
 /**
@@ -77,6 +107,205 @@ function canonicalBillingPeriod(raw) {
   return p || 'monthly';
 }
 
+/** Run async tasks with max `concurrency` in flight (ZIP PDF export). */
+async function runPool(items, concurrency, worker) {
+  if (!items.length) return;
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  let next = 0;
+  const nextIndex = () => {
+    if (next >= items.length) return null;
+    const i = next;
+    next += 1;
+    return i;
+  };
+  const launch = async () => {
+    while (true) {
+      const i = nextIndex();
+      if (i === null) return;
+      await worker(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, launch));
+}
+
+/** `YYYY-MM` → `YYYY-MM-DD` (last day of that month). */
+function lastDayOfMonthYm(ym) {
+  const parts = String(ym || '').trim().split('-');
+  if (parts.length < 2) return null;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+  const d = new Date(y, m, 0);
+  const day = d.getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Invoice / due dates for QuickBooks CSV when billing a closed calendar month (matches cycle: period end + due end of following month). */
+function qbCsvDatesForBilledMonth(ym) {
+  const periodEnd = lastDayOfMonthYm(ym);
+  if (!periodEnd) return { invoiceDate: null, dueDate: null };
+  const y = parseInt(ym.split('-')[0], 10);
+  const m = parseInt(ym.split('-')[1], 10);
+  const dueD = new Date(y, m + 1, 0);
+  const dueDate = `${dueD.getFullYear()}-${String(dueD.getMonth() + 1).padStart(2, '0')}-${String(dueD.getDate()).padStart(2, '0')}`;
+  return { invoiceDate: periodEnd, dueDate };
+}
+
+function resolveTaxCode(gstAmount, pstAmount) {
+  const gst = Number(gstAmount) || 0;
+  const pst = Number(pstAmount) || 0;
+  if (gst > 0 && pst > 0) return 'SSK';
+  if (gst > 0) return 'GST';
+  if (pst > 0) return 'PST';
+  return 'E';
+}
+
+/** Invoice # chips: keyed by customer id and by subscription id (fixes mismatched UUID vs CustomerListID on older rows). */
+function emptyCycleInvoiceLookup() {
+  return { byCustomerId: {}, bySubscriptionId: {} };
+}
+
+/**
+ * Overlay the real `customers` row onto resolver stubs so fields like purchase_order /
+ * payment_terms are not dropped when subscriptions match bottle-derived lookups first.
+ */
+function mergeCustomerDirectoryFields(baseCustomer, subscriptionCustomerId, matchCustomerBySubId) {
+  const b = baseCustomer != null && typeof baseCustomer === 'object' ? { ...baseCustomer } : {};
+  const cid = String(subscriptionCustomerId ?? b.CustomerListID ?? b.id ?? '').trim();
+  if (!cid || typeof matchCustomerBySubId !== 'function') return baseCustomer ?? b;
+  const dir = matchCustomerBySubId(cid);
+  return dir ? { ...b, ...dir } : Object.keys(b).length ? b : baseCustomer;
+}
+
+/**
+ * Invoice PDF period bounds — aligned with QuickBooks CSV when a billing month is selected
+ * (`qbBillingMonthYm` = `YYYY-MM`, not `live`). Yearly subscriptions keep Stripe yearly bounds.
+ */
+function computeInvoicePdfPeriodForRow(row, getCurrentCycleRange, qbBillingMonthYm = null) {
+  const normPeriodDay = (v) => {
+    const s = String(v || '').trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+  const subStart = normPeriodDay(row?.current_period_start);
+  const subEnd = normPeriodDay(row?.current_period_end);
+  const fallback = getCurrentCycleRange();
+  const isYearly = String(row?.billing_period || '').toLowerCase() === 'yearly';
+
+  const ymRaw = qbBillingMonthYm != null ? String(qbBillingMonthYm).trim() : '';
+  if (!isYearly && ymRaw && ymRaw.toLowerCase() !== 'live') {
+    const periodEnd = lastDayOfMonthYm(ymRaw);
+    if (periodEnd) {
+      const parts = ymRaw.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      if (Number.isFinite(y) && Number.isFinite(m)) {
+        const periodStart = `${y}-${String(m).padStart(2, '0')}-01`;
+        const { dueDate } = qbCsvDatesForBilledMonth(ymRaw);
+        return {
+          periodStart,
+          periodEnd,
+          dueDate: dueDate || fallback.dueDate,
+        };
+      }
+    }
+  }
+
+  const periodStart =
+    isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
+  const periodEnd =
+    isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
+  return { periodStart, periodEnd, dueDate: fallback.dueDate };
+}
+
+/** Same row identity as QuickBooks CSV ordering for W-number assignment. */
+function qbExportRowMatchesSub(exportRow, sub) {
+  if (exportRow?.id != null && sub?.id != null && String(exportRow.id) === String(sub.id)) return true;
+  const cr = String(exportRow?.customer_id || '').trim();
+  const cs = String(sub?.customer_id || '').trim();
+  if (!cr || !cs || cr !== cs) return false;
+  const pr = String(exportRow?.billing_period || 'monthly').toLowerCase();
+  const ps = String(sub?.billing_period || 'monthly').toLowerCase();
+  return pr === ps;
+}
+
+const QB_CSV_LAST_INV_MAP_KEY = 'qb_csv_last_invoice_map';
+
+function qbCsvInvoiceStorageKey(row) {
+  if (row?.id != null && String(row.id).trim() !== '') return `id:${String(row.id)}`;
+  return `cust:${String(row?.customer_id || '').trim()}|${String(row?.billing_period || 'monthly').toLowerCase()}`;
+}
+
+function qbCsvInvoiceStorageKeys(row) {
+  const keys = [];
+  const id = String(row?.id || '').trim();
+  const customerId = String(row?.customer_id || '').trim();
+  const customerName = String(row?.customer?.name || row?.customer?.Name || row?.customer_name || '').trim().toLowerCase();
+  const billingPeriod = String(row?.billing_period || 'monthly').toLowerCase();
+  if (id) keys.push(`id:${id}`);
+  if (customerId) keys.push(`cust:${customerId}|${billingPeriod}`);
+  if (customerName) keys.push(`name:${customerName}|${billingPeriod}`);
+  if (keys.length === 0) keys.push(qbCsvInvoiceStorageKey(row));
+  return [...new Set(keys)];
+}
+
+/**
+ * Read-only W###### matching the last QuickBooks CSV download for this `sequenceMonth`, then the same
+ * formula as `downloadInvoiceCsv` for the current export row order (does not advance invoice_state).
+ */
+function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
+  if (!targetSub) return null;
+  try {
+    const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const wantSeq = String(csvOptions?.sequenceMonth || '').trim();
+      if (parsed?.seqMonth === wantSeq && parsed?.byRowKey && wantSeq) {
+        for (const key of qbCsvInvoiceStorageKeys(targetSub)) {
+          const fromLastExport = parsed.byRowKey[key];
+          if (fromLastExport) return fromLastExport;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  if (!exportRows?.length) return null;
+  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
+  const now = new Date();
+  const calendarYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const seqMonth = csvOptions?.sequenceMonth || calendarYm;
+  const lastNumber = Number(state?.lastNumber);
+  const hasLastNumber = Number.isFinite(lastNumber);
+  const startNumber = hasLastNumber ? (lastNumber + 1) : 10000;
+  const idx = exportRows.findIndex((r) => qbExportRowMatchesSub(r, targetSub));
+  if (idx < 0) return null;
+  return `W${String(startNumber + idx).padStart(5, '0')}`;
+}
+
+function getInvoiceNumberFromLastCsvMap(targetSub) {
+  if (!targetSub) return null;
+  try {
+    const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const byRowKey = parsed?.byRowKey;
+    if (!byRowKey || typeof byRowKey !== 'object') return null;
+    for (const key of qbCsvInvoiceStorageKeys(targetSub)) {
+      const v = byRowKey[key];
+      if (v) return String(v).trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function previousCalendarMonthYm() {
+  const n = new Date();
+  const d = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 /** Short label for lease agreement end date (matches common Jan 1 renewal wording). */
 function formatLeaseAgreementExpiry(endDateStr) {
   if (!endDateStr) return '';
@@ -98,6 +327,24 @@ function formatLeaseAgreementExpiry(endDateStr) {
 
 const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Id / name variants for matching a subscription row to lease_contracts or legacy lease_agreements. */
+function customerKeysForLeaseMatch(subCustomerId, customer) {
+  const keys = new Set();
+  const add = (v) => {
+    const k = normalize(String(v || '').trim());
+    if (k) keys.add(k);
+  };
+  add(subCustomerId);
+  add(customer?.CustomerListID);
+  add(customer?.id);
+  add(customer?.name);
+  add(customer?.Name);
+  const nk = normalizeName(customer?.name || customer?.Name || '');
+  if (nk) keys.add(nk);
+  return keys;
+}
+
 const isActiveCustomer = (customer) => {
   if (!customer) return false;
   if (customer.deleted_at) return false;
@@ -106,6 +353,45 @@ const isActiveCustomer = (customer) => {
   if (customer.archived === true) return false;
   return true;
 };
+
+/**
+ * Merge all id/name aliases from customers directory rows that touch `keys`, so
+ * subscription.customer_id (e.g. CustomerListID) matches lease_contracts.customer_id (e.g. uuid).
+ */
+function expandLeaseMatchKeys(subCustomerId, customer, allCustomers) {
+  const keys = customerKeysForLeaseMatch(subCustomerId, customer);
+  if (!allCustomers?.length) return keys;
+  const addFromRecord = (c) => {
+    const add = (v) => {
+      const k = normalize(String(v || '').trim());
+      if (k) keys.add(k);
+    };
+    add(c?.CustomerListID);
+    add(c?.id);
+    const nk = normalizeName(c?.name || c?.Name || '');
+    if (nk) keys.add(nk);
+  };
+  for (let pass = 0; pass < 3; pass += 1) {
+    let grew = false;
+    const beforeSize = keys.size;
+    for (const c of allCustomers) {
+      if (!isActiveCustomer(c)) continue;
+      const candKeys = [
+        normalize(String(c.CustomerListID || '').trim()),
+        normalize(String(c.id || '').trim()),
+        normalizeName(c.name || c.Name || ''),
+      ].filter(Boolean);
+      if (!candKeys.some((k) => keys.has(k))) continue;
+      const sz = keys.size;
+      addFromRecord(c);
+      if (keys.size > sz) grew = true;
+    }
+    if (!grew && keys.size === beforeSize) break;
+  }
+  return keys;
+}
+
+const SUBSCRIPTION_TAB_FILTERS = ['all', 'monthly', 'lease'];
 
 export default function Subscriptions() {
   const { organization, user, profile } = useAuth();
@@ -125,7 +411,9 @@ export default function Subscriptions() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
-  const [legacyRows, setLegacyRows] = useState([]);
+  /** Raw DB rows; folded into `legacyRows` in useMemo so bottle realtime updates do not re-hit Supabase. */
+  const [legacyRentalsRaw, setLegacyRentalsRaw] = useState([]);
+  const [legacyLeaseRaw, setLegacyLeaseRaw] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [remitAddress, setRemitAddress] = useState(null);
@@ -135,23 +423,99 @@ export default function Subscriptions() {
   const [senderOptions, setSenderOptions] = useState([]);
   const [emailRow, setEmailRow] = useState(null);
   const [emailInitialForm, setEmailInitialForm] = useState({ to: '', from: '', subject: '', message: '' });
+  /** Bumps on each Email open so EmailInvoiceDialog remounts and always shows the latest saved template. */
+  const [emailDialogMountKey, setEmailDialogMountKey] = useState('email-dlg-closed');
   const [termsFilter, setTermsFilter] = useState('all');
   /** Monthly QuickBooks CSV: all | net30 | credit_card */
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
+  /** QuickBooks CSV: `live` = same totals as table; `YYYY-MM` = counts/pricing as of that month-end */
+  const [qbCsvBillingMonth, setQbCsvBillingMonth] = useState(() => previousCalendarMonthYm());
+  const qbCsvMonthMenuOptions = useMemo(() => {
+    const opts = [{ value: 'live', label: 'Current table (live)' }];
+    const now = new Date();
+    for (let i = 1; i <= 24; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      opts.push({
+        value: ym,
+        label: d.toLocaleString('default', { month: 'long', year: 'numeric' }),
+      });
+    }
+    return opts;
+  }, []);
   const [bulkEmailing, setBulkEmailing] = useState(false);
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
-  const [cycleInvoiceByCustomer, setCycleInvoiceByCustomer] = useState({});
-  const tabFilters = ['all', 'monthly', 'lease', 'cancelled'];
+  const [zipExporting, setZipExporting] = useState(false);
+  /** 'monthly' | 'yearly' while a ZIP export is running (for progress copy). */
+  const [zipExportBillingPeriod, setZipExportBillingPeriod] = useState(null);
+  const [zipExportProgress, setZipExportProgress] = useState({ done: 0, total: 0 });
+  const [cycleInvoiceLookup, setCycleInvoiceLookup] = useState(emptyCycleInvoiceLookup);
+  useEffect(() => {
+    if (tab >= SUBSCRIPTION_TAB_FILTERS.length) setTab(0);
+  }, [tab]);
   const defaultTemplateBody = 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.';
   const defaultTemplateSignature = 'Sincerely,\n{organization_name}';
-  const loadEmailTemplateSettings = useCallback(() => {
+  const loadEmailTemplateSettings = useCallback((organizationIdOverride) => {
     try {
-      const raw = localStorage.getItem(`invoiceEmailTemplate_${organization?.id}`);
+      const id = organizationIdOverride ?? organization?.id;
+      if (!id) return null;
+      const raw = localStorage.getItem(`invoiceEmailTemplate_${id}`);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   }, [organization?.id]);
+
+  /** Loaded from organizations.rental_invoice_email_template (shared; survives logout). */
+  const [rentalInvoiceEmailTemplateDb, setRentalInvoiceEmailTemplateDb] = useState(null);
+  useEffect(() => {
+    if (!organization?.id) {
+      setRentalInvoiceEmailTemplateDb(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('organizations')
+          .select('rental_invoice_email_template')
+          .eq('id', organization.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error?.message?.includes('rental_invoice_email_template')) {
+          setRentalInvoiceEmailTemplateDb(null);
+          return;
+        }
+        const t = data?.rental_invoice_email_template;
+        if (t && typeof t === 'object') {
+          setRentalInvoiceEmailTemplateDb(t);
+          return;
+        }
+        setRentalInvoiceEmailTemplateDb(null);
+      } catch {
+        if (!cancelled) setRentalInvoiceEmailTemplateDb(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organization?.id]);
+
+  const getSavedEmailTemplate = useCallback(() => {
+    const id = organization?.id;
+    if (!id) return null;
+    if (rentalInvoiceEmailTemplateDb && typeof rentalInvoiceEmailTemplateDb === 'object') {
+      const t = rentalInvoiceEmailTemplateDb;
+      const has =
+        String(t.body || '').trim()
+        || String(t.subject || '').trim()
+        || String(t.signature || '').trim()
+        || String(t.payment_methods || '').trim()
+        || String(t.e_transfer_email || '').trim();
+      if (has) return t;
+    }
+    return loadEmailTemplateSettings(id);
+  }, [organization?.id, rentalInvoiceEmailTemplateDb, loadEmailTemplateSettings]);
   const withGlobalSignature = useCallback((message, signature) => {
     const msg = String(message || '').trim();
     const sig = String(signature || '').trim();
@@ -172,6 +536,15 @@ export default function Subscriptions() {
     if (!msg) return header;
     return `${header}\n\n${msg}`;
   }, []);
+  const remitAddressBlock = useMemo(() => {
+    const lines = [
+      String(remitAddress?.remit_name || organization?.name || '').trim(),
+      String(remitAddress?.remit_address_line1 || '').trim(),
+      String(remitAddress?.remit_address_line2 || '').trim(),
+      String(remitAddress?.remit_address_line3 || '').trim(),
+    ].filter(Boolean);
+    return lines.join('\n');
+  }, [remitAddress, organization?.name]);
   const getCurrentCycleRange = useCallback(() => {
     const now = new Date();
     const toLocalYmd = (d) => {
@@ -207,6 +580,7 @@ export default function Subscriptions() {
   // when the actual set of unique (id, name) pairs changes, not on every
   // bottles array reference change from realtime updates.
   const bottleDerivedCandidatesRef = useRef([]);
+  const qbSnapshotGroupsCacheRef = useRef(null);
   const bottleDerivedCandidates = useMemo(() => {
     const seen = new Map();
     for (const b of (ctx.bottles || [])) {
@@ -231,15 +605,26 @@ export default function Subscriptions() {
     const byId = new Map();
     const byName = new Map();
 
-    const addCandidate = (candidate) => {
+    /**
+     * `preserveExisting=true` for bottle-derived stubs (id/name only, no purchase_order /
+     * payment_terms / billing_mode) so they do NOT overwrite the real `customers` row
+     * that already populated the map. Without this guard, fields like `purchase_order`
+     * silently disappear from row.customer once a matching bottle stub is added.
+     */
+    const addCandidate = (candidate, { preserveExisting = false } = {}) => {
       if (!candidate) return;
       if (!isActiveCustomer(candidate)) return;
       const ids = [candidate.id, candidate.CustomerListID, candidate.customer_id]
         .map(normalize)
         .filter(Boolean);
-      ids.forEach((id) => byId.set(id, candidate));
+      ids.forEach((id) => {
+        if (preserveExisting && byId.has(id)) return;
+        byId.set(id, candidate);
+      });
       const n = normalizeName(candidate.name || candidate.Name || candidate.customer_name);
-      if (n) byName.set(n, candidate);
+      if (n && !(preserveExisting && byName.has(n))) {
+        byName.set(n, candidate);
+      }
     };
 
     for (const c of (ctx.customers || [])) {
@@ -250,7 +635,7 @@ export default function Subscriptions() {
     }
 
     for (const c of bottleDerivedCandidates) {
-      addCandidate(c);
+      addCandidate(c, { preserveExisting: true });
     }
 
     return { byId, byName };
@@ -262,18 +647,18 @@ export default function Subscriptions() {
     return customerResolvers.byId.get(idKey) || customerResolvers.byName.get(nameKey) || null;
   }, [customerResolvers]);
 
-  const resolveCustomerRef = useRef(resolveCustomer);
-  useEffect(() => { resolveCustomerRef.current = resolveCustomer; });
-
   const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
-    if (!customerId || !(ctx.customers || []).length) return null;
+    if (!customerId) return null;
     const key = normalize(customerId);
-    for (const c of ctx.customers) {
-      const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
-      if (ids.includes(key)) return c;
+    const pools = [ctx.customers || [], fallbackResolverCustomers || []];
+    for (const pool of pools) {
+      for (const c of pool) {
+        const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
+        if (ids.includes(key)) return c;
+      }
     }
     return null;
-  }, [ctx.customers]);
+  }, [ctx.customers, fallbackResolverCustomers]);
 
   useEffect(() => {
     let active = true;
@@ -283,7 +668,9 @@ export default function Subscriptions() {
         // Broad fallback query so customer names still resolve when org-scoped rows are incomplete.
         const { data } = await supabase
           .from('customers')
-          .select('id, CustomerListID, name, Name, email, deleted_at, is_deleted, is_active, archived')
+          .select(
+            'id, CustomerListID, name, Name, email, purchase_order, payment_terms, billing_address, shipping_address, billing_mode, location, deleted_at, is_deleted, is_active, archived'
+          )
           .eq('organization_id', organization.id)
           .order('name');
         if (!active) return;
@@ -314,8 +701,14 @@ export default function Subscriptions() {
           .from('invoice_settings')
           .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
           .eq('organization_id', organization.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
-        if (data) setRemitAddress(data);
+        if (data) {
+          setRemitAddress(data);
+        } else {
+          setRemitAddress(null);
+        }
       } catch { /* columns may not exist yet */ }
     })();
   }, [organization?.id]);
@@ -354,6 +747,20 @@ export default function Subscriptions() {
       }),
     [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, ctx.customers, localRatesVersion]
   );
+
+  /** Normalized customer keys from legacy lease_agreements import (align Period with Lease chip when contracts use different id shape). */
+  const legacyLeaseAgreementCustomerKeys = useMemo(() => {
+    const s = new Set();
+    for (const a of legacyLeaseRaw || []) {
+      for (const v of [a.customer_id, a.customer_name]) {
+        const t = String(v || '').trim();
+        if (!t) continue;
+        s.add(normalize(t));
+        s.add(normalizeName(t));
+      }
+    }
+    return s;
+  }, [legacyLeaseRaw]);
 
   const resolveDisplayUnitPrice = useCallback((pricingRow, item) =>
     resolveDisplayUnitFromMaps({
@@ -405,37 +812,32 @@ export default function Subscriptions() {
     const { byId: invBottleById, byBarcode: invBottleByBarcode } = buildBottleLookupMaps(ctx.bottles || []);
 
     for (const bottle of (ctx.bottles || [])) {
+      if (isCustomerOwnedForBilling(bottle)) continue;
       const productRaw = bottleProductCode(bottle);
       const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
-      const linkKeys = new Set();
-      const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
-      addId(bottle.assigned_customer);
-      addId(bottle.customer_id);
-      for (const k of linkKeys) {
-        const bucket = ensureBottleBucket(k);
-        if (!bucket) continue;
-        bucket.set(productKey, (bucket.get(productKey) || 0) + 1);
-      }
+      // One bucket per bottle: avoid double-count when both assigned_customer and customer_id/name
+      // resolve to different normalized keys for the same subscription row.
+      const primaryKey =
+        normalize(bottle.assigned_customer || bottle.customer_id) ||
+        normalizeName(bottle.customer_name);
+      if (!primaryKey) continue;
+      const bucket = ensureBottleBucket(primaryKey);
+      if (!bucket) continue;
+      bucket.set(productKey, (bucket.get(productKey) || 0) + 1);
     }
 
     for (const rental of (ctx.rentals || [])) {
+      if (!isRentalOpen(rental)) continue;
+      if (isDnsRentalExcludedFromBillableCount(rental)) continue;
+      if (
+        !rentalIsDnsForBilling(rental)
+        && isCustomerOwnedForBilling(resolveBottleForRental(rental, invBottleById, invBottleByBarcode))
+      )
+        continue;
       const productRaw = resolvedRentalProductCode(rental, invBottleById, invBottleByBarcode);
       const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
-      let businessKey;
-      if (rental?.is_dns === true) {
-        businessKey = `dns:${String(rental?.dns_product_code || rental?.product_code || '').trim()}:${String(rental?.bottle_barcode || '').trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}`;
-      } else if (rental?.bottle_id != null && String(rental.bottle_id).trim() !== '') {
-        businessKey = `bottle_id:${String(rental.bottle_id).trim()}`;
-      } else if (rental?.bottle_barcode != null && String(rental.bottle_barcode).trim() !== '') {
-        businessKey = `barcode:${String(rental.bottle_barcode).trim().toUpperCase()}`;
-      } else {
-        businessKey = `row:${String(rental?.id || '').trim()}`;
-      }
-      const linkKeys = new Set();
-      const addId = (v) => { const n = normalize(v); if (n) linkKeys.add(n); };
-      const addName = (v) => { const n = normalizeName(v); if (n) linkKeys.add(n); };
-      addId(rental.customer_id);
-      addName(rental.customer_name);
+      const businessKey = openRentalBillableUnitKey(rental, invBottleById, invBottleByBarcode);
+      const linkKeys = rentalCustomerIndexKeys(rental, ctx.customers || [], invBottleById, invBottleByBarcode);
       rentalProductByBusinessKey.set(businessKey, productKey);
       for (const k of linkKeys) {
         const bucket = ensureRentalBucket(k);
@@ -449,15 +851,19 @@ export default function Subscriptions() {
     const customerKeysForSubscription = (sub, customer) => {
       const keys = new Set();
       const addId = (v) => { const n = normalize(v); if (n) keys.add(n); };
-      const addName = (v) => { const n = normalizeName(v); if (n) keys.add(n); };
       addId(sub?.customer_id);
-      addName(sub?.customer_name);
+      for (const nk of expandBillingNameLookupKeys(sub?.customer_name)) {
+        if (nk) keys.add(nk);
+      }
       if (customer) {
-        addId(customer.id);
-        addId(customer.CustomerListID);
-        addId(customer.customer_id);
-        addName(customer.name);
-        addName(customer.Name);
+        // Subscription rows often omit customer_name; merged directory row carries the display name.
+        // Without this, DNS / legacy rentals keyed by name segments never intersect subscription keys.
+        for (const nk of expandBillingNameLookupKeys(customer?.name || customer?.Name)) {
+          if (nk) keys.add(nk);
+        }
+        for (const k of subscriptionBillingLookupKeys(customer, ctx.customers || [])) {
+          keys.add(k);
+        }
       }
       return keys;
     };
@@ -470,19 +876,49 @@ export default function Subscriptions() {
         if (!rb) continue;
         for (const bk of rb.businessKeys) matchedBusinessKeys.add(bk);
       }
-      const rentalProducts = new Map();
-      for (const bk of matchedBusinessKeys) {
-        const pc = rentalProductByBusinessKey.get(bk) || '__unclassified__';
-        rentalProducts.set(pc, (rentalProducts.get(pc) || 0) + 1);
-      }
-      const haveAnyRental = rentalProducts.size > 0;
-      if (haveAnyRental) {
-        const out = [];
-        for (const [productCode, count] of rentalProducts.entries()) {
-          out.push({ productCode, count });
+
+      // DNS rows can match the subscription customer via hierarchy / bottle assignment but miss
+      // rentalsByCustomerKey buckets (stale rental fields). Same rules as CustomerDetail open rows.
+      const dnsMatchOpts = buildOpenRentalMatchOptionsForSubscription(
+        ctx.bottles || [],
+        sub.customer_id,
+        customer,
+        ctx.customers || [],
+      );
+      for (const rental of ctx.rentals || []) {
+        if (!isRentalOpen(rental) || isDnsRentalExcludedFromBillableCount(rental)) continue;
+        if (!rentalIsDnsForBilling(rental)) continue;
+        const dnsBk = openRentalBillableUnitKey(rental, invBottleById, invBottleByBarcode);
+        if (!String(dnsBk).startsWith('dns:')) continue;
+        if (matchedBusinessKeys.has(dnsBk)) continue;
+        // Match path 1: the existing CustomerDetail-style match (descendants + bottle recovery).
+        let matched = openRentalMatchesCustomer(rental, sub.customer_id, customer, dnsMatchOpts);
+        // Match path 2: rental's own customer index keys overlap any of the subscription's expanded
+        // keys (covers DNS rows whose customer_id resolves to a parent / ancestor row, where
+        // openRentalMatchesCustomer only walks descendants).
+        if (!matched) {
+          const rentalKeys = rentalCustomerIndexKeys(
+            rental,
+            ctx.customers || [],
+            invBottleById,
+            invBottleByBarcode,
+          );
+          for (const rk of rentalKeys) {
+            if (keys.has(rk)) { matched = true; break; }
+          }
         }
-        return out;
+        if (!matched) {
+          const sid = String(sub?.customer_id ?? '').trim().toLowerCase();
+          const rid = String(rental?.customer_id ?? '').trim().toLowerCase();
+          if (sid && rid && sid === rid) matched = true;
+        }
+        if (!matched) continue;
+        matchedBusinessKeys.add(dnsBk);
+        const productRaw = resolvedRentalProductCode(rental, invBottleById, invBottleByBarcode);
+        const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
+        rentalProductByBusinessKey.set(dnsBk, productKey);
       }
+
       const bottleProducts = new Map();
       for (const k of keys) {
         const bb = bottlesByCustomerKey.get(k);
@@ -491,16 +927,62 @@ export default function Subscriptions() {
           bottleProducts.set(pc, (bottleProducts.get(pc) || 0) + count);
         }
       }
-      const out = [];
-      for (const [productCode, count] of bottleProducts.entries()) {
-        out.push({ productCode, count });
+      const bottleSum = [...bottleProducts.values()].reduce((a, b) => a + b, 0);
+
+      const dnsBusinessKeys = new Set();
+      const nonDnsBusinessKeys = new Set();
+      for (const bk of matchedBusinessKeys) {
+        if (String(bk).startsWith('dns:')) dnsBusinessKeys.add(bk);
+        else nonDnsBusinessKeys.add(bk);
       }
-      return out;
+
+      const rentalMapFromKeySet = (keySet) => {
+        const m = new Map();
+        for (const bk of keySet) {
+          const pc = rentalProductByBusinessKey.get(bk) || '__unclassified__';
+          m.set(pc, (m.get(pc) || 0) + 1);
+        }
+        return m;
+      };
+
+      const nonDnsRentalMap = rentalMapFromKeySet(nonDnsBusinessKeys);
+      const dnsRentalMap = rentalMapFromKeySet(dnsBusinessKeys);
+      const nonDnsSum = [...nonDnsRentalMap.values()].reduce((a, b) => a + b, 0);
+      const fullRentalSum = nonDnsSum + [...dnsRentalMap.values()].reduce((a, b) => a + b, 0);
+
+      const mapToOut = (m) => {
+        const out = [];
+        for (const [productCode, count] of m.entries()) {
+          if (count > 0) out.push({ productCode, count });
+        }
+        return out;
+      };
+
+      const mergeMaps = (a, b) => {
+        const m = new Map(a);
+        for (const [pc, c] of b) {
+          m.set(pc, (m.get(pc) || 0) + c);
+        }
+        return m;
+      };
+
+      if (bottleSum === 0 && fullRentalSum === 0) return [];
+      if (bottleSum === 0) {
+        return mapToOut(mergeMaps(nonDnsRentalMap, dnsRentalMap));
+      }
+      if (fullRentalSum === 0) {
+        return mapToOut(bottleProducts);
+      }
+      if (nonDnsSum >= bottleSum) {
+        return mapToOut(mergeMaps(nonDnsRentalMap, dnsRentalMap));
+      }
+      // Assigned bottles outnumber open non-DNS rentals — keep bottle totals and add DNS-only rows (e.g. 40 + 1 DNS).
+      return mapToOut(mergeMaps(bottleProducts, dnsRentalMap));
     };
 
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
-      const customer =
+      const baseCustomer =
         resolveCustomer(sub.customer_id) ||
         resolveCustomer(sub.customer_name || '') ||
         matchCustomerRecordBySubscriptionId(sub.customer_id) ||
@@ -510,16 +992,39 @@ export default function Subscriptions() {
           name: sub.customer_name || sub.customer_id,
           Name: sub.customer_name,
         };
-      const totalPerCycle = computeSubscriptionBillingCycleTotal(sub, customer, pricingCtx, billingData);
+      const customer = mergeCustomerDirectoryFields(baseCustomer, sub.customer_id, matchCustomerRecordBySubscriptionId);
       const activeLease = findActiveLeaseContract(
         ctx.leaseContracts || [],
         sub.customer_id,
         organization?.id
       );
+      const leaseKeys = expandLeaseMatchKeys(sub.customer_id, customer, ctx.customers);
+      const matchesLeaseContract = (ctx.leaseContracts || []).some((c) => {
+        if (organization?.id && c.organization_id && c.organization_id !== organization?.id) return false;
+        const ck = normalize(String(c.customer_id || '').trim());
+        return ck && leaseKeys.has(ck);
+      });
+      const matchesLegacyLeaseAgreement = [...leaseKeys].some((k) => legacyLeaseAgreementCustomerKeys.has(k));
+      const forceYearlyPeriod =
+        customer?.billing_mode === 'lease' ||
+        matchesLeaseContract ||
+        matchesLegacyLeaseAgreement;
+      const effectiveBillingPeriod = forceYearlyPeriod
+        ? 'yearly'
+        : canonicalBillingPeriod(sub.billing_period);
+      /** Lease contract $ only when customer is lease mode or row matches a contract (not legacy-import alone). */
+      const useLeaseContractIfPresent =
+        customer?.billing_mode === 'lease' || matchesLeaseContract;
+      const totalPerCycle = computeSubscriptionBillingCycleTotal(
+        { ...sub, billing_period: effectiveBillingPeriod },
+        customer,
+        pricingCtx,
+        { ...billingData, useLeaseContractIfPresent }
+      );
       let itemCount = 0;
       /** Per SKU / rental-class counts — drives invoice PDF/email lines with correct resolveDisplayUnitPrice per asset type. */
       let productCounts = null;
-      if (customer?.billing_mode === 'lease') {
+      if (customer?.billing_mode === 'lease' || (activeLease && useLeaseContractIfPresent)) {
         const leaseLines = activeLease
           ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === activeLease.id)
           : [];
@@ -544,17 +1049,15 @@ export default function Subscriptions() {
         }
         if (Object.keys(productCounts).length === 0) productCounts = null;
       }
-      const forceYearlyPeriod =
-        customer?.billing_mode === 'lease' ||
-        (!!activeLease && customer?.billing_mode !== 'rental');
-      const billingPeriod = forceYearlyPeriod ? 'yearly' : canonicalBillingPeriod(sub.billing_period);
       return {
         ...sub,
         items,
         customer,
         totalPerCycle,
         itemCount,
-        billing_period: billingPeriod,
+        billing_period: effectiveBillingPeriod,
+        /** Skip SKU re-total in allRows pass when total came from lease contract lines. */
+        useLeaseContractForTotal: !!activeLease && useLeaseContractIfPresent,
         ...(productCounts && Object.keys(productCounts).length > 0 ? { productCounts } : {}),
       };
     });
@@ -572,6 +1075,7 @@ export default function Subscriptions() {
     assetPricingMap,
     defaultUnitRateByPeriod,
     organization?.id,
+    legacyLeaseAgreementCustomerKeys,
   ]);
 
   const customersWithBottlesNoSubscription = useMemo(() => {
@@ -611,15 +1115,7 @@ export default function Subscriptions() {
         productCounts: {},
       };
       existing.bottleCount += 1;
-      const rawProductCode = String(
-        bottle.product_code
-        || bottle.product_type
-        || bottle.asset_type
-        || bottle.cylinder_type
-        || bottle.gas_type
-        || bottle.sku
-        || ''
-      ).trim();
+      const rawProductCode = bottleProductCode(bottle);
       if (rawProductCode) {
         existing.productCounts[rawProductCode] = (existing.productCounts[rawProductCode] || 0) + 1;
       }
@@ -659,19 +1155,28 @@ export default function Subscriptions() {
           group.assignedId ||
           '';
 
+        const mergedVirtualCustomer = mergeCustomerDirectoryFields(
+          customer || { name: displayName, Name: displayName },
+          customerIdValue,
+          matchCustomerRecordBySubscriptionId,
+        );
+
         return {
           id: `virtual-${groupKey}`,
-          customer: customer || { name: displayName, Name: displayName },
+          customer: mergedVirtualCustomer,
           customer_id: customerIdValue,
           billing_period: (() => {
-            const activeLeaseForPeriod = findActiveLeaseContract(
-              ctx.leaseContracts || [],
-              customerIdValue,
-              organization?.id
-            );
+            const leaseKeys = expandLeaseMatchKeys(customerIdValue, customer, ctx.customers);
+            const matchesLeaseContract = (ctx.leaseContracts || []).some((c) => {
+              if (organization?.id && c.organization_id && c.organization_id !== organization?.id) return false;
+              const ck = normalize(String(c.customer_id || '').trim());
+              return ck && leaseKeys.has(ck);
+            });
+            const matchesLegacyLeaseAgreement = [...leaseKeys].some((k) => legacyLeaseAgreementCustomerKeys.has(k));
             const forceYearly =
               customer?.billing_mode === 'lease' ||
-              (!!activeLeaseForPeriod && customer?.billing_mode !== 'rental');
+              matchesLeaseContract ||
+              matchesLegacyLeaseAgreement;
             return forceYearly ? 'yearly' : 'monthly';
           })(),
           itemCount: group.bottleCount,
@@ -684,72 +1189,112 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id]);
+  }, [ctx.bottles, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, legacyLeaseAgreementCustomerKeys, matchCustomerRecordBySubscriptionId]);
 
   useEffect(() => {
+    if (!organization?.id) {
+      setLegacyRentalsRaw([]);
+      setLegacyLeaseRaw([]);
+      return;
+    }
     let active = true;
-    const loadLegacyActiveRentals = async () => {
-      if (!organization?.id) return;
-      let rows = [];
+    (async () => {
       try {
         const { data, error } = await supabase
           .from('rentals')
-          .select('id, customer_id, customer_name, bottle_id, bottle_barcode, product_code, product_type, asset_type, rental_type, rental_amount, rental_end_date, is_dns')
+          .select('id, customer_id, customer_name, bottle_id, bottle_barcode, product_code, product_type, asset_type, rental_type, rental_amount, rental_end_date, is_dns, dns_description, dns_product_code')
           .eq('organization_id', organization.id)
           .is('rental_end_date', null);
-        if (error) throw error;
         if (!active) return;
+        if (error) throw error;
+        setLegacyRentalsRaw(data || []);
+      } catch {
+        if (active) setLegacyRentalsRaw([]);
+      }
+      if (!active) return;
+      try {
+        const { data: leaseData, error: leaseErr } = await supabase
+          .from('lease_agreements')
+          .select(
+            'id, customer_id, customer_name, agreement_number, bottle_id, max_asset_count, annual_amount, billing_frequency, next_billing_date, start_date, end_date, status'
+          )
+          .eq('organization_id', organization.id)
+          .not('status', 'in', '("cancelled","expired","renewed")');
+        if (!active) return;
+        if (leaseErr) throw leaseErr;
+        setLegacyLeaseRaw(leaseData || []);
+      } catch (err) {
+        console.warn('Error loading lease agreements for rentals page:', err);
+        if (active) setLegacyLeaseRaw([]);
+      }
+    })();
+    return () => { active = false; };
+  }, [organization?.id]);
 
-        // Same spirit as pre-consolidation Rentals.jsx + billingWorkspace: keep rows even when
-        // customer directory lookup misses (QuickBooks ID drift, timing). Fall back to rental row IDs/names.
-        const legacyBottleMaps = buildBottleLookupMaps(ctx.bottles || []);
-        const grouped = (data || [])
-          .filter((r) => !r.is_dns)
-          .reduce((acc, row) => {
-            const key = String(row.customer_id || row.customer_name || 'unassigned').trim();
-            if (!key) return acc;
-            const resolvedCustomer = resolveCustomerRef.current(row.customer_id || row.customer_name, row.customer_name);
-            const fallbackId = String(row.customer_id || row.customer_name || key).trim();
-            const fallbackName =
-              row.customer_name ||
-              row.customer_id ||
-              'Unknown customer';
-            const displayCustomer =
-              resolvedCustomer ||
-              {
-                id: fallbackId,
-                CustomerListID: fallbackId,
-                name: fallbackName,
-                Name: fallbackName,
-              };
-            const cur = acc.get(key) || {
-              key,
-              customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || fallbackId,
-              customer_name: resolvedCustomer?.name || resolvedCustomer?.Name || fallbackName,
-              customer: displayCustomer,
-              itemCount: 0,
-              billing_period: row.rental_type === 'yearly' ? 'yearly' : 'monthly',
-              totalPerCycle: 0,
-              bottleIdentifiers: [],
-              bottleIds: [],
-              productCounts: {},
+  const legacyRows = useMemo(() => {
+    let rows = [];
+    try {
+      const legacyBottleMaps = buildBottleLookupMaps(ctx.bottles || []);
+      const grouped = (legacyRentalsRaw || [])
+        .filter((r) => {
+          // DNS billables ("Delivered Not Scanned") should count.
+          // Exclude DNS records that represent return exceptions.
+          const desc = String(r?.dns_description || '').toLowerCase();
+          if (desc.includes('return not on balance')) return false;
+          if (desc.includes('return not scanned')) return false;
+          return true;
+        })
+        .reduce((acc, row) => {
+          const key = String(row.customer_id || row.customer_name || 'unassigned').trim();
+          if (!key) return acc;
+          const resolvedCustomer = resolveCustomer(row.customer_id || row.customer_name, row.customer_name);
+          const fallbackId = String(row.customer_id || row.customer_name || key).trim();
+          const fallbackName =
+            row.customer_name ||
+            row.customer_id ||
+            'Unknown customer';
+          const displayCustomer =
+            resolvedCustomer ||
+            {
+              id: fallbackId,
+              CustomerListID: fallbackId,
+              name: fallbackName,
+              Name: fallbackName,
             };
-            cur.itemCount += 1;
-            cur.totalPerCycle += parseFloat(row.rental_amount) || 0;
-            const bottleLabel = String(row.bottle_barcode || row.bottle_id || '').trim();
-            if (bottleLabel) cur.bottleIdentifiers.push(bottleLabel);
-            const bottleId = String(row.bottle_id || '').trim();
-            if (bottleId) cur.bottleIds.push(bottleId);
-            const codeRaw = resolvedRentalProductCode(row, legacyBottleMaps.byId, legacyBottleMaps.byBarcode);
-            const productKey = codeRaw ? normalize(codeRaw) : '__unclassified__';
-            cur.productCounts[productKey] = (cur.productCounts[productKey] || 0) + 1;
-            acc.set(key, cur);
-            return acc;
-          }, new Map());
+          const cur = acc.get(key) || {
+            key,
+            customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || fallbackId,
+            customer_name: resolvedCustomer?.name || resolvedCustomer?.Name || fallbackName,
+            customer: displayCustomer,
+            itemCount: 0,
+            billing_period: row.rental_type === 'yearly' ? 'yearly' : 'monthly',
+            totalPerCycle: 0,
+            bottleIdentifiers: [],
+            bottleIds: [],
+            productCounts: {},
+          };
+          cur.itemCount += 1;
+          cur.totalPerCycle += parseFloat(row.rental_amount) || 0;
+          const bottleLabel = String(row.bottle_barcode || row.bottle_id || '').trim();
+          if (bottleLabel) cur.bottleIdentifiers.push(bottleLabel);
+          const bottleId = String(row.bottle_id || '').trim();
+          if (bottleId) cur.bottleIds.push(bottleId);
+          const codeRaw = resolvedRentalProductCode(row, legacyBottleMaps.byId, legacyBottleMaps.byBarcode);
+          const productKey = codeRaw ? normalize(codeRaw) : '__unclassified__';
+          cur.productCounts[productKey] = (cur.productCounts[productKey] || 0) + 1;
+          acc.set(key, cur);
+          return acc;
+        }, new Map());
 
-        rows = Array.from(grouped.values()).map((g) => ({
+      rows = Array.from(grouped.values()).map((g) => {
+        const mergedCustomer = mergeCustomerDirectoryFields(
+          g.customer || { name: g.customer_name, Name: g.customer_name },
+          g.customer_id,
+          matchCustomerRecordBySubscriptionId,
+        );
+        return {
           id: `legacy-${g.key}`,
-          customer: g.customer || { name: g.customer_name, Name: g.customer_name },
+          customer: mergedCustomer,
           customer_id: g.customer_id || g.customer_name,
           billing_period: g.billing_period,
           itemCount: g.itemCount,
@@ -761,70 +1306,58 @@ export default function Subscriptions() {
           status: 'active',
           isVirtual: true,
           legacySource: 'rentals_table',
-        }));
-      } catch {
-        rows = [];
-      }
+        };
+      });
+    } catch {
+      rows = [];
+    }
 
-      // Imported / TrackAbout lease_agreements: yearly-only billing (no monthly cylinder rental).
-      // Shown on Rentals under Yearly / All; omitted from extraLegacy dedupe so they still appear
-      // when the same customer also has a monthly subscription row.
-      let leaseRows = [];
-      try {
-        if (!active) return;
-        const { data: leaseData, error: leaseErr } = await supabase
-          .from('lease_agreements')
-          .select(
-            'id, customer_id, customer_name, agreement_number, bottle_id, max_asset_count, annual_amount, billing_frequency, next_billing_date, start_date, end_date, status'
-          )
-          .eq('organization_id', organization.id)
-          .not('status', 'in', '("cancelled","expired","renewed")');
-        if (leaseErr) throw leaseErr;
-        if (!active) return;
+    let leaseRows = [];
+    try {
+      leaseRows = (legacyLeaseRaw || []).map((a) => {
+        const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
+        const displayName =
+          resolvedCustomer?.name ||
+          resolvedCustomer?.Name ||
+          a.customer_name ||
+          a.customer_id ||
+          'Assigned customer';
+        const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
+        const agreementCode = String(a.agreement_number || '').trim();
+        const productCounts = {};
 
-        leaseRows = (leaseData || []).map((a) => {
-          const resolvedCustomer = resolveCustomerRef.current(a.customer_id || a.customer_name, a.customer_name);
-          const displayName =
-            resolvedCustomer?.name ||
-            resolvedCustomer?.Name ||
-            a.customer_name ||
-            a.customer_id ||
-            'Assigned customer';
-          const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
-          const agreementCode = String(a.agreement_number || '').trim();
-          const productCounts = {};
+        const baseAnnual = parseFloat(a.annual_amount) || 0;
+        const baseCust = resolvedCustomer || { name: displayName, Name: displayName };
+        const cidForPo = resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name;
+        const customerMerged = mergeCustomerDirectoryFields(baseCust, cidForPo, matchCustomerRecordBySubscriptionId);
 
-          const baseAnnual = parseFloat(a.annual_amount) || 0;
-          return {
-            id: `lease-agreement-${a.id}`,
-            customer: resolvedCustomer || { name: displayName, Name: displayName },
-            customer_id: resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name,
-            billing_period: 'yearly',
-            itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
-            totalPerCycle: baseAnnual,
-            lease_agreement_annual: baseAnnual,
-            lease_bottle_id: a.bottle_id || null,
-            lease_end_date: a.end_date || null,
-            bottleIdentifiers: [],
-            bottleIds: [],
-            productCounts,
-            next_billing_date: a.next_billing_date || a.end_date || null,
-            status: String(a.status || 'active').toLowerCase(),
-            isVirtual: true,
-            legacySource: 'lease_agreements',
-            notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
-          };
-        });
-      } catch (err) {
-        console.warn('Error loading lease agreements for rentals page:', err);
-        leaseRows = [];
-      }
+        return {
+          id: `lease-agreement-${a.id}`,
+          customer: customerMerged,
+          customer_id: customerMerged?.CustomerListID || customerMerged?.id || a.customer_id || a.customer_name,
+          billing_period: 'yearly',
+          itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
+          totalPerCycle: baseAnnual,
+          lease_agreement_annual: baseAnnual,
+          lease_bottle_id: a.bottle_id || null,
+          lease_end_date: a.end_date || null,
+          bottleIdentifiers: [],
+          bottleIds: [],
+          productCounts,
+          next_billing_date: a.next_billing_date || a.end_date || null,
+          status: String(a.status || 'active').toLowerCase(),
+          isVirtual: true,
+          legacySource: 'lease_agreements',
+          notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
+        };
+      });
+    } catch (err) {
+      console.warn('Error mapping lease agreements for rentals page:', err);
+      leaseRows = [];
+    }
 
-      if (active) setLegacyRows([...rows, ...leaseRows]);
-    };
-    loadLegacyActiveRentals();
-    return () => { active = false; };
-  }, [organization?.id, ctx.bottles]);
+    return [...rows, ...leaseRows];
+  }, [legacyRentalsRaw, legacyLeaseRaw, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -853,9 +1386,13 @@ export default function Subscriptions() {
       const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
       return k && !existingKeys.has(k);
     });
-    // lease_agreements imports are yearly lease fees (not monthly cylinder rental); always merge so
-    // lease-only customers appear, and Yearly tab stays populated when they share a customer with other rows.
-    const leaseAgreementRows = (legacyRows || []).filter((r) => r.legacySource === 'lease_agreements');
+    // Legacy lease_agreements: only add when this customer is not already on a subscription/virtual row.
+    // Otherwise the same customer appears twice and Lease tab counts (and totals) double.
+    const leaseAgreementRows = (legacyRows || []).filter((r) => {
+      if (r.legacySource !== 'lease_agreements') return false;
+      const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
+      return k && !existingKeys.has(k);
+    });
     const combined = [...merged, ...extraLegacy, ...leaseAgreementRows].filter((row) => {
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
@@ -943,6 +1480,15 @@ export default function Subscriptions() {
       }
 
       const customerKey = normalize(row.customer_id);
+      const hasActiveLeaseContract = !!findActiveLeaseContract(
+        ctx.leaseContracts || [],
+        row.customer_id,
+        organization?.id
+      );
+      /** Keep lease-contract annual totals; do not replace with per-SKU rate math. */
+      const preserveLeaseContractTotal =
+        row.useLeaseContractForTotal === true ||
+        (hasActiveLeaseContract && row.customer?.billing_mode === 'lease');
       const allProductsOverride = findAllProductsOverrideMultiKey(customerOverrideMap, row);
       const period = String(row.billing_period || 'monthly').toLowerCase();
       let total = parseFloat(row.totalPerCycle) || 0;
@@ -987,9 +1533,12 @@ export default function Subscriptions() {
         if (derived && Object.keys(derived).length > 0) effectiveProductCounts = derived;
       }
 
-      // For bottle-derived rows, compute total from product mix + customer/base pricing.
+      // Sum Σ (units × resolved rate per SKU). Must run for **all** rows with a product mix —
+      // not only virtual rows. Otherwise persisted subscriptions never set usedSpecificProductOverride
+      // and the blanket __all__ branch below replaces the total with one rate × total qty,
+      // wiping per-SKU customer overrides.
       let usedSpecificProductOverride = false;
-      if (row.isVirtual && effectiveProductCounts && typeof effectiveProductCounts === 'object') {
+      if (!preserveLeaseContractTotal && effectiveProductCounts && typeof effectiveProductCounts === 'object') {
         const rowForPricing = { ...row, billing_period: period };
         const recalculated = Object.entries(effectiveProductCounts).reduce((sum, [productCode, qtyRaw]) => {
           const qty = parseFloat(qtyRaw) || 0;
@@ -1013,7 +1562,13 @@ export default function Subscriptions() {
         if (recalculated > 0) total = recalculated;
       }
 
-      if (allProductsOverride && !usedSpecificProductOverride) {
+      const activeMixKeys =
+        effectiveProductCounts && typeof effectiveProductCounts === 'object'
+          ? Object.keys(effectiveProductCounts).filter((k) => (parseFloat(effectiveProductCounts[k]) || 0) > 0)
+          : [];
+      const multiSkuProductMix = activeMixKeys.length > 1;
+
+      if (!preserveLeaseContractTotal && allProductsOverride && !usedSpecificProductOverride && !multiSkuProductMix) {
         const unitOverride =
           allProductsOverride.fixed_rate_override != null
             ? parseFloat(allProductsOverride.fixed_rate_override)
@@ -1050,11 +1605,11 @@ export default function Subscriptions() {
 
       // Absolute fallback: never leave active rows with items at $0 when no
       // resolvable pricing source exists.
-      if ((parseFloat(total) || 0) <= 0) {
+      if (!preserveLeaseContractTotal && (parseFloat(total) || 0) <= 0) {
         const qty = computedItemCount;
         if (qty > 0) {
-          const period = String(row.billing_period || 'monthly').toLowerCase();
-          const unit = period === 'yearly' ? defaultUnitRateByPeriod.yearly : defaultUnitRateByPeriod.monthly;
+          const periodFallback = String(row.billing_period || 'monthly').toLowerCase();
+          const unit = periodFallback === 'yearly' ? defaultUnitRateByPeriod.yearly : defaultUnitRateByPeriod.monthly;
           total = (Number.isFinite(unit) ? unit : 0) * qty;
         }
       }
@@ -1069,11 +1624,28 @@ export default function Subscriptions() {
     ctx.customers,
     ctx.subscriptions,
     ctx.bottles,
+    ctx.leaseContracts,
     assetPricingMap,
     defaultUnitRateByPeriod,
     organization?.id,
     customerResolvers,
   ]);
+
+  /** Stable key so invoice-status fetch does not re-run when `allRows` gets a new array reference but same customers/subs. */
+  const cycleInvoiceLookupKey = useMemo(() => {
+    const customerIds = [...new Set(
+      (allRows || [])
+        .map((r) => String(r.customer_id || '').trim())
+        .filter(Boolean)
+    )].sort().join('\u0001');
+    const subscriptionIds = [...new Set(
+      (allRows || [])
+        .filter((r) => !r.isVirtual && r.id && !String(r.id).startsWith('legacy-') && !String(r.id).startsWith('virtual-'))
+        .map((r) => r.id)
+        .filter(Boolean)
+    )].sort().join('\u0001');
+    return `${customerIds}\u0002${subscriptionIds}`;
+  }, [allRows]);
 
   const derivedMrr = useMemo(() => {
     return allRows
@@ -1156,15 +1728,15 @@ export default function Subscriptions() {
       const st = String(s.status || '').toLowerCase();
       return st !== 'cancelled' && st !== 'expired';
     };
-    return {
-      monthly: allRows.filter(
-        (s) => !isLeaseRow(s) && isNotTerminalRow(s)
-      ).length,
-      lease: allRows.filter(
-        (s) => s.legacySource === 'lease_agreements' && isNotTerminalRow(s)
-      ).length,
-      cancelled: allRows.filter((s) => s.status === 'cancelled').length,
-    };
+    const monthly = allRows.filter(
+      (s) => !isLeaseRow(s) && isNotTerminalRow(s)
+    ).length;
+    /** All lease-tagged rows (contracts + billing_mode + legacy import), not only lease_agreements table. */
+    const lease = allRows.filter(
+      (s) => isLeaseRow(s) && isNotTerminalRow(s)
+    ).length;
+    const active = monthly + lease;
+    return { monthly, lease, active };
   }, [allRows, isLeaseRow]);
 
   const termsCounts = useMemo(() => {
@@ -1180,7 +1752,7 @@ export default function Subscriptions() {
 
   const filtered = useMemo(() => {
     let list = allRows;
-    const filter = tabFilters[tab];
+    const filter = SUBSCRIPTION_TAB_FILTERS[tab];
     const isNotTerminal = (s) => {
       const st = String(s.status || '').toLowerCase();
       return st !== 'cancelled' && st !== 'expired';
@@ -1191,9 +1763,9 @@ export default function Subscriptions() {
       );
     } else if (filter === 'lease') {
       list = list.filter(
-        (s) => s.legacySource === 'lease_agreements' && isNotTerminal(s)
+        (s) => isLeaseRow(s) && isNotTerminal(s)
       );
-    } else if (filter === 'cancelled') list = list.filter((s) => s.status === 'cancelled');
+    }
 
     if (termsFilter !== 'all') {
       list = list.filter((s) => {
@@ -1239,7 +1811,7 @@ export default function Subscriptions() {
     let active = true;
     const loadCycleInvoiceStatus = async () => {
       if (!organization?.id) {
-        if (active) setCycleInvoiceByCustomer({});
+        if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
         return;
       }
       const customerIds = [...new Set(
@@ -1247,28 +1819,17 @@ export default function Subscriptions() {
           .map((r) => String(r.customer_id || '').trim())
           .filter(Boolean)
       )];
-      if (customerIds.length === 0) {
-        if (active) setCycleInvoiceByCustomer({});
+      const subscriptionIds = [
+        ...new Set(
+          (allRows || [])
+            .filter((r) => !r.isVirtual && r.id && !String(r.id).startsWith('legacy-') && !String(r.id).startsWith('virtual-'))
+            .map((r) => r.id)
+            .filter(Boolean)
+        ),
+      ];
+      if (customerIds.length === 0 && subscriptionIds.length === 0) {
+        if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
         return;
-      }
-      const { periodStart, periodEnd } = getCurrentCycleRange();
-      const { data } = await supabase
-        .from('invoices')
-        .select('customer_id, invoice_number, status, updated_at')
-        .eq('organization_id', organization.id)
-        .eq('period_start', periodStart)
-        .eq('period_end', periodEnd)
-        .in('customer_id', customerIds);
-      if (!active) return;
-      const map = {};
-      for (const row of (data || [])) {
-        const key = String(row.customer_id || '').trim();
-        if (!key) continue;
-        map[key] = {
-          invoice_number: row.invoice_number,
-          status: String(row.status || '').toLowerCase(),
-          updated_at: row.updated_at || null,
-        };
       }
 
       const mergeCycleEntry = (prev, incoming) => {
@@ -1282,42 +1843,85 @@ export default function Subscriptions() {
         return it >= pt ? incoming : prev;
       };
 
-      const subscriptionIds = [
-        ...new Set(
-          (allRows || [])
-            .filter((r) => !r.isVirtual && r.id && !String(r.id).startsWith('legacy-') && !String(r.id).startsWith('virtual-'))
-            .map((r) => r.id)
-            .filter(Boolean)
-        ),
-      ];
-      if (subscriptionIds.length > 0) {
-        const { data: subInvRows } = await supabase
-          .from('subscription_invoices')
-          .select('customer_id, invoice_number, status, updated_at, period_start, period_end')
+      const mapByCustomer = {};
+      const mapBySubscription = {};
+
+      if (customerIds.length > 0) {
+        const { periodStart: virtualCycleStart, periodEnd: virtualCycleEnd } = getCurrentCycleRange();
+        const { data } = await supabase
+          .from('invoices')
+          .select('customer_id, invoice_number, status, updated_at')
           .eq('organization_id', organization.id)
-          .in('subscription_id', subscriptionIds)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd);
+          .eq('period_start', virtualCycleStart)
+          .eq('period_end', virtualCycleEnd)
+          .in('customer_id', customerIds);
         if (!active) return;
-        for (const row of (subInvRows || [])) {
+        for (const row of (data || [])) {
           const key = String(row.customer_id || '').trim();
           if (!key) continue;
+          mapByCustomer[key] = {
+            invoice_number: row.invoice_number,
+            status: String(row.status || '').toLowerCase(),
+            updated_at: row.updated_at || null,
+          };
+        }
+      }
+
+      if (subscriptionIds.length > 0) {
+        const periodPairsMap = new Map();
+        for (const r of allRows || []) {
+          if (r.isVirtual || !r.id || String(r.id).startsWith('legacy-') || String(r.id).startsWith('virtual-')) {
+            continue;
+          }
+          const { periodStart: ps, periodEnd: pe } = getPdfBillingPeriodForSub(r);
+          periodPairsMap.set(`${ps}\t${pe}`, { periodStart: ps, periodEnd: pe });
+        }
+        const periodPairs = [...periodPairsMap.values()];
+
+        let subInvQuery = supabase
+          .from('subscription_invoices')
+          .select('subscription_id, customer_id, invoice_number, status, updated_at, period_start, period_end')
+          .eq('organization_id', organization.id)
+          .in('subscription_id', subscriptionIds);
+
+        if (periodPairs.length === 1) {
+          subInvQuery = subInvQuery
+            .eq('period_start', periodPairs[0].periodStart)
+            .eq('period_end', periodPairs[0].periodEnd);
+        } else if (periodPairs.length > 1) {
+          const orExpr = periodPairs
+            .map((p) => `and(period_start.eq.${p.periodStart},period_end.eq.${p.periodEnd})`)
+            .join(',');
+          subInvQuery = subInvQuery.or(orExpr);
+        }
+
+        const { data: subInvRows } = await subInvQuery;
+        if (!active) return;
+        for (const row of (subInvRows || [])) {
           const incoming = {
             invoice_number: row.invoice_number,
             status: String(row.status || '').toLowerCase(),
             updated_at: row.updated_at || null,
           };
-          map[key] = mergeCycleEntry(map[key], incoming);
+          const ck = String(row.customer_id || '').trim();
+          if (ck) {
+            mapByCustomer[ck] = mergeCycleEntry(mapByCustomer[ck], incoming);
+          }
+          const sid = String(row.subscription_id || '').trim();
+          if (sid) {
+            mapBySubscription[sid] = mergeCycleEntry(mapBySubscription[sid], incoming);
+          }
         }
       }
 
-      setCycleInvoiceByCustomer(map);
+      setCycleInvoiceLookup({ byCustomerId: mapByCustomer, bySubscriptionId: mapBySubscription });
     };
     loadCycleInvoiceStatus().catch(() => {
-      if (active) setCycleInvoiceByCustomer({});
+      if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
     });
     return () => { active = false; };
-  }, [organization?.id, allRows, getCurrentCycleRange]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `cycleInvoiceLookupKey` replaces `allRows` so we do not refetch when row arrays are recreated with the same customers/subscriptions
+  }, [organization?.id, cycleInvoiceLookupKey, getCurrentCycleRange, getPdfBillingPeriodForSub]);
 
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
@@ -1469,13 +2073,66 @@ export default function Subscriptions() {
     if (!activeRows || activeRows.length === 0) return 0;
     const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
     const now = new Date();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const startNumber = (state.lastMonth === currentMonth && state.lastNumber)
-      ? state.lastNumber + 1
-      : 10000;
+    const calendarYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const seqMonth = options.sequenceMonth || calendarYm;
+    const lastNumber = Number(state?.lastNumber);
+    const hasLastNumber = Number.isFinite(lastNumber);
+    const startNumber = hasLastNumber ? (lastNumber + 1) : 10000;
 
-    const invoiceDate = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0, 10);
-    const dueDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    let invoiceDate = options.invoiceDate;
+    let dueDate = options.dueDate;
+    if (!invoiceDate || !dueDate) {
+      const c = getCurrentCycleRange();
+      invoiceDate = invoiceDate || c.periodEnd;
+      dueDate = dueDate || c.dueDate;
+    }
+
+    let existingMap = {};
+    try {
+      const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.seqMonth === seqMonth && parsed?.byRowKey && typeof parsed.byRowKey === 'object') {
+          existingMap = parsed.byRowKey;
+        }
+      }
+    } catch {
+      existingMap = {};
+    }
+
+    const parseInvoiceNo = (v) => {
+      const m = String(v || '').trim().match(/^W(\d{1,})$/i);
+      return m ? parseInt(m[1], 10) : null;
+    };
+
+    const usedNumbers = new Set(
+      Object.values(existingMap)
+        .map(parseInvoiceNo)
+        .filter((n) => Number.isFinite(n))
+    );
+    const assignedInvoiceByIdx = new Map();
+    let nextNumber = startNumber;
+    activeRows.forEach((row, idx) => {
+      let existingInvoice = null;
+      for (const k of qbCsvInvoiceStorageKeys(row)) {
+        const candidate = existingMap[k];
+        if (candidate) {
+          existingInvoice = String(candidate).trim();
+          break;
+        }
+      }
+      if (existingInvoice) {
+        assignedInvoiceByIdx.set(idx, existingInvoice);
+        const parsedNum = parseInvoiceNo(existingInvoice);
+        if (Number.isFinite(parsedNum)) usedNumbers.add(parsedNum);
+        return;
+      }
+      while (usedNumbers.has(nextNumber)) nextNumber += 1;
+      const generated = `W${String(nextNumber).padStart(5, '0')}`;
+      assignedInvoiceByIdx.set(idx, generated);
+      usedNumbers.add(nextNumber);
+      nextNumber += 1;
+    });
 
     const rows = activeRows.map((row, idx) => {
       const subtotal = parseFloat(row.totalPerCycle) || 0;
@@ -1483,15 +2140,16 @@ export default function Subscriptions() {
       const pst = +(subtotal * 0.06).toFixed(2);
       const tax = +(gst + pst).toFixed(2);
       const total = +(subtotal + tax).toFixed(2);
+      const txCode = resolveTaxCode(gst, pst);
       return {
-        'Invoice#': `W${String(startNumber + idx).padStart(5, '0')}`,
+        'Invoice#': assignedInvoiceByIdx.get(idx) || `W${String(startNumber + idx).padStart(5, '0')}`,
         'Customer Number': row.customer_id || '',
         'Total': total,
         'Date': invoiceDate,
         'GST': gst,
         'PST': pst,
         'TX': tax,
-        'TX code': 'G',
+        'TX code': txCode,
         'Due date': dueDate,
         'Rate': subtotal,
         'Name': row.customer?.name || row.customer?.Name || row.customer_id || '',
@@ -1499,9 +2157,30 @@ export default function Subscriptions() {
       };
     });
 
+    try {
+      const byRowKey = { ...existingMap };
+      activeRows.forEach((row, idx) => {
+        const invoiceNo = assignedInvoiceByIdx.get(idx) || `W${String(startNumber + idx).padStart(5, '0')}`;
+        qbCsvInvoiceStorageKeys(row).forEach((key) => {
+          byRowKey[key] = invoiceNo;
+        });
+      });
+      sessionStorage.setItem(
+        QB_CSV_LAST_INV_MAP_KEY,
+        JSON.stringify({ seqMonth, byRowKey, savedAt: Date.now() })
+      );
+    } catch {
+      /* ignore */
+    }
+
+    const assignedNumbers = rows
+      .map((r) => parseInvoiceNo(r['Invoice#']))
+      .filter((n) => Number.isFinite(n));
+    const maxAssigned = assignedNumbers.length > 0 ? Math.max(...assignedNumbers) : (hasLastNumber ? lastNumber : 10000);
+
     localStorage.setItem('invoice_state', JSON.stringify({
-      lastNumber: startNumber + rows.length - 1,
-      lastMonth: currentMonth,
+      lastNumber: maxAssigned,
+      lastMonth: seqMonth,
     }));
 
     const header = Object.keys(rows[0]).join(',');
@@ -1516,43 +2195,239 @@ export default function Subscriptions() {
     return rows.length;
   };
 
+  /** Same enriched rows as the grid: totals use computeSubscriptionBillingCycleTotal / totalPerCycle. */
   const getActiveExportRows = () => (allRows || []).filter((row) => (
     row.status === 'active' &&
     (parseFloat(row.itemCount) || 0) > 0
   ));
 
-  const handleExportQbInvoiceCsv = (period, cohort = 'all') => {
-    setActionError(null);
-    setActionSuccess(null);
-    const base = getActiveExportRows();
+  const buildQbCsvExportRows = useCallback(async (period, cohort = 'all') => {
+    const billingData = {
+      bottles: ctx.bottles || [],
+      rentals: ctx.rentals || [],
+      leaseContracts: ctx.leaseContracts || [],
+      leaseContractItems: ctx.leaseContractItems || [],
+      customers: ctx.customers || [],
+    };
+    const pricingCtxExport = {
+      customerOverrideMap,
+      assetPricingMap,
+      defaultMonthly: defaultUnitRateByPeriod.monthly,
+      defaultYearly: defaultUnitRateByPeriod.yearly,
+    };
+
+    const base =
+      qbCsvBillingMonth === 'live'
+        ? getActiveExportRows()
+        : (allRows || []).filter((row) => row.status === 'active');
+
     let rows = base.filter((r) => String(r.billing_period || 'monthly').toLowerCase() === period);
     if (period === 'monthly' && cohort !== 'all') {
       rows = rows.filter((r) => rowMatchesMonthlyQbCohort(r, cohort));
     }
-    if (rows.length === 0) {
-      const cohortHint =
-        period === 'monthly' && cohort === 'net30'
-          ? ' (NET 30 terms only — check customer payment terms on import)'
-          : period === 'monthly' && cohort === 'credit_card'
-            ? ' (credit card terms, including COD aliases)'
-            : '';
-      setActionError(`No active ${period} rentals match this export${cohortHint}.`);
-      return;
+
+    let csvOptions = { filePrefix: `quickbooks_invoices_${period}` };
+
+    if (qbCsvBillingMonth !== 'live') {
+      const pe = lastDayOfMonthYm(qbCsvBillingMonth);
+      if (!pe) {
+        return {
+          rows: [],
+          csvOptions: { filePrefix: `quickbooks_invoices_${period}` },
+          invalidBillingMonth: true,
+        };
+      }
+      const dates = qbCsvDatesForBilledMonth(qbCsvBillingMonth);
+
+      // Load ALL rentals (open + closed) so the snapshot counts units active on the
+      // period end — not just currently open ones from ctx.rentals.
+      // Same approach as buildInvoicePdfForRow / handleExportInvoicePdfsZip.
+      let snapshotRentals = billingData.rentals;
+      try {
+        const { data, error: rErr } = await supabase
+          .from('rentals')
+          .select('*')
+          .eq('organization_id', organization.id);
+        if (!rErr && data?.length) snapshotRentals = data;
+      } catch { /* fall back to ctx.rentals */ }
+
+      // ── Strict per-customer end-of-month counts via computeCustomerRentalHistory.
+      //    No parent/child rollup; name matching only when unique across orgs. ──
+      const periodStartYmd = ymFirstDay(qbCsvBillingMonth);
+      const lookupSnapshotGroups = (matchKey, customer) => {
+        const custRecord = matchCustomerRecordBySubscriptionId(matchKey) || customer || {
+          id: matchKey,
+          CustomerListID: matchKey,
+        };
+        const history = computeCustomerRentalHistory({
+          rentals: snapshotRentals,
+          bottles: billingData.bottles,
+          customerRecord: custRecord,
+          allCustomers: billingData.customers,
+          periodStart: periodStartYmd,
+          periodEnd: pe,
+        });
+        return history
+          .filter((h) => h.endCount > 0)
+          .map((h) => ({ productCode: h.productCode, count: h.endCount }));
+      };
+      // ── End strict counts ──
+
+      const snapshotGroupsCache = new Map();
+      const mapped = [];
+      for (const row of rows) {
+        if (row.legacySource === 'lease_agreements') { mapped.push(row); continue; }
+        const leaseKeys = expandLeaseMatchKeys(row.customer_id, row.customer, ctx.customers);
+        const matchesLeaseContract = (ctx.leaseContracts || []).some((c) => {
+          if (organization?.id && c.organization_id && c.organization_id !== organization?.id) return false;
+          const ck = normalize(String(c.customer_id || '').trim());
+          return ck && leaseKeys.has(ck);
+        });
+        const useLeaseContractIfPresent =
+          row.customer?.billing_mode === 'lease' || matchesLeaseContract;
+        const subscriptionMatchKey =
+          String(
+            row.customer_id ||
+              row.customer?.CustomerListID ||
+              row.customer?.id ||
+              row.customer?.name ||
+              row.customer?.Name ||
+              ''
+          ).trim() || row.customer_id;
+        const contract = findActiveLeaseContract(
+          billingData.leaseContracts,
+          row.customer_id,
+          row.organization_id
+        );
+        const isLeasePricing =
+          row.customer?.billing_mode === 'lease' || (!!contract && useLeaseContractIfPresent);
+        if (isLeasePricing) {
+          const total = computeSubscriptionBillingCycleTotal(
+            { ...row, billing_period: row.billing_period },
+            row.customer,
+            pricingCtxExport,
+            { ...billingData, useLeaseContractIfPresent }
+          );
+          mapped.push({ ...row, totalPerCycle: total, itemCount: row.itemCount });
+          continue;
+        }
+        const gCacheKey = `${pe}\t${subscriptionMatchKey}`;
+        let groups = snapshotGroupsCache.get(gCacheKey);
+        if (!groups) {
+          groups = lookupSnapshotGroups(subscriptionMatchKey, row.customer);
+          snapshotGroupsCache.set(gCacheKey, groups);
+        }
+        const total = computeSubscriptionBillingCycleTotal(
+          { ...row, billing_period: row.billing_period },
+          row.customer,
+          pricingCtxExport,
+          {
+            ...billingData,
+            rentals: snapshotRentals,
+            useLeaseContractIfPresent,
+            asOfPeriodEnd: pe,
+            allowAssignedBottleRecovery: true,
+            precomputedGroups: groups,
+          }
+        );
+        const itemCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+        mapped.push({
+          ...row,
+          totalPerCycle: total,
+          itemCount,
+        });
+      }
+      qbSnapshotGroupsCacheRef.current = snapshotGroupsCache;
+      rows = mapped.filter(
+        (r) => (parseFloat(r.totalPerCycle) || 0) > 0 && (parseFloat(r.itemCount) || 0) > 0
+      );
+      csvOptions = {
+        ...csvOptions,
+        invoiceDate: dates.invoiceDate,
+        dueDate: dates.dueDate,
+        sequenceMonth: qbCsvBillingMonth,
+      };
+    } else {
+      const c = getCurrentCycleRange();
+      csvOptions = {
+        ...csvOptions,
+        invoiceDate: c.periodEnd,
+        dueDate: c.dueDate,
+        sequenceMonth: c.periodStart.slice(0, 7),
+      };
     }
-    const cohortSuffix =
-      period === 'monthly' && cohort === 'net30'
-        ? '_net30'
-        : period === 'monthly' && cohort === 'credit_card'
-          ? '_creditcard'
-          : '';
-    const exported = downloadInvoiceCsv(rows, { filePrefix: `quickbooks_invoices_${period}${cohortSuffix}` });
-    const cohortLabel =
-      period === 'monthly' && cohort === 'net30'
-        ? ', NET 30 customers only'
-        : period === 'monthly' && cohort === 'credit_card'
-          ? ', credit card customers only (includes COD)'
-          : '';
-    setActionSuccess(`Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}).`);
+
+    return { rows, csvOptions };
+  }, [
+    allRows,
+    assetPricingMap,
+    ctx.bottles,
+    ctx.customers,
+    ctx.leaseContractItems,
+    ctx.leaseContracts,
+    ctx.rentals,
+    customerOverrideMap,
+    defaultUnitRateByPeriod.monthly,
+    defaultUnitRateByPeriod.yearly,
+    getActiveExportRows,
+    getCurrentCycleRange,
+    organization?.id,
+    qbCsvBillingMonth,
+  ]);
+
+  const handleExportQbInvoiceCsv = async (period, cohort = 'all') => {
+    setActionError(null);
+    setActionSuccess(null);
+    setSaving(true);
+    try {
+      const result = await buildQbCsvExportRows(period, cohort);
+      if (result.invalidBillingMonth) {
+        setActionError('Select a valid billing month for the QuickBooks export.');
+        return;
+      }
+      const { rows, csvOptions } = result;
+      if (rows.length === 0) {
+        const cohortHint =
+          period === 'monthly' && cohort === 'net30'
+            ? ' (NET 30 terms only — check customer payment terms on import)'
+            : period === 'monthly' && cohort === 'credit_card'
+              ? ' (credit card terms, including COD aliases)'
+              : '';
+        const snapHint =
+          qbCsvBillingMonth !== 'live'
+            ? ' For a past month, no rows had billable units on that month-end (or filters exclude everyone).'
+            : '';
+        setActionError(`No active ${period} rentals match this export${cohortHint}.${snapHint}`);
+        return;
+      }
+
+      const cohortSuffix =
+        period === 'monthly' && cohort === 'net30'
+          ? '_net30'
+          : period === 'monthly' && cohort === 'credit_card'
+            ? '_creditcard'
+            : '';
+      const monthTag = qbCsvBillingMonth === 'live' ? 'live' : qbCsvBillingMonth;
+      const exported = downloadInvoiceCsv(rows, {
+        ...csvOptions,
+        filePrefix: `quickbooks_invoices_${period}${cohortSuffix}_${monthTag}`,
+      });
+      const cohortLabel =
+        period === 'monthly' && cohort === 'net30'
+          ? ', NET 30 customers only'
+          : period === 'monthly' && cohort === 'credit_card'
+            ? ', credit card customers only (includes COD)'
+            : '';
+      const monthLabel =
+        qbCsvBillingMonth === 'live'
+          ? 'current cycle dates, live counts'
+          : `billed month ${qbCsvBillingMonth} (month-end snapshot)`;
+      setActionSuccess(
+        `Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}; ${monthLabel}).`
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const ensureVirtualInvoiceNumber = useCallback(async (row) => {
@@ -1613,26 +2488,190 @@ export default function Subscriptions() {
     return invoiceNumber;
   }, [organization?.id, getCurrentCycleRange]);
 
+  /** Reserve a real subscription_invoices row + sequential # when none exists (avoids W00010-style id fallbacks). */
+  const ensureSubscriptionCycleInvoiceNumber = useCallback(
+    async (sub) => {
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      const { dueDate } = getCurrentCycleRange();
+      const cid = String(sub?.customer_id || '').trim();
+      const rawId = sub?.id;
+      const subId =
+        rawId != null
+        && !sub?.isVirtual
+        && !String(rawId).startsWith('virtual-')
+        && !String(rawId).startsWith('legacy-')
+          ? String(rawId).trim()
+          : '';
+      if (!organization?.id || !cid || !subId || !periodStart || !periodEnd) return null;
+
+      const { data: existingSi } = await supabase
+        .from('subscription_invoices')
+        .select('invoice_number')
+        .eq('organization_id', organization.id)
+        .eq('subscription_id', subId)
+        .eq('period_start', periodStart)
+        .eq('period_end', periodEnd)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const existingNo = String(existingSi?.invoice_number || '').trim();
+      if (existingNo) return existingNo;
+
+      const total = parseFloat(sub?.totalPerCycle) || 0;
+      const gstAmt = +(total * 0.05).toFixed(2);
+      const pstAmt = +(total * 0.06).toFixed(2);
+      const taxAmount = +(gstAmt + pstAmt).toFixed(2);
+      const totalAmount = +(total + taxAmount).toFixed(2);
+
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const reserved = await getNextInvoiceNumbers(organization.id, 1);
+        const invoiceNumber = reserved?.[0];
+        if (!invoiceNumber) {
+          throw new Error('Failed to reserve a unique invoice number. Please retry.');
+        }
+        const { error } = await supabase.from('subscription_invoices').insert({
+          organization_id: organization.id,
+          subscription_id: subId,
+          customer_id: cid,
+          invoice_number: invoiceNumber,
+          status: 'draft',
+          period_start: periodStart,
+          period_end: periodEnd,
+          subtotal: total,
+          tax_amount: taxAmount,
+          total_amount: totalAmount,
+          due_date: dueDate,
+        });
+        if (!error) return invoiceNumber;
+        lastErr = error;
+        const { data: raceSi } = await supabase
+          .from('subscription_invoices')
+          .select('invoice_number')
+          .eq('organization_id', organization.id)
+          .eq('subscription_id', subId)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const raceNo = String(raceSi?.invoice_number || '').trim();
+        if (raceNo) return raceNo;
+        if (String(error?.code || '') !== '23505') break;
+      }
+      if (lastErr) console.warn('ensureSubscriptionCycleInvoiceNumber:', lastErr);
+      return null;
+    },
+    [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange],
+  );
+
+  /**
+   * `defaultInvoiceNumber(sub)` derives Wxxxxx from the Stripe subscription id (e.g. W00010).
+   * If that was persisted to subscription_invoices before real sequences existed, replace it
+   * with invoice_settings / getNextInvoiceNumbers and update the row.
+   */
+  const repairPlaceholderSubscriptionInvoiceNumber = useCallback(
+    async (sub, invNo) => {
+      const n = String(invNo || '').trim();
+      if (!n || !organization?.id || sub?.isVirtual) return invNo;
+      const rawId = sub?.id;
+      if (
+        rawId == null
+        || String(rawId).startsWith('virtual-')
+        || String(rawId).startsWith('legacy-')
+      ) {
+        return invNo;
+      }
+      const placeholder = defaultInvoiceNumber({ id: rawId, invoice_number: '' });
+      if (n !== placeholder) return invNo;
+
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      if (!periodStart || !periodEnd) return invNo;
+      const subId = String(rawId).trim();
+
+      const { data: si } = await supabase
+        .from('subscription_invoices')
+        .select('id, invoice_number')
+        .eq('organization_id', organization.id)
+        .eq('subscription_id', subId)
+        .eq('period_start', periodStart)
+        .eq('period_end', periodEnd)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!si?.id) return invNo;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const reserved = await getNextInvoiceNumbers(organization.id, 1);
+        const next = reserved?.[0];
+        if (!next || String(next).trim() === n) return invNo;
+        const { error } = await supabase
+          .from('subscription_invoices')
+          .update({ invoice_number: next, updated_at: new Date().toISOString() })
+          .eq('id', si.id);
+        if (!error) return String(next).trim();
+        if (String(error?.code || '') !== '23505') break;
+      }
+      return invNo;
+    },
+    [organization?.id, getPdfBillingPeriodForSub],
+  );
+
   /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
-      if (sub?.isVirtual) {
-        return ensureVirtualInvoiceNumber(sub);
-      }
+      // If user exported QB CSV, always reuse that exact assigned invoice # for PDF/email.
+      // This guarantees "same customer, same cycle" parity across CSV, PDF, and email.
+      const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub);
+      if (fromLastCsv) return fromLastCsv;
+
       const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
       let invNo = String(sub?.invoice_number || '').trim();
-      if (invNo) return invNo;
-      invNo = await resolveInvoiceNumberForRentalPdf(
-        supabase,
-        organization.id,
-        sub,
-        periodStart,
-        periodEnd
-      );
-      if (invNo) return invNo;
-      return defaultInvoiceNumber(sub);
+      if (!invNo) {
+        const fromDb = await resolveInvoiceNumberForRentalPdf(
+          supabase,
+          organization.id,
+          sub,
+          periodStart,
+          periodEnd
+        );
+        invNo = fromDb ? String(fromDb).trim() : '';
+      }
+      if (!invNo) {
+        const csvPeriod =
+          String(sub?.billing_period || 'monthly').toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
+        try {
+          const built = await buildQbCsvExportRows(csvPeriod, 'all');
+          if (!built.invalidBillingMonth && built.rows?.length) {
+            const qbNo = computeQbSequentialInvoiceNumber(built.rows, built.csvOptions, sub);
+            if (qbNo) invNo = String(qbNo).trim();
+          }
+        } catch (e) {
+          console.warn('QB sequential invoice number lookup failed', e);
+        }
+      }
+      if (!invNo && sub?.isVirtual) {
+        const v = await ensureVirtualInvoiceNumber(sub);
+        invNo = v ? String(v).trim() : '';
+      }
+      if (!invNo && !sub?.isVirtual) {
+        const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
+        invNo = ensured ? String(ensured).trim() : '';
+      }
+      if (!invNo) {
+        invNo = defaultInvoiceNumber(sub);
+      }
+      const repaired = await repairPlaceholderSubscriptionInvoiceNumber(sub, invNo);
+      return repaired || invNo;
     },
-    [ensureVirtualInvoiceNumber, getPdfBillingPeriodForSub, organization?.id]
+    [
+      buildQbCsvExportRows,
+      ensureVirtualInvoiceNumber,
+      ensureSubscriptionCycleInvoiceNumber,
+      getPdfBillingPeriodForSub,
+      organization?.id,
+      repairPlaceholderSubscriptionInvoiceNumber,
+    ]
   );
 
   const getLineItemsForRow = useCallback((row) => {
@@ -1670,23 +2709,16 @@ export default function Subscriptions() {
     }];
   }, [defaultUnitRateByPeriod, resolveDisplayUnitPrice]);
 
-  const buildInvoicePdfForRow = useCallback(async (row, invoiceNumberOverride = null) => {
-    const normPeriodDay = (v) => {
-      const s = String(v || '').trim().slice(0, 10);
-      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-    };
-    const subStart = normPeriodDay(row?.current_period_start);
-    const subEnd = normPeriodDay(row?.current_period_end);
-    const fallback = getCurrentCycleRange();
-    const isYearly = String(row?.billing_period || '').toLowerCase() === 'yearly';
-    const periodStart =
-      isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
-    const periodEnd =
-      isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
+  const buildInvoicePdfForRow = useCallback(async (row, invoiceNumberOverride = null, pdfBuildOpts = {}) => {
+    const orgRentalsCache = pdfBuildOpts.orgRentalsCache;
+    const { periodStart, periodEnd, dueDate } = computeInvoicePdfPeriodForRow(
+      row,
+      getCurrentCycleRange,
+      qbCsvBillingMonth
+    );
     const invoiceDate = periodEnd;
-    const dueDate = fallback.dueDate;
 
-    const customerRecord =
+    const rawCustomer =
       matchCustomerRecordBySubscriptionId(row.customer_id) ||
       row?.customer ||
       {
@@ -1695,6 +2727,10 @@ export default function Subscriptions() {
         name: row.customer_name || row.customer_id,
         Name: row.customer_name,
       };
+    const customerRecord = {
+      ...rawCustomer,
+      purchase_order: rawCustomer.purchase_order ?? row?.customer?.purchase_order ?? null,
+    };
 
     let lineItems = getLineItemsForRow(row);
     let hasDetail =
@@ -1705,10 +2741,18 @@ export default function Subscriptions() {
     const billingMode = String(customerRecord?.billing_mode || '').toLowerCase();
     if (billingMode !== 'lease') {
       try {
-        const { data: orgRentals, error: rErr } = await supabase
-          .from('rentals')
-          .select('*')
-          .eq('organization_id', organization.id);
+        let orgRentals;
+        let rErr = null;
+        if (Array.isArray(orgRentalsCache)) {
+          orgRentals = orgRentalsCache;
+        } else {
+          const res = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('organization_id', organization.id);
+          orgRentals = res.data;
+          rErr = res.error;
+        }
         if (!rErr && orgRentals?.length) {
           rentalsForSnapshot = orgRentals;
           const subscriptionMatchKey =
@@ -1720,17 +2764,26 @@ export default function Subscriptions() {
                 customerRecord?.Name ||
                 ''
             ).trim() || row.customer_id;
-          const groups = groupBillableUnitCountsByProductCode(
-            ctx.bottles || [],
-            orgRentals,
-            subscriptionMatchKey,
-            customerRecord,
-            {
+          const zipGroupsCache = pdfBuildOpts.zipGroupsCache;
+          const gCacheKey = `${periodEnd}\t${subscriptionMatchKey}`;
+          let groups = zipGroupsCache?.get(gCacheKey);
+          if (!groups) {
+            // Strict per-customer end-of-period counts (matches QB CSV exactly).
+            // No parent/child rollup; name matching only when unique across the org.
+            const histPeriodStart = ymFirstDay(String(periodEnd || '').slice(0, 7)) || periodStart;
+            const history = computeCustomerRentalHistory({
+              rentals: orgRentals,
+              bottles: ctx.bottles || [],
+              customerRecord,
               allCustomers: ctx.customers || [],
-              asOfPeriodEnd: periodEnd,
-              allowAssignedBottleRecovery: true,
-            }
-          );
+              periodStart: histPeriodStart,
+              periodEnd,
+            });
+            groups = history
+              .filter((h) => h.endCount > 0)
+              .map((h) => ({ productCode: h.productCode, count: h.endCount }));
+            if (zipGroupsCache) zipGroupsCache.set(gCacheKey, groups);
+          }
           if (groups.length > 0) {
             const periodFallback =
               row.billing_period === 'yearly'
@@ -1787,33 +2840,76 @@ export default function Subscriptions() {
     }
     let returnsInPeriod = [];
     try {
-      returnsInPeriod = await fetchReturnsInInvoicePeriod(supabase, organization.id, row, periodStart, periodEnd);
+      const returnsByKey = pdfBuildOpts.returnsByPeriodKey;
+      const rk = invoiceReturnsCacheKey(periodStart, periodEnd);
+      const bulk = returnsByKey?.get(rk);
+      if (bulk && Array.isArray(bulk)) {
+        returnsInPeriod = bulk.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
+      } else {
+        returnsInPeriod = await fetchReturnsInInvoicePeriod(supabase, organization.id, row, periodStart, periodEnd);
+      }
     } catch (e) {
       console.warn('Invoice PDF: could not load returns in period', e);
     }
     const bottlesForPdf = openAssets.map((b) => (b.display_label ? { ...b, description: b.display_label } : b));
-    const mergedTemplate = { ...invoiceTemplate };
-    if (remitAddress?.remit_name) mergedTemplate.remit_name = remitAddress.remit_name;
-    if (remitAddress?.remit_address_line1) mergedTemplate.remit_address_line1 = remitAddress.remit_address_line1;
-    if (remitAddress?.remit_address_line2) mergedTemplate.remit_address_line2 = remitAddress.remit_address_line2;
-    if (remitAddress?.remit_address_line3) mergedTemplate.remit_address_line3 = remitAddress.remit_address_line3;
-    if (remitAddress?.gst_number) mergedTemplate.gst_number = remitAddress.gst_number;
-    return createRentalInvoicePdfDoc({
+    let remitForPdf = remitAddress;
+    const hasBillTo =
+      String(remitForPdf?.remit_name || '').trim() ||
+      String(remitForPdf?.remit_address_line1 || '').trim();
+    if (organization?.id && !hasBillTo) {
+      try {
+        const { data } = await supabase
+          .from('invoice_settings')
+          .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
+          .eq('organization_id', organization.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data) remitForPdf = data;
+      } catch (e) {
+        console.warn('Invoice PDF: could not load bill-to from invoice_settings', e);
+      }
+    }
+    const mergedTemplate = { ...(invoiceTemplate || {}) };
+    // Always let Settings -> Bill-To values override any stale local template fields.
+    if (remitForPdf) {
+      mergedTemplate.remit_name = remitForPdf.remit_name || '';
+      mergedTemplate.remit_address_line1 = remitForPdf.remit_address_line1 || '';
+      mergedTemplate.remit_address_line2 = remitForPdf.remit_address_line2 || '';
+      mergedTemplate.remit_address_line3 = remitForPdf.remit_address_line3 || '';
+      mergedTemplate.gst_number = remitForPdf.gst_number || '';
+    }
+    const invoiceNoForPdf =
+      String(invoiceNumberOverride ?? '').trim() ||
+      String(row?.invoice_number ?? '').trim() ||
+      defaultInvoiceNumber(row);
+    const poForPdf = String(customerRecord?.purchase_order ?? row?.customer?.purchase_order ?? '').trim();
+    const pdfResult = await createRentalInvoicePdfDoc({
       organization,
       invoiceTemplate: mergedTemplate,
       primaryColorFallback: primaryColor,
       row,
       customerRecord,
       lineItems,
-      invoiceNumber: invoiceNumberOverride || row?.invoice_number || 'W00000',
+      invoiceNumber: invoiceNoForPdf,
       totals: { subtotal: total, gst, pst, tax, amountDue: grandTotal, gstRate, pstRate, taxRate },
       period: { start: periodStart, end: periodEnd },
       dates: { invoice: invoiceDate, due: dueDate },
       terms: customerRecord?.payment_terms || 'NET 30',
+      purchaseOrder: poForPdf || undefined,
       bottles: bottlesForPdf,
       returnsInPeriod,
       formatCurrency,
     });
+    return {
+      ...pdfResult,
+      amountDue: grandTotal,
+      subtotal: total,
+      invoiceNumber: invoiceNoForPdf,
+      lineItems,
+      totals: { subtotal: total, gst, pst, tax, amountDue: grandTotal, gstRate, pstRate, taxRate },
+      dates: { invoice: invoiceDate, due: dueDate },
+    };
   }, [
     getLineItemsForRow,
     getCurrentCycleRange,
@@ -1826,6 +2922,8 @@ export default function Subscriptions() {
     primaryColor,
     defaultUnitRateByPeriod,
     resolveDisplayUnitPrice,
+    qbCsvBillingMonth,
+    remitAddress,
   ]);
 
   const handleDownloadInvoicePdfForRow = useCallback(async (sub) => {
@@ -1836,13 +2934,77 @@ export default function Subscriptions() {
     }
     try {
       const invNo = await resolveRentalInvoiceNumberForActions(sub);
-      const { doc, fileName, customerName } = await buildInvoicePdfForRow(sub, invNo);
+      const snapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
+      const { doc, fileName, customerName } = await buildInvoicePdfForRow(sub, invNo, snapOpts);
       doc.save(fileName);
       setActionSuccess(`Invoice PDF downloaded for ${customerName}.`);
     } catch (err) {
       setActionError(err.message || 'Failed to generate invoice PDF.');
     }
   }, [buildInvoicePdfForRow, organization?.id, resolveRentalInvoiceNumberForActions]);
+
+  const handleExportCustomerExcel = useCallback(async (sub) => {
+    try {
+      const invNo = await resolveRentalInvoiceNumberForActions(sub);
+      const snapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
+      const invoiceBundle = await buildInvoicePdfForRow(sub, invNo, snapOpts);
+      const total = Number(invoiceBundle?.totals?.subtotal ?? invoiceBundle?.subtotal ?? 0);
+      if (total <= 0) {
+        setActionError('Cannot export a $0.00 invoice row.');
+        return;
+      }
+
+      const gst = +(invoiceBundle?.totals?.gst ?? 0);
+      const pst = +(invoiceBundle?.totals?.pst ?? 0);
+      const tax = +(invoiceBundle?.totals?.tax ?? (gst + pst));
+      const grandTotal = +(invoiceBundle?.totals?.amountDue ?? (total + tax));
+      const txCode = resolveTaxCode(gst, pst);
+      const invoiceDate = invoiceBundle?.dates?.invoice || getCurrentCycleRange().periodEnd;
+      const dueDate = invoiceBundle?.dates?.due || getCurrentCycleRange().dueDate;
+      const poExcel = String(
+        sub?.customer?.purchase_order
+          ?? matchCustomerRecordBySubscriptionId(sub?.customer_id)?.purchase_order
+          ?? '',
+      ).trim();
+      const orderedColumns = [
+        'Invoice#',
+        'Customer Number',
+        'P.O.',
+        'Total',
+        'Date',
+        'TX',
+        'TX code',
+        'Due date',
+        'Rate',
+        'Name',
+        '# of Bottles',
+      ];
+
+      const singleRowOrdered = [{
+        'Invoice#': invoiceBundle?.invoiceNumber || invNo,
+        'Customer Number': sub.customer_id || '',
+        'P.O.': poExcel,
+        'Total': grandTotal,
+        'Date': invoiceDate,
+        'TX': tax,
+        'TX code': txCode,
+        'Due date': dueDate,
+        'Rate': total,
+        'Name': sub.customer?.name || sub.customer?.Name || sub.customer_id || '',
+        '# of Bottles': parseFloat(sub.itemCount) || 0,
+      }];
+
+      const wb = XLSX.utils.book_new();
+      const summaryWs = XLSX.utils.json_to_sheet(singleRowOrdered, { header: orderedColumns });
+      XLSX.utils.book_append_sheet(wb, summaryWs, 'Invoice');
+      const safeCustomer = String(sub.customer?.name || sub.customer?.Name || sub.customer_id || 'customer')
+        .replace(/[^\w\-]+/g, '_');
+      XLSX.writeFile(wb, `quickbooks_invoice_${safeCustomer}_${invoiceDate}.xlsx`);
+      setActionSuccess(`Excel exported for ${sub.customer?.name || sub.customer?.Name || sub.customer_id}.`);
+    } catch (err) {
+      setActionError(err?.message || 'Failed to export customer Excel.');
+    }
+  }, [buildInvoicePdfForRow, getCurrentCycleRange, resolveRentalInvoiceNumberForActions, matchCustomerRecordBySubscriptionId]);
 
   const openEmailDialogForRow = async (sub) => {
     setActionError(null);
@@ -1902,43 +3064,70 @@ export default function Subscriptions() {
       const orgName = organization?.name || 'your organization';
       const orgWebsite = organization?.website || '';
 
-      const total = parseFloat(sub.totalPerCycle) || 0;
-      const gst = +(total * 0.05).toFixed(2);
-      const pst = +(total * 0.06).toFixed(2);
-      const amountDue = +(total + gst + pst).toFixed(2);
       const invNo = await resolveRentalInvoiceNumberForActions(sub);
+      const snapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
+      const pdfBundle = await buildInvoicePdfForRow(sub, invNo, snapOpts);
+      const amountDue = pdfBundle.amountDue;
+      const displayInvNo = pdfBundle.invoiceNumber;
       const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-      const savedEmailTemplate = loadEmailTemplateSettings();
-      const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
-        .replace(/\{organization_name\}/gi, orgName)
-        .replace(/\{organization_website\}/gi, orgWebsite);
+      const savedEmailTemplate = getSavedEmailTemplate();
+      const remitName = String(remitAddress?.remit_name || orgName).trim();
+      const remitLine1 = String(remitAddress?.remit_address_line1 || '').trim();
+      const remitLine2 = String(remitAddress?.remit_address_line2 || '').trim();
+      const remitLine3 = String(remitAddress?.remit_address_line3 || '').trim();
+      const billingInquiryEmail =
+        orgData?.default_invoice_email || orgData?.email || organization?.email || '';
+      const customerPo = String(
+        sub?.customer?.purchase_order
+        ?? matchCustomerRecordBySubscriptionId(sub?.customer_id)?.purchase_order
+        ?? '',
+      ).trim();
+      const emailVars = buildRentalInvoiceEmailVarMap({
+        invoiceNumber: displayInvNo,
+        formattedAmount,
+        customerName,
+        customerPurchaseOrder: customerPo,
+        orgName,
+        orgWebsite,
+        remitName,
+        remitLine1,
+        remitLine2,
+        remitLine3,
+        remitAddressBlock,
+        billingInquiryEmail,
+        savedTemplate: savedEmailTemplate,
+      });
+      const renderedSignature = applyInvoiceEmailTemplateVars(
+        String(savedEmailTemplate?.signature || defaultTemplateSignature),
+        emailVars
+      );
 
-      let defaultMessage = savedEmailTemplate?.body
-        ? savedEmailTemplate.body
-            .replace(/\{invoice_number\}/gi, invNo)
-            .replace(/\{amount\}/gi, `$${formattedAmount}`)
-            .replace(/\{customer_name\}/gi, customerName)
-            .replace(/\{organization_name\}/gi, orgName)
-            .replace(/\{organization_website\}/gi, orgWebsite)
-        : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
-      if (savedEmailTemplate?.body && !defaultMessage.includes(invNo)) {
-        defaultMessage = `Invoice ${invNo}\n\n${defaultMessage}`;
+      const savedBodyRaw = savedEmailTemplate?.body;
+      const hasSavedEmailBody = typeof savedBodyRaw === 'string' && savedBodyRaw.trim().length > 0;
+      let defaultMessage = hasSavedEmailBody
+        ? applyInvoiceEmailTemplateVars(savedBodyRaw, emailVars)
+        : `Your invoice ${displayInvNo} for $${formattedAmount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.`;
+      defaultMessage = stripRemitInstructionsFromInvoiceEmailBody(defaultMessage);
+      defaultMessage = mergePaymentMethodsIntoInvoiceEmailBody(defaultMessage, savedBodyRaw, emailVars);
+      if (hasSavedEmailBody && !defaultMessage.includes(displayInvNo)) {
+        defaultMessage = `Invoice ${displayInvNo}\n\n${defaultMessage}`;
       }
-      defaultMessage = ensureInvoiceContext(defaultMessage, invNo, formattedAmount);
+      defaultMessage = ensureInvoiceContext(defaultMessage, displayInvNo, formattedAmount);
+      if (!hasSavedEmailBody && customerPo) {
+        defaultMessage = `${defaultMessage.trim()}\n\nCustomer P.O.: ${customerPo}`;
+      }
       defaultMessage = withGlobalSignature(defaultMessage, renderedSignature);
 
-      const defaultSubject = savedEmailTemplate?.subject
-        ? savedEmailTemplate.subject
-            .replace(/\{invoice_number\}/gi, invNo)
-            .replace(/\{amount\}/gi, `$${formattedAmount}`)
-            .replace(/\{customer_name\}/gi, customerName)
-            .replace(/\{organization_name\}/gi, orgName)
-            .replace(/\{organization_website\}/gi, orgWebsite)
-        : `Invoice ${invNo} – ${customerName} – ${orgName}`;
+      const savedSubjectRaw = savedEmailTemplate?.subject;
+      const hasSavedSubject = typeof savedSubjectRaw === 'string' && savedSubjectRaw.trim().length > 0;
+      const defaultSubject = hasSavedSubject
+        ? applyInvoiceEmailTemplateVars(savedSubjectRaw, emailVars)
+        : `Invoice ${displayInvNo} – ${customerName} – ${orgName}`;
 
       setSenderOptions(options);
-      setEmailRow({ ...sub, invoice_number: invNo });
+      setEmailRow({ ...sub, invoice_number: displayInvNo });
+      setEmailDialogMountKey(`dlg-${Date.now()}-${displayInvNo}`);
       setEmailInitialForm({
         to: customerEmail,
         from: defaultFrom,
@@ -1966,17 +3155,64 @@ export default function Subscriptions() {
     setActionError(null);
     setActionSuccess(null);
     try {
-      const invNo = emailRow.invoice_number || 'W00000';
-      const { doc, customerName } = await buildInvoicePdfForRow(emailRow, invNo);
+      const invResolved = await resolveRentalInvoiceNumberForActions(emailRow);
+      const snapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
+      const { doc, customerName: pdfCustomerName, amountDue, invoiceNumber: pdfInvNo } = await buildInvoicePdfForRow(
+        emailRow,
+        invResolved,
+        snapOpts
+      );
+      const customerName =
+        String(pdfCustomerName || '').trim()
+        || emailRow?.customer?.name
+        || emailRow?.customer?.Name
+        || emailRow?.customer_id
+        || 'Customer';
       const pdfBase64 = doc.output('datauristring').split(',')[1];
       const pdfFileName = `Invoice_${String(customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-      const amountDue = +(total + total * 0.05 + total * 0.06).toFixed(2);
       const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const savedEmailTemplate = loadEmailTemplateSettings();
-      const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
-        .replace(/\{organization_name\}/gi, organization?.name || 'your organization')
-        .replace(/\{organization_website\}/gi, organization?.website || '');
-      const withInvoiceContext = ensureInvoiceContext(formFromDialog.message || '', invNo, formattedAmount);
+      const savedEmailTemplate = getSavedEmailTemplate();
+      const remitName = String(remitAddress?.remit_name || organization?.name || 'your organization').trim();
+      const remitLine1 = String(remitAddress?.remit_address_line1 || '').trim();
+      const remitLine2 = String(remitAddress?.remit_address_line2 || '').trim();
+      const remitLine3 = String(remitAddress?.remit_address_line3 || '').trim();
+      const orgName = organization?.name || 'your organization';
+      const orgWebsite = organization?.website || '';
+      const billingInquiryEmail =
+        organization?.default_invoice_email || organization?.email || '';
+      const customerPoSend = String(
+        emailRow?.customer?.purchase_order
+        ?? matchCustomerRecordBySubscriptionId(emailRow?.customer_id)?.purchase_order
+        ?? '',
+      ).trim();
+      const emailVars = buildRentalInvoiceEmailVarMap({
+        invoiceNumber: pdfInvNo,
+        formattedAmount,
+        customerName,
+        customerPurchaseOrder: customerPoSend,
+        orgName,
+        orgWebsite,
+        remitName,
+        remitLine1,
+        remitLine2,
+        remitLine3,
+        remitAddressBlock,
+        billingInquiryEmail,
+        savedTemplate: savedEmailTemplate,
+      });
+      const renderedSignature = applyInvoiceEmailTemplateVars(
+        String(savedEmailTemplate?.signature || defaultTemplateSignature),
+        emailVars
+      );
+      const subjectResolved = applyInvoiceEmailTemplateVars(formFromDialog.subject || '', emailVars);
+      let messageResolved = applyInvoiceEmailTemplateVars(formFromDialog.message || '', emailVars);
+      messageResolved = stripRemitInstructionsFromInvoiceEmailBody(messageResolved);
+      messageResolved = mergePaymentMethodsIntoInvoiceEmailBody(
+        messageResolved,
+        savedEmailTemplate?.body,
+        emailVars
+      );
+      const withInvoiceContext = ensureInvoiceContext(messageResolved, pdfInvNo, formattedAmount);
       const finalMessage = withGlobalSignature(withInvoiceContext, renderedSignature);
       const bodyHtml = finalMessage.replace(/\n/g, '<br/>');
       const response = await fetch('/.netlify/functions/send-invoice-email', {
@@ -1986,42 +3222,50 @@ export default function Subscriptions() {
           to: formFromDialog.to,
           from: formFromDialog.from,
           senderName: profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || '',
-          subject: formFromDialog.subject,
+          subject: subjectResolved,
           body: bodyHtml,
           pdfBase64,
           pdfFileName,
-          invoiceNumber: invNo,
+          invoiceNumber: pdfInvNo,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || payload?.details || `Email failed (${response.status})`);
       }
+      const virtualCycle = getCurrentCycleRange();
       if (emailRow?.isVirtual && emailRow?.customer_id) {
-        const { periodStart, periodEnd } = getCurrentCycleRange();
         await supabase
           .from('invoices')
           .update({ status: 'sent', updated_at: new Date().toISOString() })
           .eq('organization_id', organization.id)
           .eq('customer_id', emailRow.customer_id)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd)
-          .eq('invoice_number', invNo);
-        setCycleInvoiceByCustomer((prev) => ({
-          ...prev,
-          [String(emailRow.customer_id).trim()]: {
-            invoice_number: invNo,
+          .eq('period_start', virtualCycle.periodStart)
+          .eq('period_end', virtualCycle.periodEnd)
+          .eq('invoice_number', pdfInvNo);
+        setCycleInvoiceLookup((prev) => {
+          const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
+          const entry = {
+            invoice_number: pdfInvNo,
             status: 'sent',
             updated_at: new Date().toISOString(),
-          },
-        }));
+          };
+          const cid = String(emailRow.customer_id || '').trim();
+          return {
+            byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
+            bySubscriptionId: { ...base.bySubscriptionId },
+          };
+        });
       } else if (emailRow?.id && !emailRow.isVirtual) {
+        const { periodStart, periodEnd } = getPdfBillingPeriodForSub(emailRow);
         const { data: latestSi } = await supabase
           .from('subscription_invoices')
           .select('id')
           .eq('organization_id', organization.id)
           .eq('subscription_id', emailRow.id)
-          .order('created_at', { ascending: false })
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .order('updated_at', { ascending: false })
           .limit(1);
         const siId = latestSi?.[0]?.id;
         if (siId) {
@@ -2029,21 +3273,29 @@ export default function Subscriptions() {
             .from('subscription_invoices')
             .update({
               status: 'sent',
-              invoice_number: invNo,
+              invoice_number: pdfInvNo,
               updated_at: new Date().toISOString(),
             })
             .eq('id', siId);
         }
         const cid = String(emailRow.customer_id || '').trim();
-        if (cid) {
-          setCycleInvoiceByCustomer((prev) => ({
-            ...prev,
-            [cid]: {
-              invoice_number: invNo,
+        const sid = String(emailRow.id || '').trim();
+        if (cid || sid) {
+          setCycleInvoiceLookup((prev) => {
+            const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
+            const entry = {
+              invoice_number: pdfInvNo,
               status: 'sent',
               updated_at: new Date().toISOString(),
-            },
-          }));
+            };
+            return {
+              byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
+              bySubscriptionId:
+                sid && !emailRow.isVirtual && !sid.startsWith('legacy-') && !sid.startsWith('virtual-')
+                  ? { ...base.bySubscriptionId, [sid]: entry }
+                  : { ...base.bySubscriptionId },
+            };
+          });
         }
       }
       setActionSuccess(`Invoice emailed to ${formFromDialog.to}.`);
@@ -2054,7 +3306,7 @@ export default function Subscriptions() {
     } finally {
       setEmailing(false);
     }
-  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, loadEmailTemplateSettings, withGlobalSignature, ensureInvoiceContext, getCurrentCycleRange]);
+  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, getCurrentCycleRange, getPdfBillingPeriodForSub, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
 
   const handleBulkEmailInvoices = useCallback(async () => {
     const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
@@ -2068,6 +3320,7 @@ export default function Subscriptions() {
     setActionSuccess(null);
 
     let defaultFrom = '';
+    let billingInquiryEmail = organization?.default_invoice_email || organization?.email || '';
     const orgName = organization?.name || 'your organization';
     const orgWebsite = organization?.website || '';
     try {
@@ -2080,11 +3333,16 @@ export default function Subscriptions() {
       const sessionEmail = sessionData?.session?.user?.email?.trim() || '';
       const profileEmail = profile?.email?.trim() || '';
       defaultFrom = sessionEmail || profileEmail || user?.email?.trim() || orgData?.default_invoice_email || orgData?.email || '';
+      billingInquiryEmail = orgData?.default_invoice_email || orgData?.email || billingInquiryEmail;
     } catch {
       defaultFrom = profile?.email?.trim() || user?.email?.trim() || '';
     }
 
-    const savedEmailTemplate = loadEmailTemplateSettings();
+    const savedEmailTemplate = getSavedEmailTemplate();
+    const remitName = String(remitAddress?.remit_name || orgName).trim();
+    const remitLine1 = String(remitAddress?.remit_address_line1 || '').trim();
+    const remitLine2 = String(remitAddress?.remit_address_line2 || '').trim();
+    const remitLine3 = String(remitAddress?.remit_address_line3 || '').trim();
 
     let sent = 0;
     let failed = 0;
@@ -2112,36 +3370,55 @@ export default function Subscriptions() {
 
         const invNo = await resolveRentalInvoiceNumberForActions(row);
         const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
-        const total = parseFloat(row.totalPerCycle) || 0;
-        const amountDue = +(total + total * 0.05 + total * 0.06).toFixed(2);
+        const bulkSnapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
+        const { doc, customerName: cn, amountDue, invoiceNumber: pdfInvNo } = await buildInvoicePdfForRow(row, invNo, bulkSnapOpts);
         const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-        let msgBody = savedEmailTemplate?.body
-          ? savedEmailTemplate.body
-              .replace(/\{invoice_number\}/gi, invNo)
-              .replace(/\{amount\}/gi, `$${formattedAmount}`)
-              .replace(/\{customer_name\}/gi, customerName)
-              .replace(/\{organization_name\}/gi, orgName)
-              .replace(/\{organization_website\}/gi, orgWebsite)
-          : `Your invoice ${invNo} for $${formattedAmount} is attached.\n\n${orgName} accepts the following payment methods: Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA. E-transfers can be sent to ${defaultFrom}.\n\nCredit Card payments will be charged a 2.4% service fee.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.\n\n\nSincerely,\n${orgName}${orgWebsite ? `\n\n${orgWebsite}` : ''}`;
-        if (savedEmailTemplate?.body && !msgBody.includes(invNo)) {
-          msgBody = `Invoice ${invNo}\n\n${msgBody}`;
-        }
-        msgBody = ensureInvoiceContext(msgBody, invNo, formattedAmount);
-        const renderedSignature = String(savedEmailTemplate?.signature || defaultTemplateSignature)
-          .replace(/\{organization_name\}/gi, orgName)
-          .replace(/\{organization_website\}/gi, orgWebsite);
-        msgBody = withGlobalSignature(msgBody, renderedSignature);
-        const subject = savedEmailTemplate?.subject
-          ? savedEmailTemplate.subject
-              .replace(/\{invoice_number\}/gi, invNo)
-              .replace(/\{amount\}/gi, `$${formattedAmount}`)
-              .replace(/\{customer_name\}/gi, customerName)
-              .replace(/\{organization_name\}/gi, orgName)
-              .replace(/\{organization_website\}/gi, orgWebsite)
-          : `Invoice ${invNo} – ${customerName} – ${orgName}`;
+        const customerPoBulk = String(
+          row?.customer?.purchase_order
+          ?? matchCustomerRecordBySubscriptionId(row?.customer_id)?.purchase_order
+          ?? '',
+        ).trim();
+        const emailVars = buildRentalInvoiceEmailVarMap({
+          invoiceNumber: pdfInvNo,
+          formattedAmount,
+          customerName,
+          customerPurchaseOrder: customerPoBulk,
+          orgName,
+          orgWebsite,
+          remitName,
+          remitLine1,
+          remitLine2,
+          remitLine3,
+          remitAddressBlock,
+          billingInquiryEmail,
+          savedTemplate: savedEmailTemplate,
+        });
 
-        const { doc, customerName: cn } = await buildInvoicePdfForRow(row, invNo);
+        const bulkBodyRaw = savedEmailTemplate?.body;
+        const bulkHasBody = typeof bulkBodyRaw === 'string' && bulkBodyRaw.trim().length > 0;
+        let msgBody = bulkHasBody
+          ? applyInvoiceEmailTemplateVars(bulkBodyRaw, emailVars)
+          : `Your invoice ${pdfInvNo} for $${formattedAmount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.`;
+        msgBody = stripRemitInstructionsFromInvoiceEmailBody(msgBody);
+        msgBody = mergePaymentMethodsIntoInvoiceEmailBody(msgBody, bulkBodyRaw, emailVars);
+        if (bulkHasBody && !msgBody.includes(pdfInvNo)) {
+          msgBody = `Invoice ${pdfInvNo}\n\n${msgBody}`;
+        }
+        msgBody = ensureInvoiceContext(msgBody, pdfInvNo, formattedAmount);
+        if (!bulkHasBody && customerPoBulk) {
+          msgBody = `${String(msgBody).trim()}\n\nCustomer P.O.: ${customerPoBulk}`;
+        }
+        const renderedSignature = applyInvoiceEmailTemplateVars(
+          String(savedEmailTemplate?.signature || defaultTemplateSignature),
+          emailVars
+        );
+        msgBody = withGlobalSignature(msgBody, renderedSignature);
+        const bulkSubjectRaw = savedEmailTemplate?.subject;
+        const bulkHasSubject = typeof bulkSubjectRaw === 'string' && bulkSubjectRaw.trim().length > 0;
+        const subject = bulkHasSubject
+          ? applyInvoiceEmailTemplateVars(bulkSubjectRaw, emailVars)
+          : `Invoice ${pdfInvNo} – ${customerName} – ${orgName}`;
         const pdfBase64 = doc.output('datauristring').split(',')[1];
         const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
         const bodyHtml = msgBody.replace(/\n/g, '<br/>');
@@ -2157,7 +3434,7 @@ export default function Subscriptions() {
             body: bodyHtml,
             pdfBase64,
             pdfFileName,
-            invoiceNumber: invNo,
+            invoiceNumber: pdfInvNo,
           }),
         });
         if (!response.ok) {
@@ -2167,23 +3444,26 @@ export default function Subscriptions() {
           sent += 1;
           setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
           try {
+            const virtualCycle = getCurrentCycleRange();
             if (row.isVirtual && row.customer_id) {
-              const { periodStart, periodEnd } = getCurrentCycleRange();
               await supabase
                 .from('invoices')
                 .update({ status: 'sent', updated_at: new Date().toISOString() })
                 .eq('organization_id', organization.id)
                 .eq('customer_id', row.customer_id)
-                .eq('period_start', periodStart)
-                .eq('period_end', periodEnd)
-                .eq('invoice_number', invNo);
+                .eq('period_start', virtualCycle.periodStart)
+                .eq('period_end', virtualCycle.periodEnd)
+                .eq('invoice_number', pdfInvNo);
             } else if (row.id && !row.isVirtual) {
+              const { periodStart, periodEnd } = getPdfBillingPeriodForSub(row);
               const { data: latestSi } = await supabase
                 .from('subscription_invoices')
                 .select('id')
                 .eq('organization_id', organization.id)
                 .eq('subscription_id', row.id)
-                .order('created_at', { ascending: false })
+                .eq('period_start', periodStart)
+                .eq('period_end', periodEnd)
+                .order('updated_at', { ascending: false })
                 .limit(1);
               const siId = latestSi?.[0]?.id;
               if (siId) {
@@ -2191,22 +3471,30 @@ export default function Subscriptions() {
                   .from('subscription_invoices')
                   .update({
                     status: 'sent',
-                    invoice_number: invNo,
+                    invoice_number: pdfInvNo,
                     updated_at: new Date().toISOString(),
                   })
                   .eq('id', siId);
               }
             }
             const cid = String(row.customer_id || '').trim();
-            if (cid) {
-              setCycleInvoiceByCustomer((prev) => ({
-                ...prev,
-                [cid]: {
-                  invoice_number: invNo,
+            const sid = String(row.id || '').trim();
+            if (cid || sid) {
+              setCycleInvoiceLookup((prev) => {
+                const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
+                const entry = {
+                  invoice_number: pdfInvNo,
                   status: 'sent',
                   updated_at: new Date().toISOString(),
-                },
-              }));
+                };
+                return {
+                  byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
+                  bySubscriptionId:
+                    sid && !row.isVirtual && !sid.startsWith('legacy-') && !sid.startsWith('virtual-')
+                      ? { ...base.bySubscriptionId, [sid]: entry }
+                      : { ...base.bySubscriptionId },
+                };
+              });
             }
           } catch {
             /* status update best-effort; email already sent */
@@ -2224,7 +3512,175 @@ export default function Subscriptions() {
     } else {
       setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
     }
-  }, [filtered, buildInvoicePdfForRow, organization, profile, user, loadEmailTemplateSettings, withGlobalSignature, ensureInvoiceContext, resolveRentalInvoiceNumberForActions]);
+  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, getPdfBillingPeriodForSub, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
+
+  const handleExportInvoicePdfsZip = useCallback(async (zipBillingPeriod) => {
+    const periodKey = zipBillingPeriod === 'yearly' ? 'yearly' : 'monthly';
+    const baseRows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
+    const rows = baseRows.filter((r) => {
+      const isYearly = canonicalBillingPeriod(r.billing_period) === 'yearly';
+      return periodKey === 'yearly' ? isYearly : !isYearly;
+    });
+    if (rows.length === 0) {
+      setActionError(
+        periodKey === 'yearly'
+          ? 'No yearly invoiceable rentals in the current view.'
+          : 'No monthly invoiceable rentals in the current view.'
+      );
+      return;
+    }
+    setZipExporting(true);
+    setZipExportBillingPeriod(periodKey);
+    setZipExportProgress({ done: 0, total: rows.length });
+    setActionError(null);
+    setActionSuccess(null);
+
+    // One rentals load for the whole ZIP — buildInvoicePdfForRow otherwise queries the full table per row.
+    const needsRentalSnapshot = rows.some(
+      (r) => String(r.customer?.billing_mode || '').toLowerCase() !== 'lease'
+    );
+    let orgRentalsCache = [];
+    if (needsRentalSnapshot) {
+      const { data, error: rentalsZipErr } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('organization_id', organization.id);
+      if (rentalsZipErr) {
+        setActionError(rentalsZipErr.message || 'Could not load rentals for ZIP export.');
+        setZipExporting(false);
+        setZipExportBillingPeriod(null);
+        setZipExportProgress({ done: 0, total: 0 });
+        return;
+      }
+      orgRentalsCache = data || [];
+    }
+
+    const zip = new JSZip();
+    const usedFinalNames = new Set();
+    const makeEntryName = (invNo, customerName) => {
+      const safeInv = String(invNo || 'INV').replace(/[^\w\-.]+/g, '_');
+      const safeCust = String(customerName || 'Customer').replace(/[^\w\-.]+/g, '_').slice(0, 72);
+      return `Rental_Invoice_${safeInv}_${safeCust}.pdf`;
+    };
+    const uniquePdfName = (invNo, customerName) => {
+      const base = makeEntryName(invNo, customerName);
+      if (!usedFinalNames.has(base)) {
+        usedFinalNames.add(base);
+        return base;
+      }
+      let n = 2;
+      let candidate = base.replace(/\.pdf$/i, `_${n}.pdf`);
+      while (usedFinalNames.has(candidate)) {
+        n += 1;
+        candidate = base.replace(/\.pdf$/i, `_${n}.pdf`);
+      }
+      usedFinalNames.add(candidate);
+      return candidate;
+    };
+
+    /** Serialize ZIP entry naming (parallel PDF workers share `usedFinalNames`). */
+    let filenameChain = Promise.resolve();
+    const reserveEntryName = (invNo, customerName) => {
+      const task = filenameChain.then(() => uniquePdfName(invNo, customerName));
+      filenameChain = task.then(
+        () => undefined,
+        () => undefined
+      );
+      return task;
+    };
+
+    let ok = 0;
+    const failLabels = [];
+
+    try {
+      const periodKeys = new Set();
+      for (const row of rows) {
+        const { periodStart, periodEnd } = computeInvoicePdfPeriodForRow(
+          row,
+          getCurrentCycleRange,
+          qbCsvBillingMonth
+        );
+        periodKeys.add(invoiceReturnsCacheKey(periodStart, periodEnd));
+      }
+      const returnsByPeriodKey = new Map();
+      await Promise.all(
+        [...periodKeys].map(async (pkey) => {
+          const pipe = pkey.indexOf('|');
+          const periodStart = pkey.slice(0, pipe);
+          const periodEnd = pkey.slice(pipe + 1);
+          const enriched = await fetchAllReturnsInInvoicePeriodForOrg(
+            supabase,
+            organization.id,
+            periodStart,
+            periodEnd
+          );
+          returnsByPeriodKey.set(pkey, enriched);
+        })
+      );
+
+      const prepared = await Promise.all(
+        rows.map(async (row, i) => {
+          const invNo = await resolveRentalInvoiceNumberForActions(row);
+          const label = row.customer?.name || row.customer?.Name || row.customer_id || `Row ${i + 1}`;
+          return { row, invNo, label };
+        })
+      );
+
+      const zipGroupsCache = new Map();
+      const pdfBuildOpts = { orgRentalsCache, returnsByPeriodKey, zipGroupsCache };
+      let done = 0;
+      await runPool(prepared, 4, async ({ row, invNo, label }) => {
+        try {
+          const { doc, customerName } = await buildInvoicePdfForRow(row, invNo, pdfBuildOpts);
+          const entryName = await reserveEntryName(invNo, customerName);
+          zip.file(entryName, doc.output('arraybuffer'));
+          ok += 1;
+        } catch (e) {
+          failLabels.push(`${label}: ${e?.message || String(e)}`);
+        } finally {
+          done += 1;
+          setZipExportProgress({ done, total: rows.length });
+        }
+      });
+
+      const blob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'STORE',
+      });
+      const orgSlug = String(organization?.name || 'invoices').replace(/[^\w\-]+/g, '_').slice(0, 48);
+      const day = new Date().toISOString().slice(0, 10);
+      const zipSuffix = periodKey === 'yearly' ? 'Yearly' : 'Monthly';
+      saveAs(blob, `Rental_Invoices_${zipSuffix}_${orgSlug}_${day}.zip`);
+
+      if (failLabels.length === 0) {
+        setActionSuccess(
+          `Downloaded ${periodKey === 'yearly' ? 'yearly' : 'monthly'} ZIP with ${ok} invoice PDF(s) (current tab, search, and terms filter).`
+        );
+      } else if (ok === 0) {
+        setActionError(
+          `${periodKey === 'yearly' ? 'Yearly' : 'Monthly'} ZIP export failed for all rows. ${failLabels.slice(0, 2).join(' · ')}${failLabels.length > 2 ? '…' : ''}`
+        );
+      } else {
+        setActionSuccess(
+          `${periodKey === 'yearly' ? 'Yearly' : 'Monthly'} ZIP has ${ok} PDF(s). ${failLabels.length} row(s) failed — e.g. ${failLabels[0]}`
+        );
+      }
+    } catch (e) {
+      setActionError(e?.message || `Failed to create ${periodKey === 'yearly' ? 'yearly' : 'monthly'} invoice ZIP.`);
+    } finally {
+      setZipExporting(false);
+      setZipExportBillingPeriod(null);
+      setZipExportProgress({ done: 0, total: 0 });
+    }
+  }, [
+    filtered,
+    buildInvoicePdfForRow,
+    resolveRentalInvoiceNumberForActions,
+    getCurrentCycleRange,
+    qbCsvBillingMonth,
+    organization?.id,
+    organization?.name,
+  ]);
 
   const headerCards = useMemo(() => [
     { label: 'Active Rentals', value: activeRentalCount, icon: <People />, color: '#10B981' },
@@ -2244,53 +3700,94 @@ export default function Subscriptions() {
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, minHeight: '100%' }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
-        <Box>
+      <Stack
+        direction={{ xs: 'column', lg: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', lg: 'flex-start' }}
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box sx={{ flexShrink: 0 }}>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Manage customer rentals and billing
           </Typography>
         </Box>
         <Stack
-          direction="row"
-          flexWrap="wrap"
-          justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
-          sx={{ maxWidth: { sm: '70%', md: '62%' }, gap: 0.5 }}
+          spacing={1.25}
+          sx={{
+            width: { xs: '100%', lg: 'auto' },
+            flex: { lg: '1 1 auto' },
+            minWidth: 0,
+            alignItems: { xs: 'stretch', sm: 'flex-end' },
+          }}
         >
-          <Tooltip title="Refresh">
-            <IconButton size="small" onClick={ctx.refresh} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => navigate('/settings?tab=invoice-template')}
-            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+          <Stack
+            direction="row"
+            flexWrap="wrap"
+            useFlexGap
+            spacing={1}
+            justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
+            sx={{ rowGap: 1, columnGap: 1 }}
           >
-            Invoice template
-          </Button>
-          <Tooltip title="Set default email subject, body, and signature in Settings">
+            <Tooltip title="Refresh list">
+              <IconButton size="small" onClick={ctx.refresh} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Button
               size="small"
               variant="outlined"
-              startIcon={<EditIcon sx={{ fontSize: 14 }} />}
               onClick={() => navigate('/settings?tab=invoice-template')}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
             >
-              Email Template
+              Invoice template
             </Button>
-          </Tooltip>
-          <Tooltip title="Filter by payment terms on the customer record (import or Customer detail). NET 30 = terms containing net and 30. Credit card = Visa, Mastercard, Amex, credit card, COD, etc.">
-            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
-              <FormControl size="small" sx={{ minWidth: 118 }}>
-                <InputLabel id="monthly-qb-cohort-label">Monthly</InputLabel>
+            <Tooltip title="Default email subject, body, and signature (Settings)" enterDelay={400}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                onClick={() => navigate('/settings?tab=invoice-template')}
+                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+              >
+                Email template
+              </Button>
+            </Tooltip>
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <InputLabel id="qb-csv-billing-month-label">QB export month</InputLabel>
+                <Select
+                  labelId="qb-csv-billing-month-label"
+                  label="QB export month"
+                  value={qbCsvBillingMonth}
+                  onChange={(e) => setQbCsvBillingMonth(e.target.value)}
+                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.65 } }}
+                  MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
+                >
+                  {qbCsvMonthMenuOptions.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Tooltip
+                title="Past month: bottle/rental counts and line totals are recomputed as of that month’s last day (same pricing rules as the app). “Current table” matches the grid and uses the active billing-cycle dates."
+                enterDelay={400}
+                placement="top"
+              >
+                <IconButton size="small" aria-label="About QuickBooks export month" sx={{ color: 'text.secondary' }}>
+                  <HelpOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <FormControl size="small" sx={{ minWidth: 160 }}>
+                <InputLabel id="monthly-qb-cohort-label">Monthly QB</InputLabel>
                 <Select
                   labelId="monthly-qb-cohort-label"
-                  label="Monthly"
+                  label="Monthly QB"
                   value={monthlyQbCohort}
                   onChange={(e) => setMonthlyQbCohort(e.target.value)}
-                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.5 } }}
+                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.65 } }}
+                  MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
                 >
                   <MenuItem value="all">All customers</MenuItem>
                   <MenuItem value="net30">NET 30 only</MenuItem>
@@ -2301,62 +3798,113 @@ export default function Subscriptions() {
                 size="small"
                 variant="outlined"
                 onClick={() => handleExportQbInvoiceCsv('monthly', monthlyQbCohort)}
+                disabled={saving || zipExporting}
                 startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
-                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
               >
-                QB CSV
+                {saving && !zipExporting ? 'Exporting…' : 'QB CSV'}
               </Button>
             </Stack>
-          </Tooltip>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => handleExportQbInvoiceCsv('yearly')}
-            startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
-            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => handleExportQbInvoiceCsv('yearly')}
+              disabled={saving || zipExporting}
+              startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+            >
+              {saving && !zipExporting ? 'Exporting…' : 'QB yearly CSV'}
+            </Button>
+          </Stack>
+          <Stack
+            direction="row"
+            flexWrap="wrap"
+            useFlexGap
+            spacing={1}
+            justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
+            sx={{ rowGap: 1, columnGap: 1 }}
           >
-            QB yearly CSV
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={handleGenerateAllInvoices}
-            disabled={saving}
-            startIcon={<InvoiceIcon sx={{ fontSize: 16 }} />}
-            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
-          >
-            Generate invoices
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={handleBulkEmailInvoices}
-            disabled={saving || bulkEmailing}
-            startIcon={<EmailIcon sx={{ fontSize: 16 }} />}
-            sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1, py: 0.25, minWidth: 0 }}
-          >
-            {bulkEmailing
-              ? `Sending ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}…`
-              : 'Bulk Email'}
-          </Button>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<AddIcon sx={{ fontSize: 16 }} />}
-            onClick={() => setCreateOpen(true)}
-            sx={{
-              borderRadius: 1.5,
-              textTransform: 'none',
-              fontSize: '0.75rem',
-              px: 1.25,
-              py: 0.25,
-              minWidth: 0,
-              bgcolor: primaryColor,
-              '&:hover': { bgcolor: primaryColor, opacity: 0.9 },
-            }}
-          >
-            New rental
-          </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleGenerateAllInvoices}
+              disabled={saving || zipExporting}
+              startIcon={<InvoiceIcon sx={{ fontSize: 16 }} />}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+            >
+              Generate invoices
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleBulkEmailInvoices}
+              disabled={saving || bulkEmailing || zipExporting}
+              startIcon={<EmailIcon sx={{ fontSize: 16 }} />}
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+            >
+              {bulkEmailing
+                ? `Sending ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}…`
+                : 'Bulk email'}
+            </Button>
+            <Tooltip
+              title="Monthly period only. Uses current table filters. Same totals as the grid (totalPerCycle)."
+              enterDelay={500}
+              placement="top"
+            >
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => handleExportInvoicePdfsZip('monthly')}
+                  disabled={saving || bulkEmailing || zipExporting}
+                  startIcon={<FolderZipIcon sx={{ fontSize: 16 }} />}
+                  sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+                >
+                  {zipExporting && zipExportBillingPeriod === 'monthly'
+                    ? `ZIP ${zipExportProgress.done}/${zipExportProgress.total}…`
+                    : 'PDF ZIP · Monthly'}
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip
+              title="Yearly / annual period only. Uses current table filters. Same totals as the grid."
+              enterDelay={500}
+              placement="top"
+            >
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => handleExportInvoicePdfsZip('yearly')}
+                  disabled={saving || bulkEmailing || zipExporting}
+                  startIcon={<FolderZipIcon sx={{ fontSize: 16 }} />}
+                  sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
+                >
+                  {zipExporting && zipExportBillingPeriod === 'yearly'
+                    ? `ZIP ${zipExportProgress.done}/${zipExportProgress.total}…`
+                    : 'PDF ZIP · Yearly'}
+                </Button>
+              </span>
+            </Tooltip>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AddIcon sx={{ fontSize: 16 }} />}
+              onClick={() => setCreateOpen(true)}
+              sx={{
+                borderRadius: 1.5,
+                textTransform: 'none',
+                fontSize: '0.75rem',
+                px: 1.5,
+                py: 0.5,
+                minWidth: 0,
+                bgcolor: primaryColor,
+                '&:hover': { bgcolor: primaryColor, opacity: 0.9 },
+              }}
+            >
+              New rental
+            </Button>
+          </Stack>
         </Stack>
       </Stack>
 
@@ -2373,6 +3921,23 @@ export default function Subscriptions() {
           <LinearProgress
             variant="determinate"
             value={bulkEmailProgress.total > 0 ? ((bulkEmailProgress.sent + bulkEmailProgress.failed) / bulkEmailProgress.total) * 100 : 0}
+            sx={{ borderRadius: 1, height: 6 }}
+          />
+        </Box>
+      )}
+      {zipExporting && (
+        <Box sx={{ mb: 2 }}>
+          <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Building {zipExportBillingPeriod === 'yearly' ? 'yearly' : 'monthly'} invoice PDFs for ZIP…
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {zipExportProgress.done} / {zipExportProgress.total}
+            </Typography>
+          </Stack>
+          <LinearProgress
+            variant="determinate"
+            value={zipExportProgress.total > 0 ? (zipExportProgress.done / zipExportProgress.total) * 100 : 0}
             sx={{ borderRadius: 1, height: 6 }}
           />
         </Box>
@@ -2397,12 +3962,12 @@ export default function Subscriptions() {
       </Grid>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ px: 2, pt: 2, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Box sx={{ px: 2, pt: 2, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' } }}>
             <Tab label={`All (${allRows.length})`} />
             <Tab label={`Monthly (${tabRowCounts.monthly})`} />
-            <Tab label={`Lease Agreements (${tabRowCounts.lease})`} />
-            <Tab label={`Cancelled (${tabRowCounts.cancelled})`} />
+            <Tab label={`Lease (${tabRowCounts.lease})`} />
           </Tabs>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>Terms:</Typography>
@@ -2431,7 +3996,7 @@ export default function Subscriptions() {
             sx={{ ml: 'auto', minWidth: 240, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
             InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
           />
-          {tabFilters[tab] === 'lease' && (
+          {SUBSCRIPTION_TAB_FILTERS[tab] === 'lease' && (
             <Button
               size="small"
               variant="outlined"
@@ -2441,6 +4006,7 @@ export default function Subscriptions() {
               Manage Lease Agreements
             </Button>
           )}
+          </Box>
         </Box>
 
         <TableContainer
@@ -2455,6 +4021,7 @@ export default function Subscriptions() {
                 <TableCell>Customer</TableCell>
                 <TableCell>Period</TableCell>
                 <TableCell>Terms</TableCell>
+                <TableCell sx={{ maxWidth: 140 }}>P.O.</TableCell>
                 <TableCell align="center">Items</TableCell>
                 <TableCell align="right">Total / Cycle</TableCell>
                 <TableCell>Invoice #</TableCell>
@@ -2465,7 +4032,7 @@ export default function Subscriptions() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                     {allRows.length === 0 ? (
                       'No rentals found yet.'
                     ) : (
@@ -2474,7 +4041,7 @@ export default function Subscriptions() {
                           No rows match this tab or search ({allRows.length} total in list).
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-                          Lease customers appear under the Lease Agreements tab. Try the All tab, or clear the search box.
+                          Lease customers appear under the Lease tab. Try the All tab, or clear the search box.
                         </Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center">
                           {search.trim() !== '' && (
@@ -2489,7 +4056,7 @@ export default function Subscriptions() {
                           )}
                           {tabRowCounts.lease > 0 && tab !== 2 && (
                             <Button size="small" variant="outlined" onClick={() => setTab(2)}>
-                              Lease Agreements ({tabRowCounts.lease})
+                              Lease ({tabRowCounts.lease})
                             </Button>
                           )}
                           {tabRowCounts.monthly > 0 && tab !== 1 && (
@@ -2553,12 +4120,37 @@ export default function Subscriptions() {
                         );
                       })()}
                     </TableCell>
+                    <TableCell sx={{ maxWidth: 140 }}>
+                      {(() => {
+                        const po = String(sub?.customer?.purchase_order ?? '').trim();
+                        return po ? (
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.8rem' }} noWrap title={po}>
+                            {po}
+                          </Typography>
+                        ) : (
+                          <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
                     <TableCell>
                       {(() => {
                         const cid = String(sub.customer_id || '').trim();
-                        const cycleInv = cid ? cycleInvoiceByCustomer[cid] : null;
+                        const sid = String(sub.id || '').trim();
+                        const lu =
+                          cycleInvoiceLookup?.byCustomerId && cycleInvoiceLookup?.bySubscriptionId
+                            ? cycleInvoiceLookup
+                            : emptyCycleInvoiceLookup();
+                        const subSidOk =
+                          sid
+                          && !sub.isVirtual
+                          && !sid.startsWith('legacy-')
+                          && !sid.startsWith('virtual-');
+                        const cycleInv =
+                          (cid && lu.byCustomerId[cid])
+                          || (subSidOk && lu.bySubscriptionId[sid])
+                          || null;
                         const invNo = String(cycleInv?.invoice_number || '').trim();
                         const st = String(cycleInv?.status || '').toLowerCase();
                         return (
@@ -2625,6 +4217,22 @@ export default function Subscriptions() {
                           }}
                         >
                           Email
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => handleExportCustomerExcel(sub)}
+                          disabled={saving || (parseFloat(sub.totalPerCycle) || 0) <= 0}
+                          sx={{
+                            textTransform: 'none',
+                            minWidth: 'auto',
+                            px: 1,
+                            py: 0.25,
+                            fontSize: '0.72rem',
+                            lineHeight: 1.2,
+                          }}
+                        >
+                          Excel
                         </Button>
                         {sub.customer_id && (
                           <Button
@@ -2757,8 +4365,12 @@ export default function Subscriptions() {
         </DialogActions>
       </Dialog>
       <EmailInvoiceDialog
+        key={emailDialogMountKey}
         open={emailOpen}
-        onClose={() => setEmailOpen(false)}
+        onClose={() => {
+          setEmailOpen(false);
+          setEmailDialogMountKey('email-dlg-closed');
+        }}
         onSend={handleSendInvoiceEmail}
         sending={emailing}
         emailRow={emailRow}

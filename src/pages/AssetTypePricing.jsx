@@ -15,6 +15,16 @@ import {
   Refresh as RefreshIcon, Search as SearchIcon, FileUpload as ImportIcon,
 } from '@mui/icons-material';
 
+/** First human-readable label from a bottle row for rental class / pricing description. */
+function suggestDescriptionFromBottle(b) {
+  const pick = (v) => String(v ?? '').trim();
+  for (const v of [b?.display_label, b?.type, b?.description, b?.gas_type]) {
+    const t = pick(v);
+    if (t) return t;
+  }
+  return '';
+}
+
 export default function AssetTypePricing() {
   const { organization } = useAuth();
   const ctx = useSubscriptions();
@@ -30,6 +40,8 @@ export default function AssetTypePricing() {
   const [storageMode, setStorageMode] = useState('asset_type_pricing');
   const [legacyRows, setLegacyRows] = useState([]);
   const [inventoryProductCodes, setInventoryProductCodes] = useState([]);
+  /** Lowercased product_code -> { description, category } from first matching bottle in inventory */
+  const [productCodeHints, setProductCodeHints] = useState({});
 
   useEffect(() => {
     let active = true;
@@ -81,12 +93,26 @@ export default function AssetTypePricing() {
       if (!organization?.id) return;
       const { data, error } = await supabase
         .from('bottles')
-        .select('product_code')
+        .select('product_code, type, description, gas_type, category')
         .eq('organization_id', organization.id)
         .not('product_code', 'is', null);
       if (!active || error) return;
-      const uniqueCodes = [...new Set((data || []).map((b) => b.product_code).filter(Boolean))];
+      const rows = data || [];
+      const uniqueCodes = [...new Set(rows.map((b) => b.product_code).filter(Boolean))];
+      const hints = {};
+      for (const b of rows) {
+        const pc = String(b.product_code || '').trim();
+        if (!pc) continue;
+        const key = pc.toLowerCase();
+        if (hints[key]) continue;
+        const suggested = suggestDescriptionFromBottle(b);
+        hints[key] = {
+          description: suggested || pc,
+          category: String(b.category || '').trim(),
+        };
+      }
       setInventoryProductCodes(uniqueCodes);
+      setProductCodeHints(hints);
     };
     loadProductCodeOptions();
     return () => { active = false; };
@@ -352,7 +378,35 @@ export default function AssetTypePricing() {
               freeSolo
               options={productCodeOptions}
               value={editItem?.product_code || ''}
-              onInputChange={(_, value) => setEditItem((p) => ({ ...p, product_code: value }))}
+              onChange={(_, newValue) => {
+                if (typeof newValue !== 'string') return;
+                const code = newValue.trim();
+                if (!code) return;
+                setEditItem((p) => {
+                  const hint = productCodeHints[code.toLowerCase()];
+                  const next = { ...p, product_code: code, description: hint?.description || code };
+                  if ((hint?.category || '').trim() && !String(p.category || '').trim()) {
+                    next.category = hint.category;
+                  }
+                  return next;
+                });
+              }}
+              onInputChange={(_, value, reason) => {
+                setEditItem((p) => {
+                  const next = { ...p, product_code: value ?? '' };
+                  if (reason === 'selectOption') {
+                    const code = String(value ?? '').trim();
+                    if (code) {
+                      const hint = productCodeHints[code.toLowerCase()];
+                      next.description = hint?.description || code;
+                      if ((hint?.category || '').trim() && !String(p.category || '').trim()) {
+                        next.category = hint.category;
+                      }
+                    }
+                  }
+                  return next;
+                });
+              }}
               disabled={!!editItem?.id && storageMode !== 'organization_rental_classes'}
               renderInput={(params) => <TextField {...params} size="small" label="Product Code" />}
             />

@@ -22,6 +22,7 @@ import {
   Edit as EditIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../hooks/useAuth';
 
 const TRACKED_FIELDS = [
   'barcode_number',
@@ -65,6 +66,7 @@ const buildFieldChanges = (before, after) => {
 export default function AssetHistory() {
   const { id } = useParams(); // id can be barcode or serial number
   const navigate = useNavigate();
+  const { organization, profile } = useAuth();
   const [asset, setAsset] = useState(null);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,16 +80,33 @@ export default function AssetHistory() {
   // Asset lookup by barcode or serial number
   useEffect(() => {
     const fetchData = async () => {
+      const searchId = String(id || '').trim();
+      const organizationId = organization?.id || profile?.organization_id || null;
+      if (!searchId) {
+        setAsset(null);
+        setRecords([]);
+        setError('Asset not found.');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
       try {
-        // Try to find asset by barcode or serial_number
-        const { data: assetData, error: assetError } = await supabase
-          .from('bottles')
-          .select('*')
-          .or(`barcode_number.eq.${id},serial_number.eq.${id}`)
-          .single();
-        if (assetError || !assetData) throw new Error('Asset not found.');
+        // Resolve by ID first, then barcode, then serial.
+        // Avoid .single() so duplicate values do not hard-fail the lookup.
+        const queryOne = async (column, value) => {
+          let q = supabase.from('bottles').select('*').eq(column, value);
+          if (organizationId) q = q.eq('organization_id', organizationId);
+          const { data, error } = await q.order('created_at', { ascending: false }).limit(1);
+          if (error) throw error;
+          return Array.isArray(data) && data.length > 0 ? data[0] : null;
+        };
+
+        let assetData = await queryOne('id', searchId);
+        if (!assetData) assetData = await queryOne('barcode_number', searchId);
+        if (!assetData) assetData = await queryOne('serial_number', searchId);
+        if (!assetData) throw new Error('Asset not found.');
         setAsset(assetData);
         setEditForm(assetData);
         // Fetch asset history/records.
@@ -172,7 +191,7 @@ export default function AssetHistory() {
       setLoading(false);
     };
     fetchData();
-  }, [id]);
+  }, [id, organization?.id, profile?.organization_id]);
 
   // Asset edit handlers
   const handleAssetEdit = () => setEditMode(true);
