@@ -31,6 +31,7 @@ import {
   History as HistoryIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
+import { clearRentalsBottleLinksForBottleIds } from '../utils/bottleDeleteHelpers';
 import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
@@ -99,6 +100,7 @@ const TRACKED_BOTTLE_FIELDS = [
   'status',
   'location',
   'assigned_customer',
+  'customer_id',
   'customer_name',
   'ownership',
   'description',
@@ -233,8 +235,8 @@ export default function AssetDetail() {
 
   const effectiveCustomerAssignment = React.useMemo(() => {
     const fallback = {
-      assignedCustomerId: asset?.assigned_customer || '',
-      customerName: asset?.customer_name || '',
+      assignedCustomerId: String(asset?.assigned_customer || asset?.customer_id || '').trim(),
+      customerName: String(asset?.customer_name || '').trim(),
       sourceAction: 'fallback'
     };
     if (!movementHistory.length) return fallback;
@@ -253,10 +255,13 @@ export default function AssetDetail() {
       }
     }
     return fallback;
-  }, [movementHistory, asset?.assigned_customer, asset?.customer_name]);
+  }, [movementHistory, asset?.assigned_customer, asset?.customer_id, asset?.customer_name]);
 
   const effectiveAssignedCustomerId = effectiveCustomerAssignment.assignedCustomerId;
   const effectiveAssignedCustomerName = effectiveCustomerAssignment.customerName;
+  const hasCustomerAssignmentDisplay = Boolean(
+    String(effectiveAssignedCustomerId || '').trim() || String(effectiveAssignedCustomerName || '').trim()
+  );
   const effectiveStatus = React.useMemo(() => {
     const fallback = normalizeStatus(asset?.status);
     if (!movementHistory.length) return fallback;
@@ -288,7 +293,7 @@ export default function AssetDetail() {
       const updateData = {
         assigned_customer: nextId || null,
         customer_name: nextName || null,
-        customer_id: nextId || null,
+        customer_uuid: nextId || null,
         status: effectiveStatus,
       };
       if (!nextId) {
@@ -324,22 +329,50 @@ export default function AssetDetail() {
   ]);
 
   const derivedDaysAtLocation = React.useMemo(() => {
-    if (!effectiveAssignedCustomerId || !movementHistory.length) {
-      return asset?.days_at_location || 0;
+    const today = toStartOfDay(new Date());
+    if (!today) return asset?.days_at_location || 0;
+
+    // Customer-assigned assets: age from latest delivery to this customer.
+    if (effectiveAssignedCustomerId && movementHistory.length) {
+      const latestCustomerDelivery = movementHistory
+        .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, effectiveAssignedCustomerId, effectiveAssignedCustomerName))
+        .map((record) => toStartOfDay(record.created_at))
+        .filter(Boolean)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+
+      if (latestCustomerDelivery) {
+        const diffDays = Math.floor((today.getTime() - latestCustomerDelivery.getTime()) / MS_PER_DAY);
+        return Math.max(0, diffDays);
+      }
     }
 
-    const latestCustomerDelivery = movementHistory
-      .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, effectiveAssignedCustomerId, effectiveAssignedCustomerName))
-      .map((record) => toStartOfDay(record.created_at))
-      .filter(Boolean)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
+    // In-house / unassigned assets: age from latest known movement event.
+    if (movementHistory.length) {
+      const latestMovementDate = movementHistory
+        .map((record) => toStartOfDay(record.created_at))
+        .filter(Boolean)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      if (latestMovementDate) {
+        const diffDays = Math.floor((today.getTime() - latestMovementDate.getTime()) / MS_PER_DAY);
+        return Math.max(0, diffDays);
+      }
+    }
 
-    if (!latestCustomerDelivery) return asset?.days_at_location || 0;
-
-    const today = toStartOfDay(new Date());
-    const diffDays = Math.floor((today.getTime() - latestCustomerDelivery.getTime()) / MS_PER_DAY);
-    return Math.max(0, diffDays);
-  }, [effectiveAssignedCustomerId, effectiveAssignedCustomerName, asset?.days_at_location, movementHistory]);
+    // Fallback to record timestamps before using stored counter.
+    const fallbackDate = toStartOfDay(asset?.updated_at || asset?.created_at);
+    if (fallbackDate) {
+      const diffDays = Math.floor((today.getTime() - fallbackDate.getTime()) / MS_PER_DAY);
+      return Math.max(0, diffDays);
+    }
+    return asset?.days_at_location || 0;
+  }, [
+    effectiveAssignedCustomerId,
+    effectiveAssignedCustomerName,
+    movementHistory,
+    asset?.updated_at,
+    asset?.created_at,
+    asset?.days_at_location
+  ]);
 
   useEffect(() => {
     fetchAssetDetail();
@@ -361,14 +394,16 @@ export default function AssetDetail() {
     }
   }, [asset?.barcode_number, asset?.serial_number, profile?.organization_id]);
 
-  // Fetch customer data when assigned_customer changes
+  // Fetch customer data when assignment id or display name changes (name-only legacy rows)
   useEffect(() => {
-    if (effectiveAssignedCustomerId) {
-      fetchCustomerData(effectiveAssignedCustomerId);
+    const hint =
+      String(effectiveAssignedCustomerId || effectiveAssignedCustomerName || '').trim();
+    if (hint) {
+      fetchCustomerData(hint);
     } else {
       setCustomerData(null);
     }
-  }, [effectiveAssignedCustomerId, profile?.organization_id]);
+  }, [effectiveAssignedCustomerId, effectiveAssignedCustomerName, profile?.organization_id]);
 
   const fetchAssetDetail = async () => {
     try {
@@ -381,7 +416,7 @@ export default function AssetDetail() {
       
       const { data, error } = await supabase
         .from('bottles')
-        .select('id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_name, ownership, description, organization_id, created_at, days_at_location, type, category')
+        .select('id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_id:customer_uuid, customer_name, ownership, description, organization_id, created_at, updated_at, days_at_location, type, category')
         .eq('id', id)
         .eq('organization_id', profile.organization_id)
         .single();
@@ -413,15 +448,16 @@ export default function AssetDetail() {
         description: data.description || ''
       });
       
-      // Fetch customer data if bottle is assigned to a customer
-      if (data?.assigned_customer) {
-        fetchCustomerData(data.assigned_customer);
+      const loadHint = String(data?.assigned_customer || data?.customer_id || data?.customer_name || '').trim();
+      if (loadHint) {
+        fetchCustomerData(loadHint);
       }
-      
-      // Movement history is fetched by the useEffect when asset state is set
+
+      return data;
     } catch (error) {
       logger.error('Error fetching asset:', error);
       setError(error.message || 'Failed to load asset details');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -583,16 +619,17 @@ export default function AssetDetail() {
     }
   };
 
-  const fetchMovementHistory = async () => {
+  const fetchMovementHistory = async (assetSnapshot = null) => {
+    const sourceAsset = assetSnapshot ?? asset;
     try {
       setLoadingHistory(true);
-      if (!profile?.organization_id || !asset) {
+      if (!profile?.organization_id || !sourceAsset) {
         setLoadingHistory(false);
         return;
       }
 
-      const barcodeNumber = asset.barcode_number;
-      const serialNumber = asset.serial_number;
+      const barcodeNumber = sourceAsset.barcode_number;
+      const serialNumber = sourceAsset.serial_number;
       
       if (!barcodeNumber && !serialNumber) {
         setMovementHistory([]);
@@ -701,7 +738,7 @@ export default function AssetDetail() {
         const { data: rentalsData, error: rentalsError } = await supabase
           .from('rentals')
           .select('*')
-          .or(`bottle_barcode.eq.${barcodeNumber},bottle_id.eq.${asset.id}`)
+          .or(`bottle_barcode.eq.${barcodeNumber},bottle_id.eq.${sourceAsset.id}`)
           .eq('organization_id', profile.organization_id)
           .order('rental_start_date', { ascending: false })
           .limit(50);
@@ -744,13 +781,13 @@ export default function AssetDetail() {
       }
 
       // Include exceptions as timeline events so users can see non-scan changes
-      if (asset.id && profile?.organization_id) {
+      if (sourceAsset.id && profile?.organization_id) {
         const exceptionRows = await runOptionalQuery(
           () =>
             supabase
               .from('asset_exceptions')
               .select('*')
-              .eq('asset_id', asset.id)
+              .eq('asset_id', sourceAsset.id)
               .eq('organization_id', profile.organization_id)
               .order('created_at', { ascending: false })
               .limit(50),
@@ -764,7 +801,7 @@ export default function AssetDetail() {
             barcode_number: barcodeNumber,
             customer_id: item.customer_id || null,
             customer_name: item.customer_name || null,
-            location: item.location || asset.location || null,
+            location: item.location || sourceAsset.location || null,
             created_at: item.created_at || nowIso,
             action: item.exception_type ? `EXCEPTION: ${item.exception_type}` : 'EXCEPTION',
             mode: item.resolution_status || 'EXCEPTION',
@@ -775,14 +812,14 @@ export default function AssetDetail() {
       }
 
       // Optional transfer activity source
-      if (profile?.organization_id && (asset.id || barcodeNumber)) {
+      if (profile?.organization_id && (sourceAsset.id || barcodeNumber)) {
         const transferRows = await runOptionalQuery(
           () =>
             supabase
               .from('transfer_history')
               .select('*')
               .eq('organization_id', profile.organization_id)
-              .or(`bottle_id.eq.${asset.id},bottle_barcode.eq.${barcodeNumber}`)
+              .or(`bottle_id.eq.${sourceAsset.id},bottle_barcode.eq.${barcodeNumber}`)
               .order('created_at', { ascending: false })
               .limit(50),
           'transfer_history'
@@ -806,7 +843,7 @@ export default function AssetDetail() {
       }
 
       // Optional audit source for direct bottle edits
-      if (profile?.organization_id && asset.id) {
+      if (profile?.organization_id && sourceAsset.id) {
         let auditRows = await runOptionalQuery(
           () =>
             supabase
@@ -814,7 +851,7 @@ export default function AssetDetail() {
               .select('*')
               .eq('organization_id', profile.organization_id)
               .eq('table_name', 'bottles')
-              .eq('record_id', asset.id)
+              .eq('record_id', sourceAsset.id)
               .order('created_at', { ascending: false })
               .limit(50),
           'audit_logs'
@@ -826,7 +863,7 @@ export default function AssetDetail() {
                 .from('audit_logs')
                 .select('*')
                 .eq('organization_id', profile.organization_id)
-                .eq('record_id', asset.id)
+                .eq('record_id', sourceAsset.id)
                 .order('created_at', { ascending: false })
                 .limit(50),
             'audit_logs_fallback'
@@ -842,7 +879,7 @@ export default function AssetDetail() {
                   .select('*')
                   .eq('organization_id', profile.organization_id)
                   .eq('action', 'BOTTLE_UPDATE')
-                  .or(`details->>bottle_id.eq.${asset.id},details->>barcode_number.eq.${barcodeForAudit}`)
+                  .or(`details->>bottle_id.eq.${sourceAsset.id},details->>barcode_number.eq.${barcodeForAudit}`)
                   .order('created_at', { ascending: false })
                   .limit(50),
               'audit_logs_details_fallback'
@@ -859,7 +896,7 @@ export default function AssetDetail() {
             barcode_number: barcodeNumber,
             customer_id: null,
             customer_name: null,
-            location: item.location || asset.location || null,
+            location: item.location || sourceAsset.location || null,
             created_at: item.created_at || nowIso,
             action: item.action ? `AUDIT: ${item.action}` : 'AUDIT UPDATE',
             mode: item.action || 'AUDIT',
@@ -871,10 +908,10 @@ export default function AssetDetail() {
       }
 
       // 4. Fetch from cylinder_fills table (for fill history)
-      if (barcodeNumber || asset.id) {
+      if (barcodeNumber || sourceAsset.id) {
         const orClauses = [];
         if (barcodeNumber) orClauses.push(`barcode_number.eq.${barcodeNumber}`);
-        if (asset.id) orClauses.push(`cylinder_id.eq.${asset.id}`);
+        if (sourceAsset.id) orClauses.push(`cylinder_id.eq.${sourceAsset.id}`);
 
         let fillsQuery = supabase
           .from('cylinder_fills')
@@ -904,26 +941,26 @@ export default function AssetDetail() {
       }
 
       // 5. Add bottle creation as "Add New Asset" if we have created_at
-      if (asset.created_at) {
+      if (sourceAsset.created_at) {
         allHistory.push({
           id: 'bottle_created',
           history_type: 'creation',
           barcode_number: barcodeNumber,
-          created_at: asset.created_at,
+          created_at: sourceAsset.created_at,
           action: 'Add New Asset',
           mode: 'CREATE',
-          location: asset.location
+          location: sourceAsset.location
         });
       }
-      if (asset.updated_at && asset.created_at && new Date(asset.updated_at).getTime() !== new Date(asset.created_at).getTime()) {
+      if (sourceAsset.updated_at && sourceAsset.created_at && new Date(sourceAsset.updated_at).getTime() !== new Date(sourceAsset.created_at).getTime()) {
         allHistory.push({
           id: 'bottle_last_updated',
           history_type: 'record_update',
           barcode_number: barcodeNumber,
-          created_at: asset.updated_at,
+          created_at: sourceAsset.updated_at,
           action: 'Asset Record Updated',
           mode: 'UPDATE',
-          location: asset.location
+          location: sourceAsset.location
         });
       }
 
@@ -1034,6 +1071,8 @@ export default function AssetDetail() {
       }
       if (editData.assigned_customer !== undefined) {
         updateData.assigned_customer = editData.assigned_customer || null;
+        // Legacy/customer views may still read customer_uuid; keep it in sync with assigned_customer.
+        updateData.customer_uuid = updateData.assigned_customer;
       }
       if (editData.customer_name !== undefined) {
         updateData.customer_name = editData.customer_name || null;
@@ -1143,8 +1182,12 @@ export default function AssetDetail() {
         }
       }
 
-      // Refresh asset data
-      await fetchAssetDetail();
+      // Refresh asset data and movement history so RETURN scans and cleared assignment are visible
+      // before syncAssignmentFromHistory runs (stale history would otherwise re-apply the old customer).
+      const freshAsset = await fetchAssetDetail();
+      if (freshAsset) {
+        await fetchMovementHistory(freshAsset);
+      }
       setEditDialog(false);
       setSuccess('Bottle updated successfully');
       
@@ -1188,7 +1231,14 @@ export default function AssetDetail() {
           },
         },
       });
-      
+
+      const { error: detachErr } = await clearRentalsBottleLinksForBottleIds(
+        supabase,
+        profile.organization_id,
+        [id]
+      );
+      if (detachErr) throw detachErr;
+
       const { error } = await supabase
         .from('bottles') // Keep using bottles table for now
         .delete()
@@ -1351,6 +1401,13 @@ export default function AssetDetail() {
               }
               size="small"
             />
+            {effectiveStatus === 'rented' && !hasCustomerAssignmentDisplay && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
+                No customer is linked on this asset record, so it is not clear who it is rented to. Movement history
+                has no ship/delivery yet. Use Edit to assign a customer, or open Rentals / the customer page if an open
+                rental row exists without a matching assignment here.
+              </Typography>
+            )}
           </Grid>
           <Grid item xs={12} md={6}>
             <Typography variant="body2" color="textSecondary">
@@ -1384,8 +1441,8 @@ export default function AssetDetail() {
         </Grid>
       </Paper>
 
-      {/* Customer Assignment */}
-      {effectiveAssignedCustomerId && (
+      {/* Customer Assignment — show when list id, legacy customer_id, or display name exists */}
+      {hasCustomerAssignmentDisplay && (
         <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Customer Assignment
@@ -1396,7 +1453,7 @@ export default function AssetDetail() {
                 Customer ID
               </Typography>
               <Typography variant="body1" fontWeight="bold">
-                {effectiveAssignedCustomerId}
+                {effectiveAssignedCustomerId || '—'}
               </Typography>
             </Grid>
             <Grid item xs={12} md={6}>

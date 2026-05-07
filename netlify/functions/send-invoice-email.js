@@ -266,8 +266,11 @@ exports.handler = async (event, _context) => {
       let fromHeader;
       let replyToHeader = addr;
 
-      // SMTP2GO: many accounts enforce verified senders/domains.
-      // Use configured sender for transport reliability and route replies to selected user.
+      // SMTP2GO: many accounts verify a whole domain or multiple mailboxes.
+      // Historically we always used SMTP2GO_FROM as From and put the UI "from" only on Reply-To,
+      // so customers saw e.g. evan@… even when accounting@… sent the invoice.
+      // Prefer the dialog-selected address as From when org opts in or it shares the same domain
+      // as the configured sender (typical @weldcor.ca mailboxes).
       if (emailService === 'SMTP2GO') {
         const smtp2goFrom =
           process.env.SMTP2GO_FROM ||
@@ -278,10 +281,28 @@ exports.handler = async (event, _context) => {
         if (!smtp2goFrom) {
           throw new Error('SMTP2GO_FROM (or EMAIL_FROM) is required for SMTP2GO sending.');
         }
-        fromHeader = `"${friendly}" <${smtp2goFrom}>`;
-        replyToHeader = addr || smtp2goFrom;
-        if (addr && addr.toLowerCase() !== String(smtp2goFrom).toLowerCase()) {
-          console.log(`SMTP2GO: using verified From ${smtp2goFrom}, Reply-To ${addr}`);
+        const trimmedAddr = addr ? String(addr).trim() : '';
+        const domainOf = (e) => {
+          try {
+            const p = String(e || '').split('@');
+            return p.length >= 2 ? p[p.length - 1].toLowerCase().trim() : '';
+          } catch {
+            return '';
+          }
+        };
+        const forceRequestFrom = String(process.env.SMTP2GO_USE_REQUEST_FROM || '').toLowerCase() === 'true';
+        const sameDomain =
+          trimmedAddr
+          && domainOf(trimmedAddr)
+          && domainOf(trimmedAddr) === domainOf(smtp2goFrom);
+        const effectiveFrom =
+          trimmedAddr && (forceRequestFrom || sameDomain) ? trimmedAddr : smtp2goFrom;
+        fromHeader = `"${friendly}" <${effectiveFrom}>`;
+        replyToHeader = trimmedAddr || effectiveFrom;
+        if (trimmedAddr && trimmedAddr.toLowerCase() !== String(effectiveFrom).toLowerCase()) {
+          console.log(`SMTP2GO: From ${effectiveFrom}, Reply-To ${trimmedAddr}`);
+        } else if (effectiveFrom !== smtp2goFrom) {
+          console.log(`SMTP2GO: using selected sender as From: ${effectiveFrom} (same domain as ${smtp2goFrom} or SMTP2GO_USE_REQUEST_FROM)`);
         }
       } else if (emailService === 'Gmail' && gmailUser && addr && addr.toLowerCase() !== gmailUser) {
         fromHeader = `"${friendly}" <${gmailUser}>`;

@@ -151,15 +151,17 @@ function lineQuantityForInvoice(line) {
 }
 
 /**
- * Exact SKU or hyphenated family only (e.g. bcs68-300 vs bcs68-300-16pack).
- * Avoids parent codes like "bchemtane" matching every bchemtane240 / bchemtane260 line.
+ * Whether an asset/return SKU `assetNorm` counts toward invoice line `lineKeyNorm`.
+ * - Exact match, or asset is a hyphenated child of the line (box300 line ← box300-16pk asset).
+ * - Does NOT match when the line is more specific than the asset (box300-16pk line ⊄ box300 return),
+ *   so parent-tier returns/shipments are not rolled into pack-size lines (fixes SHIP/RTN columns).
  */
-function codesMatchProductKey(codeNorm, keyNorm) {
-  if (!codeNorm || !keyNorm) return false;
-  if (codeNorm === keyNorm) return true;
-  const a = codeNorm.length <= keyNorm.length ? codeNorm : keyNorm;
-  const b = codeNorm.length > keyNorm.length ? codeNorm : keyNorm;
-  return b.startsWith(`${a}-`);
+function assetCodeMatchesInvoiceLineKey(assetNorm, lineKeyNorm) {
+  if (!assetNorm || !lineKeyNorm) return false;
+  if (assetNorm === lineKeyNorm) return true;
+  if (assetNorm.startsWith(`${lineKeyNorm}-`)) return true;
+  if (lineKeyNorm.startsWith(`${assetNorm}-`)) return false;
+  return false;
 }
 
 /** Match serialized bottle / open rental row to a summary line (productCounts / items). */
@@ -180,7 +182,7 @@ function bottleMatchesLineItem(b, line) {
       if (!pc || pc === '__unclassified__') return true;
       continue;
     }
-    if (codes.some((c) => codesMatchProductKey(c, key))) return true;
+    if (codes.some((c) => assetCodeMatchesInvoiceLineKey(c, key))) return true;
   }
   return false;
 }
@@ -193,7 +195,7 @@ function returnMatchesLineItem(r, line) {
   );
   for (const key of keys) {
     if (key === 'unclassified') return !rc || rc === '__unclassified__';
-    if (codesMatchProductKey(rc, key)) return true;
+    if (assetCodeMatchesInvoiceLineKey(rc, key)) return true;
   }
   return false;
 }
@@ -295,6 +297,15 @@ export async function createRentalInvoicePdfDoc(params) {
 
   const invNo = invoiceNumber || defaultInvoiceNumber(row);
   const customer = customerRecord || row?.customer || {};
+  /** Customer PO from `customers.purchase_order`, unless caller passed an explicit value. */
+  const purchaseOrderDisplay = (() => {
+    const passed = String(purchaseOrder ?? '').trim();
+    if (passed && passed !== '—') return passed;
+    const fromCustomer = String(
+      customer.purchase_order ?? row?.customer?.purchase_order ?? '',
+    ).trim();
+    return fromCustomer || '—';
+  })();
   const billLines = billToLines(customer);
   const shipDisplay = shipToLines(customer, billLines);
 
@@ -383,7 +394,7 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.setFont(fontFamily, 'bold');
   doc.setFontSize(9);
   doc.setTextColor(20, 20, 20);
-  doc.text(String(organization?.name || remitName).toUpperCase(), left, issuerY);
+  doc.text(String(remitName).toUpperCase(), left, issuerY);
   issuerY += 4;
   doc.setFont(fontFamily, 'normal');
   doc.setFontSize(7.5);
@@ -448,13 +459,13 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.setFont(fontFamily, 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(55, 55, 55);
-  doc.text('PLEASE REMIT PAYMENT TO:', left + 2, y + 4);
+  doc.text('Please remit payment to:', left + 2, y + 4);
   let remitInnerY = y + 8;
   doc.setFont(fontFamily, 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(35, 35, 35);
   remitLines.forEach((ln) => {
-    doc.text(String(ln).toUpperCase(), left + 2, remitInnerY);
+    doc.text(String(ln), left + 2, remitInnerY);
     remitInnerY += 3.6;
   });
   const remitBoxH = remitInnerY - remitBoxTop + 3;
@@ -523,7 +534,11 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.text(String(shipAcct), b3, bandValY);
   doc.text(String(terms), b4, bandValY);
   doc.text(formatUsDate(dates.due), b5, bandValY);
-  doc.text(purchaseOrder && purchaseOrder !== '—' ? String(purchaseOrder) : '', b6, bandValY);
+  doc.text(
+    purchaseOrderDisplay && purchaseOrderDisplay !== '—' ? String(purchaseOrderDisplay) : '',
+    b6,
+    bandValY,
+  );
   y = bandTop + bandTotalH + 8;
 
   // --- Rental summary table (black column header, grid) ---

@@ -2239,7 +2239,7 @@ export default function ImportApprovals() {
       // NOTE: bottle_scans uses 'bottle_barcode' and 'cylinder_barcode', not 'barcode_number'
       let bottleScans = [];
       
-      const bottleScansSelect = 'bottle_barcode, cylinder_barcode, barcode_number, created_at, order_number, organization_id, mode';
+      const bottleScansSelect = 'bottle_barcode, cylinder_barcode, barcode_number, created_at, timestamp, order_number, organization_id, mode, action, user_id';
       // Try exact match first (string)
       let { data: bottleScansData, error: bottleScansError } = await supabase
         .from('bottle_scans')
@@ -2514,6 +2514,7 @@ export default function ImportApprovals() {
                 mode: s.mode,
                 created_at: s.created_at,
                 customer_name: s.customer_name,
+                user_id: s.user_id ?? null,
                 isReturn: thisIsReturn,
                 time
               });
@@ -2585,12 +2586,32 @@ export default function ImportApprovals() {
 
           const orderNorm = normalizeOrderNum(orderNumber);
 
+          const scanUserIds = [
+            ...new Set(
+              Array.from(barcodeToBestScan.values())
+                .map((v) => v.user_id)
+                .filter(Boolean)
+            ),
+          ];
+          let profileById = {};
+          if (scanUserIds.length > 0) {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, email, full_name')
+              .in('id', scanUserIds);
+            (profs || []).forEach((p) => {
+              profileById[p.id] = p.full_name || p.email || p.id;
+            });
+          }
+
           // Match bottles with scan information (most recent wins so View Bottles matches card Trk)
           bottleData.forEach(bottle => {
             const b = bottle.barcode_number?.toString().trim();
             const best = b ? barcodeToBestScan.get(b) : null;
             const scanAction = best ? (best.action || best.mode) : 'unknown';
             const scanDate = best?.created_at ?? null;
+            const scanUserId = best?.user_id ?? null;
+            const scanUserDisplay = scanUserId ? profileById[scanUserId] || scanUserId : '—';
             const movementNow = latestGlobalByBarcode.get(normalizeBarcode(b));
             const hasMovementNow = !!movementNow;
             const customer_name = hasMovementNow ? movementNow.customer_name : (bottle.customer_name ?? best?.customer_name ?? null);
@@ -2607,6 +2628,8 @@ export default function ImportApprovals() {
               location,
               scanAction,
               scanDate,
+              scanUserId,
+              scanUserDisplay,
               latestGlobalOnThisOrder
             });
           });
@@ -4771,6 +4794,7 @@ export default function ImportApprovals() {
                       <TableCell><strong>Category/Group/Type</strong></TableCell>
                       <TableCell><strong>Description</strong></TableCell>
                       <TableCell><strong>Scan Action</strong></TableCell>
+                      <TableCell><strong>Scanned by</strong></TableCell>
                       <TableCell><strong>Actions</strong></TableCell>
                     </TableRow>
                   </TableHead>
@@ -4894,6 +4918,11 @@ export default function ImportApprovals() {
                               'default'
                             }
                           />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {bottle.scanUserDisplay ?? '—'}
+                          </Typography>
                         </TableCell>
                         <TableCell>
                           <IconButton

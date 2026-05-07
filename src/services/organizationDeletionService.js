@@ -191,7 +191,15 @@ export class OrganizationDeletionService {
       deletedCounts.bottle_scans = bottleScansCount || 0;
       logger.log(`✅ Deleted ${deletedCounts.bottle_scans} bottle scans`);
 
-      // 2. Delete bottles
+      // 2. Delete rentals (must run before bottles: rentals_bottle_id_fkey -> bottles.id)
+      const { count: rentalsCount } = await supabase
+        .from('rentals')
+        .delete({ count: 'exact' })
+        .eq('organization_id', organizationId);
+      deletedCounts.rentals = rentalsCount || 0;
+      logger.log(`✅ Deleted ${deletedCounts.rentals} rentals`);
+
+      // 3. Delete bottles
       const { count: bottlesCount } = await supabase
         .from('bottles')
         .delete({ count: 'exact' })
@@ -199,21 +207,13 @@ export class OrganizationDeletionService {
       deletedCounts.bottles = bottlesCount || 0;
       logger.log(`✅ Deleted ${deletedCounts.bottles} bottles`);
 
-      // 3. Delete customers
+      // 4. Delete customers
       const { count: customersCount } = await supabase
         .from('customers')
         .delete({ count: 'exact' })
         .eq('organization_id', organizationId);
       deletedCounts.customers = customersCount || 0;
       logger.log(`✅ Deleted ${deletedCounts.customers} customers`);
-
-      // 4. Delete rentals
-      const { count: rentalsCount } = await supabase
-        .from('rentals')
-        .delete({ count: 'exact' })
-        .eq('organization_id', organizationId);
-      deletedCounts.rentals = rentalsCount || 0;
-      logger.log(`✅ Deleted ${deletedCounts.rentals} rentals`);
 
       // 5. Delete invoices
       const { count: invoicesCount } = await supabase

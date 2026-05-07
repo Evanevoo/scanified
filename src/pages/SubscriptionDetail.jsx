@@ -42,7 +42,14 @@ export default function SubscriptionDetail() {
   const sub = ctx.subscriptions.find((s) => s.id === id);
   const items = useMemo(() => ctx.subscriptionItems.filter((i) => i.subscription_id === id), [ctx.subscriptionItems, id]);
   const activeItems = items.filter((i) => i.status === 'active');
-  const customer = ctx.customers.find((c) => c.id === sub?.customer_id || c.CustomerListID === sub?.customer_id);
+  const subCustKey = String(sub?.customer_id || '').trim().toLowerCase();
+  const customer =
+    (ctx.customers || []).find((c) => {
+      const ids = [c.id, c.CustomerListID]
+        .map((x) => String(x ?? '').trim().toLowerCase())
+        .filter(Boolean);
+      return subCustKey && ids.includes(subCustKey);
+    }) || null;
   const subInvoices = useMemo(() => ctx.invoices.filter((i) => i.subscription_id === id), [ctx.invoices, id]);
   const total = computeSubscriptionTotal(activeItems);
 
@@ -143,6 +150,11 @@ export default function SubscriptionDetail() {
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2}>
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 700 }}>{customer?.name || customer?.Name || sub.customer_id}</Typography>
+            {String(customer?.purchase_order || '').trim() !== '' && (
+              <Typography variant="body2" sx={{ mt: 0.75, color: 'text.secondary', fontFamily: 'monospace' }}>
+                P.O.: <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>{customer.purchase_order}</Box>
+              </Typography>
+            )}
             <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
               <Chip label={sub.status} color={STATUS_COLORS[sub.status] || 'default'} size="small" sx={{ fontWeight: 600, textTransform: 'capitalize' }} />
               <Chip label={sub.billing_period} variant="outlined" size="small" sx={{ fontWeight: 600, textTransform: 'capitalize' }} />

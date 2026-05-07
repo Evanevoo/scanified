@@ -1,4 +1,8 @@
 import logger from '../utils/logger';
+import {
+  clearRentalsBottleLinksForBottleIds,
+  clearAllRentalsBottleLinksForOrg,
+} from '../utils/bottleDeleteHelpers';
 
 import React, { useState, useEffect, useMemo } from 'react';
 
@@ -188,7 +192,13 @@ const BottleManagement = () => {
 
             "CustomerListID",
 
-            name
+            name,
+
+            deleted_at,
+
+            is_deleted,
+
+            is_active
 
           )
 
@@ -240,7 +250,39 @@ const BottleManagement = () => {
 
       
 
-      setBottles(data || []);
+      const normalizedBottles = (data || []).map((bottle) => {
+
+        const hasAssignedCustomer = !!String(bottle.assigned_customer || '').trim();
+
+        const linkedCustomer = bottle.customers || null;
+
+        const linkedCustomerDeleted = !!linkedCustomer?.deleted_at || linkedCustomer?.is_deleted === true || linkedCustomer?.is_active === false;
+
+        if (!hasAssignedCustomer || linkedCustomerDeleted) {
+
+          return {
+
+            ...bottle,
+
+            assigned_customer: null,
+
+            customer_name: null
+
+          };
+
+        }
+
+        return {
+
+          ...bottle,
+
+          customer_name: linkedCustomer?.name || bottle.customer_name || null
+
+        };
+
+      });
+
+      setBottles(normalizedBottles);
 
     } catch (error) {
 
@@ -471,6 +513,30 @@ const BottleManagement = () => {
             return '';
           };
 
+
+          const normalizeBarcode = (value) => {
+            if (value === undefined || value === null) return '';
+            let normalized = String(value).trim();
+            // Excel numeric cells can become "123456789.0" when parsed.
+            normalized = normalized.replace(/\.0+$/, '');
+            return normalized;
+          };
+
+          const stripLeadingZeros = (value) => {
+            const normalized = normalizeBarcode(value);
+            if (!normalized) return '';
+            const stripped = normalized.replace(/^0+/, '');
+            return stripped || '0';
+          };
+
+          const barcodesMatch = (left, right) => {
+            const leftNorm = normalizeBarcode(left);
+            const rightNorm = normalizeBarcode(right);
+            if (!leftNorm || !rightNorm) return false;
+            if (leftNorm === rightNorm) return true;
+            return stripLeadingZeros(leftNorm) === stripLeadingZeros(rightNorm);
+          };
+
           const rowIndicatesDeliveredNotScanned = (row) => {
             const status = getColumnValue(row, [
               'Status',
@@ -553,14 +619,33 @@ const BottleManagement = () => {
             
             // If Branch is a location name, use it as location only, not as customer
             // Otherwise, check Branch and other columns for customer information
+            const customerColumnCandidates = [
+              'Customer',
+              'customer',
+              'customer_name',
+              'Customer Name',
+              'CustomerName',
+              'Customer Number',
+              'customer_number',
+              'Customer #',
+              'customer #',
+              'Customer No',
+              'customer no',
+              'Customer Name/Number',
+              'Customer Name / Number',
+              'CustomerNameNumber',
+              'Customer Info',
+              'customer_info'
+            ];
             let customerName = null;
             if (!isLocationName) {
               // Branch is not a location, so it might be a customer name
-              customerName = getColumnValue(row, ['Branch', 'branch', 'Customer', 'customer', 'customer_name', 'Customer Name']);
+              customerName = getColumnValue(row, ['Branch', 'branch', ...customerColumnCandidates]);
             } else {
               // Branch is a location, check other columns for customer
-              customerName = getColumnValue(row, ['Customer', 'customer', 'customer_name', 'Customer Name']);
+              customerName = getColumnValue(row, customerColumnCandidates);
             }
+
             
             // Get location - prefer Location column, but if Branch is a location name, use that
             const locationColumn = getColumnValue(row, ['Location', 'location']) || '';
@@ -588,12 +673,32 @@ const BottleManagement = () => {
               // Remove "Header:" prefix if present (e.g., "Supreme Steel Header:Supreme Steel LP SK")
               customerName = customerName.replace(/^[^:]*Header:\s*/i, '').trim();
               
-              const idMatch = customerName.match(/\(([^)]+)\)\s*$/);
-              if (idMatch) {
-                customerId = idMatch[1].trim().toUpperCase();
-                // Clean the customer name by removing the ID in brackets
+              // Common formats:
+              //   "Acme Welding (12345)"
+              //   "Acme Welding - 12345"
+              //   "Acme Welding #12345"
+              //   "12345 - Acme Welding"
+              const trailingParen = customerName.match(/\(([^)]+)\)\s*$/);
+              const trailingDash = customerName.match(/\s[-–—]\s*([A-Za-z0-9._/\\-]+)\s*$/);
+              const trailingHash = customerName.match(/\s#\s*([A-Za-z0-9._/\\-]+)\s*$/);
+              const leadingId = customerName.match(/^\s*([A-Za-z0-9._/\\-]{3,})\s[-–—]\s*(.+)$/);
+
+              if (trailingParen) {
+                customerId = trailingParen[1].trim().toUpperCase();
                 customerName = customerName.replace(/\s*\([^)]+\)\s*$/, '').trim();
-                logger.log(`Extracted CustomerListID "${customerId}" from customer name, cleaned name: "${customerName}"`);
+              } else if (trailingDash) {
+                customerId = trailingDash[1].trim().toUpperCase();
+                customerName = customerName.replace(/\s[-–—]\s*[A-Za-z0-9._/\\-]+\s*$/, '').trim();
+              } else if (trailingHash) {
+                customerId = trailingHash[1].trim().toUpperCase();
+                customerName = customerName.replace(/\s#\s*[A-Za-z0-9._/\\-]+\s*$/, '').trim();
+              } else if (leadingId) {
+                customerId = leadingId[1].trim().toUpperCase();
+                customerName = leadingId[2].trim();
+              }
+
+              if (customerId) {
+                logger.log(`Extracted CustomerListID "${customerId}" from customer field, cleaned name: "${customerName}"`);
               }
             }
 
@@ -743,7 +848,18 @@ const BottleManagement = () => {
 
             const bottle = {
 
-              barcode_number: String(row['Barcode'] || row['barcode_number'] || row['Barcode Number'] || '').trim(),
+              barcode_number: normalizeBarcode(
+                getColumnValue(row, [
+                  'Barcode',
+                  'barcode',
+                  'barcode_number',
+                  'Barcode Number',
+                  'Bottle Barcode',
+                  'bottle_barcode',
+                  'Asset Barcode',
+                  'asset_barcode'
+                ])
+              ),
 
               serial_number: getColumnValue(row, ['Serial Number', 'serial_number', 'Serial', 'SerialNumber', 'SerialNum', 'serial_num', 'serial']),
 
@@ -1133,6 +1249,7 @@ const BottleManagement = () => {
 
           // Track barcodes we've seen in THIS upload batch to catch duplicates within the file.
           const seenBarcodesInBatch = new Set();
+          const seenSerialsInBatch = new Set();
           
           // Split records into inserts vs updates for existing barcodes.
           const newBottles = [];
@@ -1155,41 +1272,51 @@ const BottleManagement = () => {
 
           bottlesToInsert.forEach((bottle, index) => {
             // Normalize barcode to string (CSV may give number) for consistent duplicate check
-            const barcode = bottle.barcode_number != null ? String(bottle.barcode_number).trim() : '';
+            const barcode = normalizeBarcode(bottle.barcode_number);
             const serial = bottle.serial_number != null ? String(bottle.serial_number).trim() : (bottle.serial_number?.trim?.() ?? '');
             
             // Only check for duplicates if we have a VALID barcode (not placeholder values)
             // Rows without valid barcode are still allowed – they're inserted (avoids blocking uploads when column name differs)
             const hasValidBarcode = isValidIdentifier(barcode);
+            const hasValidSerial = isValidIdentifier(serial);
             
-            if (!hasValidBarcode) {
-              newBottles.push(bottle);
-              logger.log(`Allowing bottle without valid barcode (row ${index + 1}): Barcode="${barcode || 'N/A'}", Serial="${serial || 'N/A'}"`);
-              return;
-            }
-            
-            // First check: Is this a duplicate WITHIN the upload batch? (by barcode only, normalized)
-            const isDuplicateInBatch = seenBarcodesInBatch.has(barcode);
+            // First check: duplicate within upload batch by barcode or serial
+            const isDuplicateInBatch =
+              (hasValidBarcode && seenBarcodesInBatch.has(barcode)) ||
+              (hasValidSerial && seenSerialsInBatch.has(serial));
             
             if (isDuplicateInBatch) {
               duplicatesInFile.push({
                 barcode: barcode || 'N/A',
                 serial: serial || 'N/A',
-                reason: 'barcode (duplicate in file)',
+                reason: hasValidBarcode && seenBarcodesInBatch.has(barcode)
+                  ? 'barcode (duplicate in file)'
+                  : 'serial (duplicate in file)',
                 row: index + 1
               });
-              logger.log(`Skipping duplicate bottle in upload file (row ${index + 1}): Barcode=${barcode}, Serial=${serial || 'N/A'} (barcode "${barcode}" already seen in this file)`);
+              logger.log(`Skipping duplicate bottle in upload file (row ${index + 1}): Barcode=${barcode || 'N/A'}, Serial=${serial || 'N/A'}`);
               return; // Skip this bottle
             }
 
-            // Mark this barcode as processed so a second row in the same upload is skipped.
-            seenBarcodesInBatch.add(barcode);
+            // Mark identifiers as processed so second row in same upload is skipped.
+            if (hasValidBarcode) seenBarcodesInBatch.add(barcode);
+            if (hasValidSerial) seenSerialsInBatch.add(serial);
             
-            // Second check: Does this bottle already exist in the database? (by barcode only, normalized string)
-            const existingBottle = existingBottles.find(existing => {
-              const existingBarcode = existing.barcode_number != null ? String(existing.barcode_number).trim() : '';
-              return existingBarcode && isValidIdentifier(existingBarcode) && existingBarcode === barcode;
-            });
+            // Second check: Does this bottle already exist in the database?
+            // Match by barcode first, then serial number fallback.
+            let existingBottle = null;
+            if (hasValidBarcode) {
+              existingBottle = existingBottles.find(existing => {
+                const existingBarcode = normalizeBarcode(existing.barcode_number);
+                return existingBarcode && isValidIdentifier(existingBarcode) && barcodesMatch(existingBarcode, barcode);
+              }) || null;
+            }
+            if (!existingBottle && hasValidSerial) {
+              existingBottle = existingBottles.find(existing => {
+                const existingSerial = existing.serial_number != null ? String(existing.serial_number).trim() : '';
+                return existingSerial && isValidIdentifier(existingSerial) && existingSerial === serial;
+              }) || null;
+            }
             
             if (existingBottle) {
               bottlesToUpdate.push({
@@ -1202,6 +1329,9 @@ const BottleManagement = () => {
               logger.log(`Queued bottle update for existing barcode "${barcode}" (id: ${existingBottle.id})`);
             } else {
               // This is a new bottle - insert it.
+              if (!hasValidBarcode && !hasValidSerial) {
+                logger.log(`Allowing bottle without valid barcode/serial (row ${index + 1}) as insert`);
+              }
               newBottles.push(bottle);
             }
           });
@@ -1443,6 +1573,18 @@ const BottleManagement = () => {
       }
 
 
+
+      const { error: detachErr } = await clearRentalsBottleLinksForBottleIds(
+        supabase,
+        organization?.id,
+        bottleIds
+      );
+      if (detachErr) {
+        throw new Error(
+          detachErr.message
+            || 'Could not unlink rentals from these bottles. Check permissions or close open rentals first.'
+        );
+      }
 
       // Try deleting in smaller batches to avoid timeouts
 
@@ -1770,7 +1912,8 @@ const BottleManagement = () => {
 
       setLoading(true);
 
-      
+      const { error: detachAllErr } = await clearAllRentalsBottleLinksForOrg(supabase, organization.id);
+      if (detachAllErr) throw detachAllErr;
 
       // Delete all bottles for this organization
 

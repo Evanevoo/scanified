@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useLayoutEffect, useCallback } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, TextField, Stack, Typography, FormControl,
@@ -19,17 +19,23 @@ function EmailInvoiceDialog({
   const [recipientInput, setRecipientInput] = useState('');
   const [recipients, setRecipients] = useState([]);
 
-  useEffect(() => {
-    if (open && initialForm) {
-      setForm(initialForm);
-      const initial = String(initialForm.to || '').trim();
-      if (initial) {
-        setRecipients(initial.split(',').map((e) => e.trim()).filter(Boolean));
-      } else {
-        setRecipients([]);
-      }
-      setRecipientInput('');
+  // useLayoutEffect: apply parent-built template before paint so Message/Subject never flash stale defaults.
+  // Parent remounts this dialog (React key) on each open.
+  useLayoutEffect(() => {
+    if (!open || !initialForm) return;
+    setForm({
+      to: initialForm.to ?? '',
+      from: initialForm.from ?? '',
+      subject: initialForm.subject ?? '',
+      message: initialForm.message ?? '',
+    });
+    const initial = String(initialForm.to || '').trim();
+    if (initial) {
+      setRecipients(initial.split(',').map((e) => e.trim()).filter(Boolean));
+    } else {
+      setRecipients([]);
     }
+    setRecipientInput('');
   }, [open, initialForm]);
 
   const addRecipient = useCallback((raw) => {

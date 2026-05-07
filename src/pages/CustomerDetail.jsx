@@ -75,6 +75,7 @@ import {
   invalidateOrgRentalPricingCache,
 } from '../utils/rentalPricing';
 import { findActiveLeaseContract } from '../services/leaseBilling';
+import { isCustomerOwnedForBilling } from '../services/billingFromAssets';
 
 /** rentals.location is often empty; use the live bottle and then customer branch. */
 function displayRentalRowLocation(rental, bottle, customer) {
@@ -306,7 +307,6 @@ export default function CustomerDetail() {
   const [rentalSettingsForm, setRentalSettingsForm] = useState({
     payment_terms: '',
     purchase_order: '',
-    purchase_order_required: true,
     tax_region: '',
     daily_calculation_method: 'start_of_day',
     minimum_billable_amount: '5.00',
@@ -342,13 +342,14 @@ export default function CustomerDetail() {
   /** Bottles referenced by open rentals but missing from merged assigned-bottle list (stale/wrong customer link, etc.). */
   const [supplementalBottles, setSupplementalBottles] = useState([]);
   const [reassigningOrphans, setReassigningOrphans] = useState(false);
+  const [endingOrphanRentals, setEndingOrphanRentals] = useState(false);
 
   /**
    * Bottles for this account. Legacy import paths could have saved:
    *   - bottles.assigned_customer = CustomerListID (correct)
    *   - bottles.assigned_customer = display name
-   *   - bottles.customer_id      = CustomerListID
-   *   - bottles.customer_id      = display name
+   *   - bottles.customer_uuid    = CustomerListID
+   *   - bottles.customer_uuid    = display name
    *   - bottles.customer_name    = display name
    * Merge every match so no assignments disappear.
    */
@@ -359,7 +360,7 @@ export default function CustomerDetail() {
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
         : Promise.resolve({ data: [], error: null }),
       listId
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', listId)
+        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', listId)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -376,7 +377,7 @@ export default function CustomerDetail() {
     if (customerName) {
       const legacyRuns = await Promise.all([
         supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName),
-        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_id', customerName),
+        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', customerName),
         supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName),
       ]);
       legacyRuns.forEach(({ data, error }) => {
@@ -489,7 +490,7 @@ export default function CustomerDetail() {
   const dnsSummaryByType = useMemo(() => {
     const byType = {};
     (dnsOnlyRentals || []).forEach(r => {
-      const type = r.dns_product_code || r.product_code || 'DNS';
+      const type = r.dns_product_code || r.product_code || 'UNCLASSIFIED';
       byType[type] = (byType[type] || 0) + 1;
     });
     return byType;
@@ -519,7 +520,7 @@ export default function CustomerDetail() {
       id: 'dns-' + r.id,
       serial_number: '—',
       barcode_number: (r.dns_description || '').includes('Return not on balance') ? (r.bottle_barcode || 'RNB') : (r.bottle_barcode || 'DNS'),
-      type: r.dns_product_code || r.product_code || '—',
+      type: r.dns_product_code || r.product_code || 'UNCLASSIFIED',
       description: r.dns_description || '',
       location: '—',
       isDns: true
@@ -663,7 +664,8 @@ export default function CustomerDetail() {
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
         const barcodesWithRental = new Set(merged.map(r => r.bottle_barcode).filter(Boolean));
-        const bottlesWithoutRental = (customerAssetsData || []).filter(b => {
+        const bottlesWithoutRental = (customerAssetsData || []).filter((b) => {
+          if (isCustomerOwnedForBilling(b)) return false;
           const hasById = b.id && bottleIdsWithRental.has(b.id);
           const barcode = b.barcode_number || b.barcode;
           const hasByBarcode = barcode && barcodesWithRental.has(barcode);
@@ -980,15 +982,28 @@ export default function CustomerDetail() {
 
   const handleReassignOrphans = async () => {
     if (!customer || !organization?.id) return;
+    const normalizeBarcode = (value) => {
+      if (value === undefined || value === null) return '';
+      return String(value).trim().replace(/\.0+$/, '');
+    };
+    const stripLeadingZeros = (value) => {
+      const normalized = normalizeBarcode(value);
+      if (!normalized) return '';
+      const stripped = normalized.replace(/^0+/, '');
+      return stripped || '0';
+    };
+
     const listId = customer.CustomerListID || id;
     const toFix = orphanRentals.filter((o) => o.bottle?.id);
     if (!toFix.length) return;
     setReassigningOrphans(true);
     try {
       let fixed = 0;
+      let alreadyAssigned = 0;
       for (const { rental, bottle } of toFix) {
         const payload = {
           assigned_customer: listId,
+          customer_uuid: listId,
           customer_name: customer.name,
         };
         let updated = false;
@@ -1008,20 +1023,66 @@ export default function CustomerDetail() {
           }
         }
 
-        // Fallback: update by rental barcode when id path updated 0 rows.
+        // Fallback: resolve bottle id from rental barcode/serial variants, then update by id.
         if (!updated) {
-          const barcode = String(rental?.bottle_barcode || '').trim();
-          if (barcode) {
-            const { data, error } = await supabase
-              .from('bottles')
-              .update(payload)
-              .eq('organization_id', organization.id)
-              .or(`barcode_number.eq.${barcode},serial_number.eq.${barcode}`)
-              .select('id');
-            if (error) {
-              logger.error('Reassign orphan bottle by barcode failed:', error);
-            } else if ((data || []).length > 0) {
-              updated = true;
+          const barcodeRaw = normalizeBarcode(rental?.bottle_barcode);
+          if (barcodeRaw) {
+            const candidates = [barcodeRaw];
+            const noLeadingZeros = stripLeadingZeros(barcodeRaw);
+            if (noLeadingZeros && !candidates.includes(noLeadingZeros)) {
+              candidates.push(noLeadingZeros);
+            }
+
+            let resolvedBottleId = null;
+            let resolvedBottleRow = null;
+
+            for (const candidate of candidates) {
+              const [byBarcodeRes, bySerialRes] = await Promise.all([
+                supabase
+                  .from('bottles')
+                  .select('id, assigned_customer, customer_name')
+                  .eq('organization_id', organization.id)
+                  .eq('barcode_number', candidate)
+                  .limit(1),
+                supabase
+                  .from('bottles')
+                  .select('id, assigned_customer, customer_name')
+                  .eq('organization_id', organization.id)
+                  .eq('serial_number', candidate)
+                  .limit(1),
+              ]);
+
+              const byBarcodeRow = byBarcodeRes?.data?.[0] || null;
+              const bySerialRow = bySerialRes?.data?.[0] || null;
+              const hit = byBarcodeRow || bySerialRow;
+              if (hit?.id) {
+                resolvedBottleId = hit.id;
+                resolvedBottleRow = hit;
+                break;
+              }
+            }
+
+            if (resolvedBottleId) {
+              const alreadyCorrect =
+                String(resolvedBottleRow?.assigned_customer || '').trim() === String(listId).trim()
+                && String(resolvedBottleRow?.customer_name || '').trim() === String(customer.name || '').trim();
+
+              if (alreadyCorrect) {
+                alreadyAssigned += 1;
+                updated = true;
+              } else {
+                const { data, error } = await supabase
+                  .from('bottles')
+                  .update(payload)
+                  .eq('id', resolvedBottleId)
+                  .eq('organization_id', organization.id)
+                  .select('id');
+                if (error) {
+                  logger.error('Reassign orphan bottle by resolved id failed:', error);
+                } else if ((data || []).length > 0) {
+                  updated = true;
+                }
+              }
             }
           }
         }
@@ -1039,7 +1100,9 @@ export default function CustomerDetail() {
         message:
           fixed > 0
             ? `Reassigned ${fixed} bottle(s) to ${customer.name}.`
-            : 'No bottle assignments were changed. These rows may already be assigned or require manual data repair.',
+            : alreadyAssigned > 0
+              ? `${alreadyAssigned} bottle(s) were already assigned to ${customer.name}.`
+              : 'No bottle assignments were changed. These rows may already be assigned or require manual data repair.',
         severity: fixed > 0 ? 'success' : 'warning',
       });
     } catch (e) {
@@ -1047,6 +1110,72 @@ export default function CustomerDetail() {
       setTransferMessage({ open: true, message: e?.message || 'Failed to reassign', severity: 'error' });
     } finally {
       setReassigningOrphans(false);
+    }
+  };
+
+  const orphanRentalsToEnd = useMemo(
+    () => (orphanRentals || []).filter((o) => o.rental?.id && !o.rental?.is_dns),
+    [orphanRentals]
+  );
+
+  const handleEndOrphanRentals = async () => {
+    if (!customer?.organization_id) return;
+    const rows = orphanRentalsToEnd;
+    if (!rows.length) return;
+    const n = rows.length;
+    if (
+      !window.confirm(
+        `Close ${n} open rental row(s) for this customer? They will stop being billed (use when cylinders were transferred back to the warehouse or should not be on rent).`
+      )
+    ) {
+      return;
+    }
+    setEndingOrphanRentals(true);
+    try {
+      const endDate = new Date().toISOString().split('T')[0];
+      const updatedAt = new Date().toISOString();
+      let closed = 0;
+      for (const { rental } of rows) {
+        const { error } = await supabase
+          .from('rentals')
+          .update({
+            rental_end_date: endDate,
+            updated_at: updatedAt,
+          })
+          .eq('id', rental.id)
+          .eq('organization_id', customer.organization_id);
+        if (error) {
+          logger.error('End orphan rental failed:', error);
+        } else {
+          closed += 1;
+        }
+      }
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        customer.organization_id,
+        customer.name,
+        customer.CustomerListID
+      );
+      setLocationAssets(merged);
+      if (closed > 0 && typeof subscriptionCtx?.refresh === 'function') {
+        subscriptionCtx.refresh();
+      }
+      setTransferMessage({
+        open: true,
+        message:
+          closed > 0
+            ? `Closed ${closed} rental row(s). They are no longer included in open rental billing.`
+            : 'No rental rows were closed.',
+        severity: closed > 0 ? 'success' : 'warning',
+      });
+    } catch (e) {
+      logger.error('End orphan rentals error:', e);
+      setTransferMessage({
+        open: true,
+        message: e?.message || 'Failed to close rentals',
+        severity: 'error',
+      });
+    } finally {
+      setEndingOrphanRentals(false);
     }
   };
 
@@ -1419,7 +1548,6 @@ export default function CustomerDetail() {
     setRentalSettingsForm({
       payment_terms: customer?.payment_terms ?? '',
       purchase_order: customer?.purchase_order ?? '',
-      purchase_order_required: customer?.purchase_order_required !== false,
       tax_region: customer?.location || customer?.tax_region || 'SASKATOON',
       daily_calculation_method: customer?.daily_calculation_method || 'start_of_day',
       minimum_billable_amount: customer?.minimum_billable_amount ?? '5.00',
@@ -1799,7 +1927,7 @@ export default function CustomerDetail() {
         message: savedViaLegacyTable
           ? 'Product code rates saved via customer_pricing_overrides (JSON column on customer_pricing not available).'
           : savedViaLocalFallback
-            ? 'Product code rates saved on this device only. Fix Supabase schema (see error hint / sql scripts), then save again for server-wide pricing.'
+            ? 'Product code rates saved on this device only. In Supabase SQL Editor run sql/add_rental_rates_by_product_code_to_customer_pricing.sql (and if needed sql/ensure_customer_pricing_overrides.sql), reload the API schema cache, then save again for server-wide pricing.'
           : 'Product code rates saved.',
         severity: 'success',
       });
@@ -3139,8 +3267,15 @@ export default function CustomerDetail() {
           {locationAssets.length > 0 && (
             <Button
               component={Link}
-              to="/rentals"
-              state={id ? { openEditForCustomerId: id } : undefined}
+              to="/pricing/customers"
+              state={
+                id
+                  ? {
+                      prefillCustomerId: id,
+                      prefillCustomerName: customer?.name || customer?.Name || '',
+                    }
+                  : undefined
+              }
               variant="outlined"
               size="small"
             >
@@ -3150,9 +3285,11 @@ export default function CustomerDetail() {
         </Box>
         {locationAssets.length > 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
-            Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing — the same live rules as the Rentals page (including saved overrides and local rate edits).
+            Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing — the same rules as the Rentals page. Use the button above to open <strong>Customer Pricing</strong> for per-SKU overrides (same as &quot;Edit Rates&quot; on Rentals).
             {' '}
-            <strong>Invoices charge each open row below ({locationAssets.length}).</strong>
+            <strong>
+              Invoices charge each open row below ({locationAssets.length}); customer-owned cylinders are not counted as rent.
+            </strong>
             {openRentalsDelta !== 0 && (
               <>
                 {' '}
@@ -3170,16 +3307,38 @@ export default function CustomerDetail() {
             severity="warning"
             sx={{ mb: 2 }}
             action={
-              <Button
-                color="warning"
-                size="small"
-                variant="contained"
-                disabled={reassigningOrphans || orphanRentals.filter((o) => o.bottle?.id).length === 0}
-                onClick={handleReassignOrphans}
-                startIcon={reassigningOrphans ? <CircularProgress size={14} /> : <Inventory2Icon />}
-              >
-                {reassigningOrphans ? 'Reassigning…' : `Assign ${orphanRentals.filter((o) => o.bottle?.id).length} bottle(s)`}
-              </Button>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                <Button
+                  color="warning"
+                  size="small"
+                  variant="outlined"
+                  disabled={
+                    endingOrphanRentals ||
+                    reassigningOrphans ||
+                    orphanRentalsToEnd.length === 0
+                  }
+                  onClick={handleEndOrphanRentals}
+                  startIcon={endingOrphanRentals ? <CircularProgress size={14} /> : null}
+                >
+                  {endingOrphanRentals
+                    ? 'Closing…'
+                    : `End ${orphanRentalsToEnd.length} rental(s) (stop billing)`}
+                </Button>
+                <Button
+                  color="warning"
+                  size="small"
+                  variant="contained"
+                  disabled={
+                    reassigningOrphans ||
+                    endingOrphanRentals ||
+                    orphanRentals.filter((o) => o.bottle?.id).length === 0
+                  }
+                  onClick={handleReassignOrphans}
+                  startIcon={reassigningOrphans ? <CircularProgress size={14} /> : <Inventory2Icon />}
+                >
+                  {reassigningOrphans ? 'Reassigning…' : `Assign ${orphanRentals.filter((o) => o.bottle?.id).length} bottle(s)`}
+                </Button>
+              </Stack>
             }
           >
             <Typography variant="body2" fontWeight={600} gutterBottom>
@@ -3188,8 +3347,9 @@ export default function CustomerDetail() {
             <Typography variant="body2">
               Barcodes: {orphanRentals.map((o) => o.rental.bottle_barcode || '?').join(', ')}.
               {orphanRentals.filter((o) => o.bottle?.id).length > 0
-                ? ' Click to reassign these bottles to this customer so physical inventory matches open rentals.'
-                : ' Could not find matching bottle records — these may need manual investigation.'}
+                ? ' If cylinders were returned to the warehouse, use End rental(s) to stop billing. Otherwise assign bottles here so inventory matches open rentals.'
+                : ' Could not find matching bottle records — use End rental(s) if these should not bill, or investigate data.'}{' '}
+              Customer-owned cylinders are excluded from rental charges automatically.
             </Typography>
           </Alert>
         )}
@@ -3701,6 +3861,25 @@ export default function CustomerDetail() {
           </Box>
           <Divider sx={{ mb: 3 }} />
 
+          <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2, bgcolor: 'rgba(25, 118, 210, 0.04)', borderColor: 'primary.light' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
+              <Box>
+                <Typography variant="subtitle2" fontWeight={700} color="primary.dark" gutterBottom>
+                  Purchase order (P.O.)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560 }}>
+                  Shown on rental invoice PDFs in the &quot;PURCHASE ORDER&quot; column when set. Leave empty for customers who do not use a PO.
+                </Typography>
+                <Typography variant="body1" sx={{ mt: 1, fontWeight: customer?.purchase_order ? 600 : 400 }}>
+                  {customer?.purchase_order ? customer.purchase_order : '— None on file'}
+                </Typography>
+              </Box>
+              <Button variant="contained" onClick={handleOpenRentalSettings} sx={{ flexShrink: 0, fontWeight: 700 }}>
+                Enter or edit P.O.
+              </Button>
+            </Stack>
+          </Paper>
+
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>Rental rates</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -3864,10 +4043,10 @@ export default function CustomerDetail() {
 
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other settings</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: customer?.purchase_order ? 'transparent' : 'warning.light', px: 1.5, borderRadius: 1 }}>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Purchase order</Typography>
-              <Typography variant="body2" fontWeight={customer?.purchase_order ? 400 : 600}>
-                {customer?.purchase_order ? `${customer.purchase_order} (Required)` : 'Not set (Required)'}
+              <Typography variant="body2" color={customer?.purchase_order ? 'text.primary' : 'text.secondary'}>
+                {customer?.purchase_order ? customer.purchase_order : '—'}
               </Typography>
               <Button size="small" variant="text" color="primary" onClick={handleOpenRentalSettings}>Change</Button>
             </Box>
@@ -3892,6 +4071,16 @@ export default function CustomerDetail() {
         <DialogTitle sx={{ fontWeight: 700 }}>Rental settings</DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <TextField
+              fullWidth
+              size="small"
+              label="Purchase order (P.O.)"
+              value={rentalSettingsForm.purchase_order || ''}
+              onChange={(e) => setRentalSettingsForm(f => ({ ...f, purchase_order: e.target.value }))}
+              placeholder="e.g. P000021880"
+              helperText="Optional. Printed on rental invoice PDFs; leave blank if this customer does not use a PO."
+              autoFocus
+            />
             <FormControl fullWidth size="small">
               <InputLabel>Payment terms</InputLabel>
               <Select
@@ -3904,14 +4093,6 @@ export default function CustomerDetail() {
                 ))}
               </Select>
             </FormControl>
-            <TextField
-              fullWidth
-              size="small"
-              label="Purchase order (required)"
-              value={rentalSettingsForm.purchase_order || ''}
-              onChange={(e) => setRentalSettingsForm(f => ({ ...f, purchase_order: e.target.value }))}
-              placeholder="e.g. P000021880"
-            />
             <FormControl fullWidth size="small">
               <InputLabel>Tax region</InputLabel>
               <Select

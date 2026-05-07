@@ -44,6 +44,8 @@ export async function resolveInvoiceNumberForRentalPdf(supabaseClient, organizat
       .eq('subscription_id', subId)
       .eq('period_start', periodStart)
       .eq('period_end', periodEnd)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (si?.invoice_number) return String(si.invoice_number).trim();
   }
