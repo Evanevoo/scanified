@@ -120,6 +120,22 @@ export default function LeaseAgreements() {
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
 
+  const getCustomerIdValue = useCallback((customer) => {
+    if (!customer) return '';
+    return String(
+      customer.CustomerListID
+      || customer.customer_id
+      || customer.id
+      || ''
+    ).trim();
+  }, []);
+
+  const getCustomerLabelValue = useCallback((customer) => {
+    if (!customer) return '';
+    const label = customer.name ?? customer.Name ?? customer.customer_name ?? '';
+    return String(label || '').trim();
+  }, []);
+
   const recalculateAnnualAmountForBottleCount = (nextCountRaw, prevData) => {
     const nextCount = parsePositiveInt(nextCountRaw);
     if (nextCount <= 0) return prevData.annual_amount;
@@ -1030,30 +1046,28 @@ export default function LeaseAgreements() {
                     fullWidth
                     disablePortal
                     options={customers}
-                    value={customers.find((c) => c.CustomerListID === formData.customer_id) || null}
-                    isOptionEqualToValue={(option, value) => option.CustomerListID === value.CustomerListID}
-                    getOptionLabel={(option) => {
-                      const label = option?.name ?? option?.Name ?? option?.customer_name ?? '';
-                      return typeof label === 'string' ? label : String(label ?? '');
-                    }}
+                    value={customers.find((c) => getCustomerIdValue(c) === String(formData.customer_id || '').trim()) || null}
+                    isOptionEqualToValue={(option, value) => getCustomerIdValue(option) === getCustomerIdValue(value)}
+                    getOptionLabel={(option) => getCustomerLabelValue(option)}
                     filterOptions={(opts, { inputValue }) => {
                       const term = inputValue.trim().toLowerCase();
                       if (!term) return opts;
                       return opts.filter((o) => {
-                        const label = (o?.name ?? o?.Name ?? o?.customer_name ?? '');
-                        return String(label).toLowerCase().includes(term);
+                        const label = getCustomerLabelValue(o).toLowerCase();
+                        const customerId = getCustomerIdValue(o).toLowerCase();
+                        return label.includes(term) || customerId.includes(term);
                       });
                     }}
                     PopperProps={{ sx: { zIndex: 2000 } }}
                     onChange={(_, customer) => {
-                      const newCustomerId = customer?.CustomerListID || '';
+                      const newCustomerId = getCustomerIdValue(customer);
                       const assignedCount = newCustomerId ? (bottleCountByCustomerId[String(newCustomerId)] || 0) : 0;
                       setFormData((prev) => {
                         const nextCount = assignedCount > 0 ? String(assignedCount) : '';
                         return {
                           ...prev,
                           customer_id: newCustomerId,
-                          customer_name: customer?.name || '',
+                          customer_name: getCustomerLabelValue(customer),
                           payment_terms: customer?.payment_terms || prev.payment_terms || 'Net 30',
                           bottle_id: null,
                           applyToAllBottles: false,
@@ -1067,7 +1081,7 @@ export default function LeaseAgreements() {
                       <TextField
                         {...params}
                         label="Customer"
-                        placeholder="Type to search customer..."
+                        placeholder="Type customer name or ID..."
                       />
                     )}
                     noOptionsText="No matching customers"

@@ -20,6 +20,7 @@ import {
   CircularProgress,
   Alert,
   FormControl,
+  FormControlLabel,
   Select,
   MenuItem,
   Card,
@@ -295,6 +296,7 @@ export default function CustomerDetail() {
   const [showTransferHistory, setShowTransferHistory] = useState(false);
   const [transferHistory, setTransferHistory] = useState([]);
   const [locationFilter, setLocationFilter] = useState('all');
+  const [showDnsInBottleList, setShowDnsInBottleList] = useState(true);
   const [quickTransferDialogOpen, setQuickTransferDialogOpen] = useState(false);
   const [recentCustomers, setRecentCustomers] = useState([]);
   const [warehouseConfirmDialogOpen, setWarehouseConfirmDialogOpen] = useState(false);
@@ -327,6 +329,8 @@ export default function CustomerDetail() {
   const [orgRentalClasses, setOrgRentalClasses] = useState([]);
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
+  const [resolvingDnsId, setResolvingDnsId] = useState(null); // rental id being resolved (DNS close)
+  const [fixingDnsRnb, setFixingDnsRnb] = useState(false);
 
   const [leaseContractRow, setLeaseContractRow] = useState(null);
   const [leaseItemsRows, setLeaseItemsRows] = useState([]);
@@ -516,8 +520,9 @@ export default function CustomerDetail() {
     return byType;
   }, [rnsRentals]);
   const displayBottleList = useMemo(() => {
-    const physical = (customerAssets || []).map(a => ({ ...a, isDns: false }));
-    const dnsRows = [...dnsOnlyRentals, ...rnbRentals].map(r => ({
+    const physical = (customerAssets || []).map((a) => ({ ...a, isDns: false }));
+    if (!showDnsInBottleList) return physical;
+    const dnsRows = [...dnsOnlyRentals, ...rnbRentals].map((r) => ({
       id: 'dns-' + r.id,
       serial_number: '—',
       barcode_number: (r.dns_description || '').includes('Return not on balance') ? (r.bottle_barcode || 'RNB') : (r.bottle_barcode || 'DNS'),
@@ -527,7 +532,7 @@ export default function CustomerDetail() {
       isDns: true
     }));
     return [...physical, ...dnsRows];
-  }, [customerAssets, dnsOnlyRentals, rnbRentals]);
+  }, [customerAssets, dnsOnlyRentals, rnbRentals, showDnsInBottleList]);
   const openRentalBottleKeys = useMemo(() => {
     const bottleIds = new Set();
     const barcodes = new Set();
@@ -594,6 +599,116 @@ export default function CustomerDetail() {
       setTransferMessage({ open: true, message: e?.message || 'Failed to resolve RNS', severity: 'error' });
     } finally {
       setResolvingRnsId(null);
+    }
+  };
+
+  const resolveDns = async (rental) => {
+    if (!rental?.id || !customer?.organization_id) return;
+    setResolvingDnsId(rental.id);
+    try {
+      const { error } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: new Date().toISOString().split('T')[0],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', rental.id);
+      if (error) throw error;
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        customer.organization_id,
+        customer.name,
+        customer.CustomerListID
+      );
+      setLocationAssets(merged);
+      setTransferMessage({ open: true, message: 'DNS cleared. It will no longer show on this customer.', severity: 'success' });
+    } catch (e) {
+      logger.error('Resolve DNS error:', e);
+      setTransferMessage({ open: true, message: e?.message || 'Failed to clear DNS', severity: 'error' });
+    } finally {
+      setResolvingDnsId(null);
+    }
+  };
+
+  const resolveDnsRnbPairs = async () => {
+    if (!customer?.organization_id || !customer?.CustomerListID) return;
+    setFixingDnsRnb(true);
+    try {
+      const productKey = (r) => String(r?.dns_product_code || r?.product_code || '').trim().toUpperCase() || 'UNCLASSIFIED';
+      const sortByOldest = (a, b) => {
+        const aTime = Date.parse(a?.rental_start_date || a?.created_at || '') || 0;
+        const bTime = Date.parse(b?.rental_start_date || b?.created_at || '') || 0;
+        return aTime - bTime;
+      };
+
+      const dnsByProduct = {};
+      const rnbByProduct = {};
+
+      (dnsOnlyRentals || []).forEach((r) => {
+        const key = productKey(r);
+        if (!dnsByProduct[key]) dnsByProduct[key] = [];
+        dnsByProduct[key].push(r);
+      });
+      (rnbRentals || []).forEach((r) => {
+        const key = productKey(r);
+        if (!rnbByProduct[key]) rnbByProduct[key] = [];
+        rnbByProduct[key].push(r);
+      });
+
+      Object.keys(dnsByProduct).forEach((k) => dnsByProduct[k].sort(sortByOldest));
+      Object.keys(rnbByProduct).forEach((k) => rnbByProduct[k].sort(sortByOldest));
+
+      const idsToClose = [];
+      const keys = new Set([...Object.keys(dnsByProduct), ...Object.keys(rnbByProduct)]);
+      keys.forEach((key) => {
+        const dnsRows = dnsByProduct[key] || [];
+        const rnbRows = rnbByProduct[key] || [];
+        const pairCount = Math.min(dnsRows.length, rnbRows.length);
+        for (let i = 0; i < pairCount; i += 1) {
+          if (dnsRows[i]?.id) idsToClose.push(dnsRows[i].id);
+          if (rnbRows[i]?.id) idsToClose.push(rnbRows[i].id);
+        }
+      });
+
+      if (idsToClose.length === 0) {
+        setTransferMessage({
+          open: true,
+          message: 'No DNS/RNB pairs found to auto-resolve for this customer.',
+          severity: 'info',
+        });
+        return;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const { error } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: today,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', idsToClose)
+        .eq('organization_id', customer.organization_id);
+      if (error) throw error;
+
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        customer.organization_id,
+        customer.name,
+        customer.CustomerListID
+      );
+      setLocationAssets(merged);
+      setTransferMessage({
+        open: true,
+        message: `Auto-resolved ${Math.floor(idsToClose.length / 2)} DNS/RNB pair(s) for this customer.`,
+        severity: 'success',
+      });
+    } catch (e) {
+      logger.error('resolveDnsRnbPairs error:', e);
+      setTransferMessage({
+        open: true,
+        message: e?.message || 'Failed to auto-resolve DNS/RNB pairs',
+        severity: 'error',
+      });
+    } finally {
+      setFixingDnsRnb(false);
     }
   };
 
@@ -3065,13 +3180,37 @@ export default function CustomerDetail() {
         )}
       </Paper>
 
-      {/* Currently Assigned Bottles (physical + DNS so we know how many the customer has) */}
+      {/* Currently Assigned Bottles (physical + optional DNS/RNB placeholders) */}
       <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, mb: 2.5, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
             <Typography variant="h5" fontWeight={700} color="primary">
-              🏠 Currently Assigned Bottles ({totalBottleCount})
+              🏠 Currently Assigned Bottles ({showDnsInBottleList ? totalBottleCount : customerAssets.length})
             </Typography>
+            <FormControlLabel
+              control={(
+                <Checkbox
+                  size="small"
+                  checked={showDnsInBottleList}
+                  onChange={(e) => setShowDnsInBottleList(e.target.checked)}
+                />
+              )}
+              label="Show DNS/RNB rows in bottle list"
+              sx={{ mt: 0.5 }}
+            />
+            {(dnsOnlyRentals.length > 0 && rnbRentals.length > 0) && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                onClick={resolveDnsRnbPairs}
+                disabled={fixingDnsRnb}
+                startIcon={fixingDnsRnb ? <CircularProgress size={14} /> : null}
+                sx={{ mt: 1 }}
+              >
+                {fixingDnsRnb ? 'Fixing DNS/RNB…' : 'Fix DNS/RNB for customer'}
+              </Button>
+            )}
             {(dnsOnlyRentals.length > 0 || rnbRentals.length > 0 || rnsRentals.length > 0) && (
               <Typography variant="body2" color="text.secondary">
                 {customerAssets.length} physical
@@ -3081,7 +3220,7 @@ export default function CustomerDetail() {
                 {totalBottleCount !== customerAssets.length && (dnsOnlyRentals.length > 0 || rnsRentals.length > 0) && ` = ${totalBottleCount} total`}
               </Typography>
             )}
-            {totalBottleCount === 0 && (
+            {displayBottleList.length === 0 && (
               <Typography variant="body2" color="text.secondary">
                 No bottles assigned to this customer yet
               </Typography>
@@ -3167,7 +3306,7 @@ export default function CustomerDetail() {
           )}
         </Box>
         
-        {totalBottleCount === 0 ? (
+        {displayBottleList.length === 0 ? (
           <Box>
             <Typography color="text.secondary" mb={2}>
               No bottles currently assigned to this customer.
@@ -3410,6 +3549,10 @@ export default function CustomerDetail() {
                   const isDNS = rental.is_dns === true;
                   const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
                   const isRNS = isDNS && (rental.dns_description || '').includes('Return not scanned');
+                  const dnsDescriptionText = typeof rental.dns_description === 'string' ? rental.dns_description : '';
+                  const dnsDisplayDescription = /delivered not[- ]scanned/i.test(dnsDescriptionText)
+                    ? 'DNS'
+                    : (dnsDescriptionText || 'Approved invoice, no scanned bottle');
                   const bottle =
                     !isDNS &&
                     findCustomerAssetForRentalExtended(customerAssets || [], supplementalBottles, rental);
@@ -3453,7 +3596,7 @@ export default function CustomerDetail() {
                               {rental.dns_product_code || 'N/A'}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {rental.dns_description || 'Approved invoice, no scanned bottle'}
+                              {dnsDisplayDescription}
                             </Typography>
                           </Box>
                         ) : (
@@ -3518,24 +3661,40 @@ export default function CustomerDetail() {
                             </span>
                           </Tooltip>
                         )}
-                        {isDNS && !isRNB && (
-                          <DNSConversionDialog
-                            dnsRental={rental}
-                            customerId={customer?.CustomerListID}
-                            customerName={customer?.name}
-                            onConverted={() => {
-                              // Reload rentals with the same merge+dedupe logic used by initial load.
-                              const loadRentals = async () => {
-                                const merged = await fetchMergedOpenRentalsForCustomer(
-                                  customer?.organization_id,
-                                  customer?.name,
-                                  customer?.CustomerListID || id
-                                );
-                                setLocationAssets(merged);
-                              };
-                              loadRentals();
-                            }}
-                          />
+                        {isDNS && !isRNB && !isRNS && (
+                          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                            <DNSConversionDialog
+                              dnsRental={rental}
+                              customerId={customer?.CustomerListID}
+                              customerName={customer?.name}
+                              onConverted={() => {
+                                // Reload rentals with the same merge+dedupe logic used by initial load.
+                                const loadRentals = async () => {
+                                  const merged = await fetchMergedOpenRentalsForCustomer(
+                                    customer?.organization_id,
+                                    customer?.name,
+                                    customer?.CustomerListID || id
+                                  );
+                                  setLocationAssets(merged);
+                                };
+                                loadRentals();
+                              }}
+                            />
+                            <Tooltip title="Close this DNS so it no longer shows on this customer">
+                              <span>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                  disabled={resolvingDnsId === rental.id}
+                                  onClick={() => resolveDns(rental)}
+                                  startIcon={resolvingDnsId === rental.id ? <CircularProgress size={14} /> : null}
+                                >
+                                  {resolvingDnsId === rental.id ? 'Clearing…' : 'Clear DNS'}
+                                </Button>
+                              </span>
+                            </Tooltip>
+                          </Stack>
                         )}
                       </TableCell>
                     </TableRow>
