@@ -25,6 +25,7 @@ import Alert from '@mui/material/Alert';
 import { supabase } from './supabase/client';
 import CookieNotice from './components/CookieNotice';
 import NavigationBar from './components/NavigationBar';
+import SubscriptionRefreshOnNavigate from './components/SubscriptionRefreshOnNavigate';
 import SessionTimeoutWarning from './components/SessionTimeoutWarning';
 import NotificationLayer from './components/NotificationLayer';
 import RedirectIfInApp from './components/RedirectIfInApp';
@@ -224,6 +225,7 @@ function AppContent() {
                 return null;
               })()}
               <AnalyticsTracker />
+              <SubscriptionRefreshOnNavigate />
               <NavigationBar />
               <div className="App">
                 <Routes>

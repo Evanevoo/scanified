@@ -392,8 +392,11 @@ export default function CustomerDetail() {
   }, [id]);
 
   /** Open rentals: CustomerListID match, merged with legacy rows keyed by display name (same customer can have both). */
-  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId) => {
-    const listId = (customerListId || id || '').toString().trim();
+  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId, customerPkId = null) => {
+    const nameTrim = String(customerName || '').trim();
+    const listId = String(customerListId || id || '').trim();
+    const pkTrim = String(customerPkId || '').trim();
+
     let rentalById = [];
     if (listId) {
       const { data, error: rentalError } = await supabase
@@ -406,21 +409,33 @@ export default function CustomerDetail() {
       rentalById = data || [];
     }
 
+    let rentalByPk = [];
+    if (pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)) {
+      const { data, error: pkErr } = await supabase
+        .from('rentals')
+        .select('*')
+        .eq('customer_id', pkTrim)
+        .eq('organization_id', orgId)
+        .is('rental_end_date', null);
+      if (pkErr) throw pkErr;
+      rentalByPk = data || [];
+    }
+
     let rentalByName = [];
     let rentalByNameAsId = [];
     let rentalByNameError = null;
     let rentalByNameAsIdError = null;
-    if (customerName) {
+    if (nameTrim) {
       const byNameResp = await supabase
         .from('rentals')
         .select('*')
-        .eq('customer_name', customerName)
+        .eq('customer_name', nameTrim)
         .eq('organization_id', orgId)
         .is('rental_end_date', null);
       const byNameAsIdResp = await supabase
         .from('rentals')
         .select('*')
-        .eq('customer_id', customerName)
+        .eq('customer_id', nameTrim)
         .eq('organization_id', orgId)
         .is('rental_end_date', null);
       rentalByName = byNameResp.data || [];
@@ -440,6 +455,7 @@ export default function CustomerDetail() {
       });
     };
     push(rentalById);
+    push(rentalByPk);
     if (!rentalByNameError) push(rentalByName);
     if (!rentalByNameAsIdError) push(rentalByNameAsId);
 
@@ -558,7 +574,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customer.id
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
@@ -585,7 +602,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customer.id
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
@@ -660,7 +678,8 @@ export default function CustomerDetail() {
         const merged = await fetchMergedOpenRentalsForCustomer(
           orgId,
           customerData.name,
-          customerData.CustomerListID
+          customerData.CustomerListID,
+          customerData.id
         );
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
@@ -696,7 +715,8 @@ export default function CustomerDetail() {
           const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
-            customerData.CustomerListID
+            customerData.CustomerListID,
+            customerData.id
           );
           setLocationAssets(mergedAfterBackfill);
         } else {
@@ -1187,7 +1207,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customer.id
       );
       setLocationAssets(merged);
       if (closed > 0 && typeof subscriptionCtx?.refresh === 'function') {
@@ -3529,7 +3550,8 @@ export default function CustomerDetail() {
                                 const merged = await fetchMergedOpenRentalsForCustomer(
                                   customer?.organization_id,
                                   customer?.name,
-                                  customer?.CustomerListID || id
+                                  customer?.CustomerListID || id,
+                                  customer?.id
                                 );
                                 setLocationAssets(merged);
                               };

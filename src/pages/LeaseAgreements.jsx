@@ -120,6 +120,22 @@ export default function LeaseAgreements() {
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
 
+  const getCustomerIdValue = useCallback((customer) => {
+    if (!customer) return '';
+    return String(
+      customer.CustomerListID
+      ?? customer.customer_id
+      ?? customer.id
+      ?? ''
+    ).trim();
+  }, []);
+
+  const getCustomerLabelValue = useCallback((customer) => {
+    if (!customer) return '';
+    const label = customer.name ?? customer.Name ?? customer.customer_name ?? '';
+    return String(label || '').trim();
+  }, []);
+
   const recalculateAnnualAmountForBottleCount = (nextCountRaw, prevData) => {
     const nextCount = parsePositiveInt(nextCountRaw);
     if (nextCount <= 0) return prevData.annual_amount;
@@ -321,7 +337,7 @@ export default function LeaseAgreements() {
         const [agreementNumber] = await getNextAgreementNumbers(profile.organization_id, 1);
         if (!agreementNumber) throw new Error('Failed to reserve agreement number');
 
-        const nextBillingDate = calculateNextBillingDate(startDate, formData.billing_frequency);
+        const nextBillingDate = calculateNextUpcomingBillingDate(startDate, formData.billing_frequency);
         const nextBillingStr = nextBillingDate.toISOString().split('T')[0];
 
         const insertRow = {
@@ -395,7 +411,7 @@ export default function LeaseAgreements() {
       if (!numberData) throw new Error('Failed to generate agreement number');
 
       // Calculate next billing date
-      const nextBillingDate = calculateNextBillingDate(
+      const nextBillingDate = calculateNextUpcomingBillingDate(
         newStartDate,
         agreement.billing_frequency
       );
@@ -518,6 +534,18 @@ export default function LeaseAgreements() {
         date.setMonth(date.getMonth() + 1);
     }
     return date;
+  };
+
+  /** First billing milestone after `startDate` is always `calculateNextBillingDate(start)`. For retroactive agreements, advance until that date is after today (local calendar day). */
+  const calculateNextUpcomingBillingDate = (startDate, frequency, asOfDate = new Date()) => {
+    let next = calculateNextBillingDate(new Date(startDate), frequency);
+    const asOfDay = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), asOfDate.getDate()).getTime();
+    let guard = 0;
+    while (new Date(next.getFullYear(), next.getMonth(), next.getDate()).getTime() <= asOfDay && guard < 10000) {
+      next = calculateNextBillingDate(next, frequency);
+      guard += 1;
+    }
+    return next;
   };
 
   const getStatusColor = (status) => {
@@ -1021,39 +1049,43 @@ export default function LeaseAgreements() {
                 <Alert severity="warning" sx={{ mb: 2 }}>
                   <strong>Retroactive Agreement Detected</strong><br/>
                   {retroactiveBilling.message}<br/>
-                  <strong>Next regular billing will occur on: {formData.start_date ? calculateNextBillingDate(new Date(formData.start_date), formData.billing_frequency).toLocaleDateString() : 'N/A'}</strong>
+                  <strong>Next regular billing will occur on: {formData.start_date ? calculateNextUpcomingBillingDate(new Date(formData.start_date), formData.billing_frequency).toLocaleDateString() : 'N/A'}</strong>
                 </Alert>
               )}
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
                   <Autocomplete
                     fullWidth
-                    disablePortal
+                    openOnFocus
                     options={customers}
-                    value={customers.find((c) => c.CustomerListID === formData.customer_id) || null}
-                    isOptionEqualToValue={(option, value) => option.CustomerListID === value.CustomerListID}
-                    getOptionLabel={(option) => {
-                      const label = option?.name ?? option?.Name ?? option?.customer_name ?? '';
-                      return typeof label === 'string' ? label : String(label ?? '');
-                    }}
+                    value={
+                      customers.find(
+                        (c) => getCustomerIdValue(c) === String(formData.customer_id || '').trim()
+                      ) || null
+                    }
+                    isOptionEqualToValue={(option, value) =>
+                      getCustomerIdValue(option) === getCustomerIdValue(value)
+                    }
+                    getOptionLabel={(option) => getCustomerLabelValue(option)}
                     filterOptions={(opts, { inputValue }) => {
                       const term = inputValue.trim().toLowerCase();
                       if (!term) return opts;
                       return opts.filter((o) => {
-                        const label = (o?.name ?? o?.Name ?? o?.customer_name ?? '');
-                        return String(label).toLowerCase().includes(term);
+                        const label = getCustomerLabelValue(o).toLowerCase();
+                        const customerId = getCustomerIdValue(o).toLowerCase();
+                        return label.includes(term) || customerId.includes(term);
                       });
                     }}
-                    PopperProps={{ sx: { zIndex: 2000 } }}
+                    PopperProps={{ sx: { zIndex: (theme) => theme.zIndex.modal + 1 } }}
                     onChange={(_, customer) => {
-                      const newCustomerId = customer?.CustomerListID || '';
+                      const newCustomerId = getCustomerIdValue(customer);
                       const assignedCount = newCustomerId ? (bottleCountByCustomerId[String(newCustomerId)] || 0) : 0;
                       setFormData((prev) => {
                         const nextCount = assignedCount > 0 ? String(assignedCount) : '';
                         return {
                           ...prev,
                           customer_id: newCustomerId,
-                          customer_name: customer?.name || '',
+                          customer_name: getCustomerLabelValue(customer),
                           payment_terms: customer?.payment_terms || prev.payment_terms || 'Net 30',
                           bottle_id: null,
                           applyToAllBottles: false,

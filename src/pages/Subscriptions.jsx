@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import { useTheme } from '../context/ThemeContext';
@@ -36,6 +36,7 @@ import {
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
   resolvedRentalProductCode,
+  subscriptionBillingLookupKeys,
 } from '../services/billingFromAssets';
 import {
   mergeOpenRentalsForBillingBasis,
@@ -397,6 +398,7 @@ export default function Subscriptions() {
   const { organizationColors } = useTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
@@ -409,8 +411,8 @@ export default function Subscriptions() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
-  /** Raw DB rows; folded into `legacyRows` in useMemo so bottle realtime updates do not re-hit Supabase. */
-  const [legacyRentalsRaw, setLegacyRentalsRaw] = useState([]);
+  /** Open rentals from SubscriptionContext (same source as the rest of the app; updates on navigate / refresh). */
+  const legacyRentalsRaw = useMemo(() => ctx.rentals || [], [ctx.rentals]);
   const [legacyLeaseRaw, setLegacyLeaseRaw] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
@@ -1004,6 +1006,7 @@ export default function Subscriptions() {
               mergedVirtualCustomer?.Name ||
               group.assignedName ||
               '',
+            customerPkId: mergedVirtualCustomer?.id || null,
           }
         );
         const rentalSummary = summarizeMergedOpenRentalsByProduct(
@@ -1051,25 +1054,11 @@ export default function Subscriptions() {
 
   useEffect(() => {
     if (!organization?.id) {
-      setLegacyRentalsRaw([]);
       setLegacyLeaseRaw([]);
       return;
     }
     let active = true;
     (async () => {
-      try {
-        const { data, error } = await supabase
-          .from('rentals')
-          .select('id, customer_id, customer_name, bottle_id, bottle_barcode, product_code, product_type, asset_type, rental_type, rental_amount, rental_end_date, is_dns, dns_description, dns_product_code')
-          .eq('organization_id', organization.id)
-          .is('rental_end_date', null);
-        if (!active) return;
-        if (error) throw error;
-        setLegacyRentalsRaw(data || []);
-      } catch {
-        if (active) setLegacyRentalsRaw([]);
-      }
-      if (!active) return;
       try {
         const { data: leaseData, error: leaseErr } = await supabase
           .from('lease_agreements')
@@ -1087,7 +1076,7 @@ export default function Subscriptions() {
       }
     })();
     return () => { active = false; };
-  }, [organization?.id]);
+  }, [organization?.id, location.pathname]);
 
   const legacyRows = useMemo(() => {
     let rows = [];
@@ -1181,6 +1170,8 @@ export default function Subscriptions() {
           a.customer_id ||
           'Assigned customer';
         const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
+        const leaseMaxAssetCount =
+          Number.isFinite(itemCount) && itemCount > 0 ? itemCount : null;
         const agreementCode = String(a.agreement_number || '').trim();
         const productCounts = {};
 
@@ -1197,6 +1188,8 @@ export default function Subscriptions() {
           itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
           totalPerCycle: baseAnnual,
           lease_agreement_annual: baseAnnual,
+          /** Bottles covered by this agreement; caps lease Items + annual vs assigned inventory. */
+          lease_max_asset_count: leaseMaxAssetCount,
           lease_bottle_id: a.bottle_id || null,
           lease_end_date: a.end_date || null,
           bottleIdentifiers: [],
@@ -1280,15 +1273,45 @@ export default function Subscriptions() {
 
       return true;
     });
-    const legacyTotalsByCustomer = new Map(
-      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
-    );
-    const legacyCountsByCustomer = new Map(
-      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.itemCount) || 0])
-    );
-    const legacyProductCountsByCustomer = new Map(
-      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), r.productCounts || null])
-    );
+
+    /** Match legacy rentals roll-up to subscription rows even when UUID vs CustomerListID differs (same as customer directory aliases). */
+    const lookupKeysForRentalPricingRow = (row) => {
+      const keys = new Set();
+      const add = (v) => {
+        if (v == null || v === '') return;
+        keys.add(normalize(v));
+        keys.add(normalizeName(v));
+      };
+      add(row.customer_id);
+      const c = row.customer;
+      if (c) {
+        add(c.CustomerListID);
+        add(c.id);
+        add(c.name);
+        add(c.Name);
+        for (const lk of subscriptionBillingLookupKeys(c, ctx.customers || [])) {
+          if (lk != null && String(lk).trim() !== '') keys.add(String(lk).trim());
+        }
+      }
+      return keys;
+    };
+
+    const legacyTotalsByCustomer = new Map();
+    const legacyCountsByCustomer = new Map();
+    const legacyProductCountsByCustomer = new Map();
+    for (const r of legacyRows || []) {
+      if (r.legacySource === 'lease_agreements') continue;
+      const t = parseFloat(r.totalPerCycle) || 0;
+      const n = parseFloat(r.itemCount) || 0;
+      const pc = r.productCounts && typeof r.productCounts === 'object' ? r.productCounts : null;
+      for (const k of lookupKeysForRentalPricingRow(r)) {
+        legacyTotalsByCustomer.set(k, Math.max(legacyTotalsByCustomer.get(k) || 0, t));
+        legacyCountsByCustomer.set(k, Math.max(legacyCountsByCustomer.get(k) || 0, n));
+        if (pc && Object.keys(pc).length > 0) {
+          legacyProductCountsByCustomer.set(k, pc);
+        }
+      }
+    }
 
     // Pre-build lookup maps ONCE (outside the per-row loop) for O(1) access.
     const byBottleId = new Map(
@@ -1322,14 +1345,28 @@ export default function Subscriptions() {
         let displayItems = parseFloat(row.itemCount) || 1;
         if (!row.lease_bottle_id) {
           const cid = normalize(row.customer_id);
-          let n = 0;
+          let assigned = 0;
           for (const b of ctx.bottles || []) {
             const bk = normalize(b.assigned_customer || b.customer_id);
-            if (bk && bk === cid) n += 1;
+            if (bk && bk === cid) assigned += 1;
           }
-          const effective = n > 0 ? n : 1;
-          displayedAnnual = safeBase * effective;
-          displayItems = effective;
+          const cap =
+            row.lease_max_asset_count != null && row.lease_max_asset_count !== ''
+              ? parseFloat(row.lease_max_asset_count)
+              : NaN;
+          const hasCap = Number.isFinite(cap) && cap > 0;
+
+          if (hasCap) {
+            // Agreement annual is for `cap` bottles; only those units are on lease (e.g. 5 of 7 assigned).
+            const covered = assigned <= 0 ? 0 : Math.min(assigned, cap);
+            displayItems = covered;
+            displayedAnnual = safeBase * (covered / cap);
+          } else {
+            // Legacy agreements with no max: keep prior behavior (treat annual as per assigned bottle).
+            const effective = assigned > 0 ? assigned : 1;
+            displayedAnnual = safeBase * effective;
+            displayItems = effective;
+          }
         } else {
           displayItems = 1;
         }
@@ -1360,13 +1397,24 @@ export default function Subscriptions() {
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
-      if (row.isVirtual) {
-        const legacyCount = legacyCountsByCustomer.get(customerKey) || 0;
-        if (legacyCount > computedItemCount) computedItemCount = legacyCount;
+
+      let legacyOpenRentalCountMax = 0;
+      for (const k of lookupKeysForRentalPricingRow(row)) {
+        legacyOpenRentalCountMax = Math.max(legacyOpenRentalCountMax, legacyCountsByCustomer.get(k) || 0);
+      }
+      // Rentals grid must not under-count vs Customer Detail: open `rentals` rows (incl. DNS) are grouped in legacyRows
+      // but were only merged into isVirtual rows before, so subscribed customers could show bottle count only.
+      if (!preserveLeaseContractTotal && period === 'monthly') {
+        if (legacyOpenRentalCountMax > computedItemCount) {
+          computedItemCount = legacyOpenRentalCountMax;
+        }
         if (!effectiveProductCounts) {
-          const legacyMix = legacyProductCountsByCustomer.get(customerKey);
-          if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
-            effectiveProductCounts = legacyMix;
+          for (const k of lookupKeysForRentalPricingRow(row)) {
+            const legacyMix = legacyProductCountsByCustomer.get(k);
+            if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
+              effectiveProductCounts = legacyMix;
+              break;
+            }
           }
         }
       }
@@ -2494,6 +2542,116 @@ export default function Subscriptions() {
     [organization?.id, getPdfBillingPeriodForSub],
   );
 
+  /**
+   * After a successful send-invoice-email call, persist `sent` so the Rentals table "Emailed" chip survives refresh.
+   * Inserts a cycle row when none exists (e.g. PDF used a placeholder # without a DB row, or invoice # mismatch blocked update).
+   */
+  const persistRentalInvoiceEmailSent = useCallback(
+    async (row, pdfInvNo) => {
+      const invNo = String(pdfInvNo || '').trim();
+      if (!invNo || !organization?.id) return;
+
+      if (row?.isVirtual && row?.customer_id) {
+        const { periodStart, periodEnd, dueDate } = getCurrentCycleRange();
+        const invoiceDate = new Date().toISOString().split('T')[0];
+        const total = parseFloat(row?.totalPerCycle) || 0;
+        const gstAmt = +(total * 0.05).toFixed(2);
+        const pstAmt = +(total * 0.06).toFixed(2);
+        const taxAmount = +(gstAmt + pstAmt).toFixed(2);
+        const totalAmount = +(total + taxAmount).toFixed(2);
+
+        const { data: existingRows } = await supabase
+          .from('invoices')
+          .select('id')
+          .eq('organization_id', organization.id)
+          .eq('customer_id', row.customer_id)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .limit(1);
+
+        const invId = existingRows?.[0]?.id;
+        if (invId) {
+          await supabase
+            .from('invoices')
+            .update({
+              status: 'sent',
+              invoice_number: invNo,
+            })
+            .eq('id', invId);
+        } else {
+          await supabase.from('invoices').insert({
+            organization_id: organization.id,
+            customer_id: row.customer_id,
+            customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
+            period_start: periodStart,
+            period_end: periodEnd,
+            invoice_date: invoiceDate,
+            due_date: dueDate,
+            subtotal: total,
+            tax_amount: taxAmount,
+            total_amount: totalAmount,
+            invoice_number: invNo,
+            status: 'sent',
+          });
+        }
+        return;
+      }
+
+      if (!row?.id || row.isVirtual) return;
+      const rawId = row.id;
+      if (String(rawId).startsWith('legacy-') || String(rawId).startsWith('virtual-')) return;
+
+      const subId = String(rawId).trim();
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(row);
+      const { dueDate } = getCurrentCycleRange();
+      const cid = String(row.customer_id || '').trim();
+      if (!subId || !cid || !periodStart || !periodEnd) return;
+
+      const { data: siRows } = await supabase
+        .from('subscription_invoices')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('subscription_id', subId)
+        .eq('period_start', periodStart)
+        .eq('period_end', periodEnd)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      const siId = siRows?.[0]?.id;
+      const total = parseFloat(row?.totalPerCycle) || 0;
+      const gstAmt = +(total * 0.05).toFixed(2);
+      const pstAmt = +(total * 0.06).toFixed(2);
+      const taxAmount = +(gstAmt + pstAmt).toFixed(2);
+      const totalAmount = +(total + taxAmount).toFixed(2);
+
+      if (siId) {
+        await supabase
+          .from('subscription_invoices')
+          .update({
+            status: 'sent',
+            invoice_number: invNo,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', siId);
+      } else {
+        await supabase.from('subscription_invoices').insert({
+          organization_id: organization.id,
+          subscription_id: subId,
+          customer_id: cid,
+          invoice_number: invNo,
+          status: 'sent',
+          period_start: periodStart,
+          period_end: periodEnd,
+          subtotal: total,
+          tax_amount: taxAmount,
+          total_amount: totalAmount,
+          due_date: dueDate,
+        });
+      }
+    },
+    [organization?.id, getCurrentCycleRange, getPdfBillingPeriodForSub],
+  );
+
   /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
@@ -3159,16 +3317,10 @@ export default function Subscriptions() {
       if (!response.ok) {
         throw new Error(payload?.error || payload?.details || `Email failed (${response.status})`);
       }
-      const virtualCycle = getCurrentCycleRange();
-      if (emailRow?.isVirtual && emailRow?.customer_id) {
-        await supabase
-          .from('invoices')
-          .update({ status: 'sent', updated_at: new Date().toISOString() })
-          .eq('organization_id', organization.id)
-          .eq('customer_id', emailRow.customer_id)
-          .eq('period_start', virtualCycle.periodStart)
-          .eq('period_end', virtualCycle.periodEnd)
-          .eq('invoice_number', pdfInvNo);
+      await persistRentalInvoiceEmailSent(emailRow, pdfInvNo);
+      const cid = String(emailRow.customer_id || '').trim();
+      const sid = String(emailRow.id || '').trim();
+      if (cid || sid) {
         setCycleInvoiceLookup((prev) => {
           const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
           const entry = {
@@ -3176,53 +3328,14 @@ export default function Subscriptions() {
             status: 'sent',
             updated_at: new Date().toISOString(),
           };
-          const cid = String(emailRow.customer_id || '').trim();
           return {
             byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
-            bySubscriptionId: { ...base.bySubscriptionId },
+            bySubscriptionId:
+              sid && !emailRow.isVirtual && !sid.startsWith('legacy-') && !sid.startsWith('virtual-')
+                ? { ...base.bySubscriptionId, [sid]: entry }
+                : { ...base.bySubscriptionId },
           };
         });
-      } else if (emailRow?.id && !emailRow.isVirtual) {
-        const { periodStart, periodEnd } = getPdfBillingPeriodForSub(emailRow);
-        const { data: latestSi } = await supabase
-          .from('subscription_invoices')
-          .select('id')
-          .eq('organization_id', organization.id)
-          .eq('subscription_id', emailRow.id)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd)
-          .order('updated_at', { ascending: false })
-          .limit(1);
-        const siId = latestSi?.[0]?.id;
-        if (siId) {
-          await supabase
-            .from('subscription_invoices')
-            .update({
-              status: 'sent',
-              invoice_number: pdfInvNo,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', siId);
-        }
-        const cid = String(emailRow.customer_id || '').trim();
-        const sid = String(emailRow.id || '').trim();
-        if (cid || sid) {
-          setCycleInvoiceLookup((prev) => {
-            const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
-            const entry = {
-              invoice_number: pdfInvNo,
-              status: 'sent',
-              updated_at: new Date().toISOString(),
-            };
-            return {
-              byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
-              bySubscriptionId:
-                sid && !emailRow.isVirtual && !sid.startsWith('legacy-') && !sid.startsWith('virtual-')
-                  ? { ...base.bySubscriptionId, [sid]: entry }
-                  : { ...base.bySubscriptionId },
-            };
-          });
-        }
       }
       setActionSuccess(`Invoice emailed to ${formFromDialog.to}.`);
       setEmailOpen(false);
@@ -3232,7 +3345,7 @@ export default function Subscriptions() {
     } finally {
       setEmailing(false);
     }
-  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, getCurrentCycleRange, getPdfBillingPeriodForSub, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
+  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
 
   const handleBulkEmailInvoices = useCallback(async () => {
     const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
@@ -3370,39 +3483,7 @@ export default function Subscriptions() {
           sent += 1;
           setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
           try {
-            const virtualCycle = getCurrentCycleRange();
-            if (row.isVirtual && row.customer_id) {
-              await supabase
-                .from('invoices')
-                .update({ status: 'sent', updated_at: new Date().toISOString() })
-                .eq('organization_id', organization.id)
-                .eq('customer_id', row.customer_id)
-                .eq('period_start', virtualCycle.periodStart)
-                .eq('period_end', virtualCycle.periodEnd)
-                .eq('invoice_number', pdfInvNo);
-            } else if (row.id && !row.isVirtual) {
-              const { periodStart, periodEnd } = getPdfBillingPeriodForSub(row);
-              const { data: latestSi } = await supabase
-                .from('subscription_invoices')
-                .select('id')
-                .eq('organization_id', organization.id)
-                .eq('subscription_id', row.id)
-                .eq('period_start', periodStart)
-                .eq('period_end', periodEnd)
-                .order('updated_at', { ascending: false })
-                .limit(1);
-              const siId = latestSi?.[0]?.id;
-              if (siId) {
-                await supabase
-                  .from('subscription_invoices')
-                  .update({
-                    status: 'sent',
-                    invoice_number: pdfInvNo,
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', siId);
-              }
-            }
+            await persistRentalInvoiceEmailSent(row, pdfInvNo);
             const cid = String(row.customer_id || '').trim();
             const sid = String(row.id || '').trim();
             if (cid || sid) {
@@ -3438,7 +3519,7 @@ export default function Subscriptions() {
     } else {
       setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
     }
-  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, getPdfBillingPeriodForSub, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
+  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
 
   const handleExportInvoicePdfsZip = useCallback(async (zipBillingPeriod) => {
     const periodKey = zipBillingPeriod === 'yearly' ? 'yearly' : 'monthly';
