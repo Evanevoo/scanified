@@ -31,7 +31,7 @@ exports.handler = async (event, _context) => {
     }
 
     // Create transporter with Outlook settings
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       host: 'smtp-mail.outlook.com',
       port: 587,
       secure: false,
