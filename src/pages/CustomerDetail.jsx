@@ -448,7 +448,8 @@ export default function CustomerDetail() {
     const byKey = new Map();
     const dedupeKey = (r) => {
       if (r?.is_dns === true) {
-        return `dns:${r?.dns_product_code || r?.product_code || ''}:${String(r?.bottle_barcode || '').trim().toUpperCase()}:${r?.customer_id || ''}`;
+        // Keep distinct DNS rows by id; rentalById/byName merge already removes true duplicates by id.
+        return `dns_row:${String(r?.id || '').trim() || `${r?.dns_product_code || r?.product_code || ''}:${String(r?.bottle_barcode || '').trim().toUpperCase()}:${r?.customer_id || ''}:${r?.rental_start_date || ''}:${r?.created_at || ''}`}`;
       }
       if (r?.bottle_id) return `bottle_id:${r.bottle_id}`;
       if (r?.bottle_barcode) return `barcode:${String(r.bottle_barcode).trim().toUpperCase()}`;
@@ -1008,12 +1009,13 @@ export default function CustomerDetail() {
         };
         let updated = false;
 
-        // Primary: update by bottle row id.
-        if (bottle?.id != null && String(bottle.id).trim() !== '') {
+        // Primary: update by bottle row id (only when id is a UUID).
+        const bottleRowId = String(bottle?.id || '').trim();
+        if (bottleRowId && UUID_RE.test(bottleRowId)) {
           const { data, error } = await supabase
             .from('bottles')
             .update(payload)
-            .eq('id', bottle.id)
+            .eq('id', bottleRowId)
             .eq('organization_id', organization.id)
             .select('id');
           if (error) {
@@ -1071,16 +1073,48 @@ export default function CustomerDetail() {
                 alreadyAssigned += 1;
                 updated = true;
               } else {
-                const { data, error } = await supabase
-                  .from('bottles')
-                  .update(payload)
-                  .eq('id', resolvedBottleId)
-                  .eq('organization_id', organization.id)
-                  .select('id');
-                if (error) {
-                  logger.error('Reassign orphan bottle by resolved id failed:', error);
-                } else if ((data || []).length > 0) {
-                  updated = true;
+                const resolvedBottleIdText = String(resolvedBottleId || '').trim();
+                if (resolvedBottleIdText && UUID_RE.test(resolvedBottleIdText)) {
+                  const { data, error } = await supabase
+                    .from('bottles')
+                    .update(payload)
+                    .eq('id', resolvedBottleIdText)
+                    .eq('organization_id', organization.id)
+                    .select('id');
+                  if (error) {
+                    logger.error('Reassign orphan bottle by resolved id failed:', error);
+                  } else if ((data || []).length > 0) {
+                    updated = true;
+                  }
+                } else {
+                  // Legacy/non-UUID ids can exist in lookup data; update by matched barcode/serial instead.
+                  for (const candidate of candidates) {
+                    const { data: barcodeData, error: barcodeError } = await supabase
+                      .from('bottles')
+                      .update(payload)
+                      .eq('organization_id', organization.id)
+                      .eq('barcode_number', candidate)
+                      .select('id');
+                    if (barcodeError) {
+                      logger.error('Reassign orphan bottle by barcode failed:', barcodeError);
+                    } else if ((barcodeData || []).length > 0) {
+                      updated = true;
+                      break;
+                    }
+
+                    const { data: serialData, error: serialError } = await supabase
+                      .from('bottles')
+                      .update(payload)
+                      .eq('organization_id', organization.id)
+                      .eq('serial_number', candidate)
+                      .select('id');
+                    if (serialError) {
+                      logger.error('Reassign orphan bottle by serial failed:', serialError);
+                    } else if ((serialData || []).length > 0) {
+                      updated = true;
+                      break;
+                    }
+                  }
                 }
               }
             }
@@ -3214,7 +3248,7 @@ export default function CustomerDetail() {
                         </Link>
                       ) : ''}
                     </TableCell>
-                    <TableCell>{asset.type || asset.description || 'Unknown'}</TableCell>
+                    <TableCell>{asset.product_code || asset.type || asset.description || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
                         label={(() => {
@@ -3295,7 +3329,7 @@ export default function CustomerDetail() {
                 {' '}
                 Physical inventory shows <strong>{customerAssets.length}</strong> assigned containers.
                 {dnsRentals.length === 0 && rnbRentals.length === 0 && rnsRentals.length === 0
-                  ? ` The ${openRentalsDelta}-row difference is not “DNS without barcodes” — those lines are regular rentals where the bottle is not in the assigned list on this page (wrong assignment, transfer, or lookup mismatch).`
+                  ? ` The ${Math.abs(openRentalsDelta)}-row difference is not “DNS without barcodes” — those lines are regular rentals where the bottle is not in the assigned list on this page (wrong assignment, transfer, or lookup mismatch).`
                   : ' Lower counts often mix DNS/RNB/RNS billing rows with how assigned inventory is loaded.'}
               </>
             )}

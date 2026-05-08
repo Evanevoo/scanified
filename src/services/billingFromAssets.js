@@ -613,9 +613,13 @@ export function openRentalBillableUnitKey(rental, bottleById, bottleByBarcode) {
   const byId = bottleById || new Map();
   const byBc = bottleByBarcode || new Map();
   if (rentalIsDnsForBilling(rental)) {
+    const rid = String(rental?.id || '').trim();
+    if (rid) return `dns_row:${rid}`;
+    const start = String(rental?.rental_start_date || '').trim();
+    const created = String(rental?.created_at || '').trim();
     return `dns:${String(rental?.dns_product_code || rental?.product_code || '').trim()}:${String(
       rental?.bottle_barcode || ''
-    ).trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}`;
+    ).trim().toUpperCase()}:${String(rental?.customer_id || '').trim()}:${start}:${created}`;
   }
   const bid = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
   if (bid) return `bottle:${bid}`;
@@ -626,6 +630,41 @@ export function openRentalBillableUnitKey(rental, bottleById, bottleByBarcode) {
     return `barcode:${bc}`;
   }
   return `row:${String(rental?.id || '').trim()}`;
+}
+
+/**
+ * Synonym keys for one inventory bottle so month-end billing can merge with rental rows that
+ * reference the same asset by id only, barcode only, or both (avoids 27 physical + 28 billed).
+ */
+function billingPhysicalSynonymKeysForBottle(b) {
+  const keys = [];
+  if (b?.id != null && String(b.id).trim() !== '') keys.push(`billphys:id:${String(b.id).trim()}`);
+  const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
+  if (bc) keys.push(`billphys:bc:${bc}`);
+  return keys;
+}
+
+/** Synonyms for one open rental (non-DNS expands id + barcode + resolved inventory id). */
+function billingPhysicalSynonymKeysForRental(r, bottleByBarcode) {
+  const byBc = bottleByBarcode || new Map();
+  if (rentalIsDnsForBilling(r)) {
+    const inner = openRentalBillableUnitKey(r, new Map(), byBc);
+    return inner ? [`billphys:${inner}`] : [];
+  }
+  const keys = [];
+  const bid = r?.bottle_id != null ? String(r.bottle_id).trim() : '';
+  if (bid) keys.push(`billphys:id:${bid}`);
+  const bc = String(r?.bottle_barcode || '').trim().toUpperCase();
+  if (bc) {
+    keys.push(`billphys:bc:${bc}`);
+    const hit = byBc.get(bc);
+    if (hit?.id != null && String(hit.id).trim() !== '') {
+      keys.push(`billphys:id:${String(hit.id).trim()}`);
+    }
+  }
+  if (keys.length > 0) return [...new Set(keys)];
+  const inner = openRentalBillableUnitKey(r, new Map(), byBc);
+  return inner ? [`billphys:${inner}`] : [];
 }
 
 /** Product / SKU key for an open rental row (DNS uses dns_product_code). */
@@ -709,15 +748,18 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
   const seenRentalKeys = new Set();
   const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottles);
 
-  const canonicalUnitKeyFromBottle = (b) => {
-    if (b?.id != null && String(b.id).trim() !== '') return `bottle:${String(b.id).trim()}`;
-    const bc = String(b?.barcode_number || b?.barcode || '').trim().toUpperCase();
-    return bc ? `barcode:${bc}` : null;
-  };
-
   if (asOfPeriodEnd) {
     const pe = clipYmd(asOfPeriodEnd);
-    const unitToProduct = new Map();
+    /** Any synonym hit means this physical unit was already billed from bottles or an earlier rental. */
+    const claimedSynonyms = new Set();
+    const claimUnit = (synonyms, pkey) => {
+      if (!synonyms?.length || !pkey) return;
+      for (const s of synonyms) {
+        if (claimedSynonyms.has(s)) return;
+      }
+      for (const s of synonyms) claimedSynonyms.add(s);
+      map.set(pkey, (map.get(pkey) || 0) + 1);
+    };
 
     // Prefer bottle rows first (custody + SKU are authoritative); then rental-only units (DNS, etc.).
     for (const b of bottles || []) {
@@ -731,12 +773,12 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
         continue;
       const del = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
       if (pe && del && del > pe) continue;
-      const uk = canonicalUnitKeyFromBottle(b);
-      if (!uk) continue;
+      const synonyms = billingPhysicalSynonymKeysForBottle(b);
+      if (synonyms.length === 0) continue;
       const raw = bottleProductCode(b);
       const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
       if (!pkey) continue;
-      unitToProduct.set(uk, pkey);
+      claimUnit(synonyms, pkey);
     }
 
     for (const r of rentals || []) {
@@ -748,16 +790,12 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
         && isCustomerOwnedForBilling(resolveBottleForRental(r, bottleById, bottleByBarcode))
       )
         continue;
-      const uk = openRentalBillableUnitKey(r, bottleById, bottleByBarcode);
-      if (!uk || unitToProduct.has(uk)) continue;
+      const synonyms = billingPhysicalSynonymKeysForRental(r, bottleByBarcode);
+      if (synonyms.length === 0) continue;
       const raw = resolvedRentalProductCode(r, bottleById, bottleByBarcode);
       const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
       if (!pkey) continue;
-      unitToProduct.set(uk, pkey);
-    }
-
-    for (const pkey of unitToProduct.values()) {
-      map.set(pkey, (map.get(pkey) || 0) + 1);
+      claimUnit(synonyms, pkey);
     }
   } else {
     for (const r of rentals || []) {

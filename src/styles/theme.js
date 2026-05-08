@@ -22,39 +22,49 @@ const brandColors = {
   border: '#E5E7EB'
 };
 
-// Common component styles
+// Common component styles (aligned with 8px grid + ~200ms motion)
 export const commonStyles = {
   // Cards
   card: {
     borderRadius: 12,
-    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-    transition: 'all 0.3s ease',
+    boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)',
+    transition:
+      'box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
     '&:hover': {
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
-    }
+      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.08)',
+      transform: 'translateY(-1px)',
+    },
   },
-  
+
   // Buttons
   primaryButton: {
     borderRadius: 8,
     textTransform: 'none',
     fontWeight: 600,
     padding: '10px 20px',
-    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+    letterSpacing: '0.01em',
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+    transition:
+      'background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
     '&:hover': {
-      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-    }
+      boxShadow: '0 6px 18px rgba(64, 181, 173, 0.22)',
+      transform: 'translateY(-1px)',
+    },
+    '&:active': {
+      transform: 'translateY(0)',
+    },
   },
-  
+
   secondaryButton: {
     borderRadius: 8,
     textTransform: 'none',
     fontWeight: 600,
     padding: '10px 20px',
     border: '2px solid',
+    transition: 'background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
     '&:hover': {
-      backgroundColor: 'rgba(64, 181, 173, 0.08)'
-    }
+      backgroundColor: 'rgba(64, 181, 173, 0.08)',
+    },
   },
   
   // Form inputs

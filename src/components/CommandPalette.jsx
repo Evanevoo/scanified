@@ -129,11 +129,15 @@ export default function CommandPalette({ open, onClose }) {
             InputProps={{
               disableUnderline: true,
               startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
+                <InputAdornment position="start" sx={{ alignSelf: 'center', mr: 0.5 }}>
+                  <SearchIcon color="action" sx={{ display: 'block' }} />
                 </InputAdornment>
               ),
-              sx: { fontSize: '1.1rem' },
+              sx: {
+                fontSize: '1.1rem',
+                alignItems: 'center',
+                minHeight: 44,
+              },
             }}
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>

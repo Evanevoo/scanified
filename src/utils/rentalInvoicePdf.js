@@ -225,10 +225,14 @@ function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, g
     return { ship: globalShip, rtn: globalRtn, end: globalOnHand };
   }
   const q = lineQuantityForInvoice(line);
+  // Per-SKU billed lines: STRT column = billed qty (see row renderer). END must match so the grid
+  // reflects the same units as line TOTAL / subtotal (serialized on-hand counts can exceed billed SKUs).
+  if (q > 0) {
+    return { ship: 0, rtn: 0, end: q };
+  }
   const anyBottleMatch = inPeriodBottles.some((b) => bottleMatchesLineItem(b, line));
   const endOut = endN > 0 ? endN : (!anyBottleMatch && q > 0 ? q : endN);
 
-  // STRT + SHIP - RTN = END. Observed in-period movement may be incomplete; add remainder to SHIP or RTN.
   const delta = endOut - q;
   const obsNet = shipN - rtnN;
   const rem = delta - obsNet;
@@ -307,7 +311,12 @@ export async function createRentalInvoicePdfDoc(params) {
     return fromCustomer || '—';
   })();
   const billLines = billToLines(customer);
-  const shipDisplay = shipToLines(customer, billLines);
+  const shipLinesCandidate = shipToLines(customer, billLines);
+  const shipIsSameAsBill =
+    billLines.length > 0 &&
+    shipLinesCandidate.length === billLines.length &&
+    shipLinesCandidate.every((ln, i) => String(ln).trim() === String(billLines[i]).trim());
+  const shipDisplay = shipIsSameAsBill ? ['Same as billing address'] : shipLinesCandidate;
 
   const billAcct =
     customer.CustomerListID
@@ -491,11 +500,18 @@ export async function createRentalInvoicePdfDoc(params) {
     billY = wrap(ln, left, billY, mid - left - 4, 3.5);
   });
   let shipY = y;
-  doc.text(String(custName).toUpperCase(), mid + 2, shipY);
-  shipY += 3.5;
-  shipDisplay.forEach((ln) => {
-    shipY = wrap(ln, mid + 2, shipY, right - mid - 6, 3.5);
-  });
+  if (shipIsSameAsBill) {
+    doc.setFontSize(8);
+    shipDisplay.forEach((ln) => {
+      shipY = wrap(String(ln), mid + 2, shipY, right - mid - 6, 3.5);
+    });
+  } else {
+    doc.text(String(custName).toUpperCase(), mid + 2, shipY);
+    shipY += 3.5;
+    shipDisplay.forEach((ln) => {
+      shipY = wrap(ln, mid + 2, shipY, right - mid - 6, 3.5);
+    });
+  }
   y = Math.max(billY, shipY) + 6;
 
   // --- Account band (single bordered table; TrackAbout-style) ---

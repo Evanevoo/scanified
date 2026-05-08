@@ -26,7 +26,7 @@ export async function fetchBillingWorkspaceData(organizationId) {
       .eq('organization_id', organizationId),
     supabase
       .from('bottles')
-      .select('*, customers:assigned_customer(customer_type)')
+      .select('*, customers!assigned_customer(customer_type)')
       .eq('organization_id', organizationId)
       .not('assigned_customer', 'is', null),
     supabase.from('bottles').select('*').eq('organization_id', organizationId),

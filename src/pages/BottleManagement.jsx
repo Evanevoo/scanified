@@ -188,17 +188,11 @@ const BottleManagement = () => {
 
           *,
 
-          customers:assigned_customer (
+          customers!assigned_customer (
 
             "CustomerListID",
 
-            name,
-
-            deleted_at,
-
-            is_deleted,
-
-            is_active
+            name
 
           )
 
@@ -228,25 +222,19 @@ const BottleManagement = () => {
 
       
 
-      // Get total count with filters
+      const from = page * rowsPerPage;
 
-      const { count } = await query;
+      const to = (page + 1) * rowsPerPage - 1;
 
-      setTotalCount(count || 0);
-
-      
-
-      // Apply pagination and ordering
-
-      const { data, error } = await query
+      const { data, error, count } = await query
 
         .order('customer_name', { ascending: true, nullsFirst: false })
 
-        .range(page * rowsPerPage, (page + 1) * rowsPerPage - 1);
-
-
+        .range(from, to);
 
       if (error) throw error;
+
+      setTotalCount(count ?? 0);
 
       
 
@@ -256,9 +244,7 @@ const BottleManagement = () => {
 
         const linkedCustomer = bottle.customers || null;
 
-        const linkedCustomerDeleted = !!linkedCustomer?.deleted_at || linkedCustomer?.is_deleted === true || linkedCustomer?.is_active === false;
-
-        if (!hasAssignedCustomer || linkedCustomerDeleted) {
+        if (!hasAssignedCustomer) {
 
           return {
 
