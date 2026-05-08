@@ -37,6 +37,10 @@ import {
   groupBillableUnitCountsByProductCode,
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
+import {
+  mergeOpenRentalsForBillingBasis,
+  summarizeMergedOpenRentalsByProduct,
+} from '../services/openRentalsBillingBasis';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import JSZip from 'jszip';
@@ -991,6 +995,29 @@ export default function Subscriptions() {
           customerIdValue,
           matchCustomerRecordBySubscriptionId,
         );
+        const mergedBillingBasisRows = mergeOpenRentalsForBillingBasis(
+          ctx.rentals || [],
+          {
+            customerListId: customerIdValue,
+            customerName:
+              mergedVirtualCustomer?.name ||
+              mergedVirtualCustomer?.Name ||
+              group.assignedName ||
+              '',
+          }
+        );
+        const rentalSummary = summarizeMergedOpenRentalsByProduct(
+          mergedBillingBasisRows,
+          ctx.bottles || []
+        );
+        const rentalProductCounts = {};
+        for (const row of rentalSummary) {
+          const qty = Number(row?.count) || 0;
+          if (qty <= 0) continue;
+          const key = row?.productCode || '__unclassified__';
+          rentalProductCounts[key] = (rentalProductCounts[key] || 0) + qty;
+        }
+        const rentalItemCount = mergedBillingBasisRows.length;
 
         return {
           id: `virtual-${groupKey}`,
@@ -1010,8 +1037,8 @@ export default function Subscriptions() {
               matchesLegacyLeaseAgreement;
             return forceYearly ? 'yearly' : 'monthly';
           })(),
-          itemCount: group.bottleCount,
-          productCounts: group.productCounts || {},
+          itemCount: rentalItemCount > 0 ? rentalItemCount : group.bottleCount,
+          productCounts: rentalItemCount > 0 ? rentalProductCounts : (group.productCounts || {}),
           totalPerCycle: 0,
           next_billing_date: null,
           status: 'active',
@@ -1020,7 +1047,7 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, legacyLeaseAgreementCustomerKeys, matchCustomerRecordBySubscriptionId]);
+  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, legacyLeaseAgreementCustomerKeys, matchCustomerRecordBySubscriptionId]);
 
   useEffect(() => {
     if (!organization?.id) {
@@ -1256,6 +1283,12 @@ export default function Subscriptions() {
     const legacyTotalsByCustomer = new Map(
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
+    const legacyCountsByCustomer = new Map(
+      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.itemCount) || 0])
+    );
+    const legacyProductCountsByCustomer = new Map(
+      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), r.productCounts || null])
+    );
 
     // Pre-build lookup maps ONCE (outside the per-row loop) for O(1) access.
     const byBottleId = new Map(
@@ -1327,6 +1360,16 @@ export default function Subscriptions() {
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
+      if (row.isVirtual) {
+        const legacyCount = legacyCountsByCustomer.get(customerKey) || 0;
+        if (legacyCount > computedItemCount) computedItemCount = legacyCount;
+        if (!effectiveProductCounts) {
+          const legacyMix = legacyProductCountsByCustomer.get(customerKey);
+          if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
+            effectiveProductCounts = legacyMix;
+          }
+        }
+      }
 
       // For legacy virtual rows, derive product mix from linked bottle ids first.
       if (row.isVirtual && !effectiveProductCounts) {
