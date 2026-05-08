@@ -27,6 +27,7 @@ const REALTIME_TABLES = [
   'customer_pricing_overrides',
   'subscription_invoices',
   'payments',
+  'customers',
   'lease_contracts',
   'lease_contract_items',
 ];
@@ -230,6 +231,7 @@ export function SubscriptionProvider({ children }) {
     subscribeIfPresent('customer_pricing_overrides');
     subscribeIfPresent('subscription_invoices');
     subscribeIfPresent('payments');
+    subscribeIfPresent('customers');
     subscribeIfPresent('bottles');
     subscribeIfPresent('rentals');
     subscribeIfPresent('lease_contracts');
@@ -242,6 +244,33 @@ export function SubscriptionProvider({ children }) {
       if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
+  }, [orgId, fetchAll]);
+
+  /** Refetch when the user returns to the tab (Realtime can be off or delayed in some environments). */
+  useEffect(() => {
+    if (!orgId) return;
+    let debounceTimer = null;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        fetchAll({ silent: true });
+      }, 400);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [orgId, fetchAll]);
+
+  /** Allow any screen to request a silent sync without importing Supabase (detail: dispatchEvent). */
+  useEffect(() => {
+    if (!orgId) return;
+    const onRequest = () => fetchAll({ silent: true });
+    window.addEventListener('gas-cylinder-subscription-refresh', onRequest);
+    return () => window.removeEventListener('gas-cylinder-subscription-refresh', onRequest);
   }, [orgId, fetchAll]);
 
   const activeSubscriptions = useMemo(
@@ -315,6 +344,7 @@ export function SubscriptionProvider({ children }) {
   );
 
   const refresh = useCallback(() => fetchAll({ silent: false }), [fetchAll]);
+  const refreshSilent = useCallback(() => fetchAll({ silent: true }), [fetchAll]);
 
   const value = useMemo(() => ({
     loading,
@@ -338,12 +368,13 @@ export function SubscriptionProvider({ children }) {
     outstandingBalance,
     nextBillingDate,
     refresh,
+    refreshSilent,
   }), [
     loading, error, subscriptions, subscriptionItems, assetTypePricing,
     customerPricingRows, legacyPricingOverrides, customerPricingOverrides,
     invoices, payments, customers, bottles, openRentals,
     leaseContracts, leaseContractItems, activeSubscriptions,
-    mrr, arr, outstandingBalance, nextBillingDate, refresh,
+    mrr, arr, outstandingBalance, nextBillingDate, refresh, refreshSilent,
   ]);
 
   return (

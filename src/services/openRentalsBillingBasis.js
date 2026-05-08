@@ -13,6 +13,9 @@ import {
 } from './billingFromAssets';
 import { normalizePricingKey } from './pricingResolution';
 
+const RENTAL_CUSTOMER_PK_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function clipYmd(v) {
   const s = String(v || '').trim().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
@@ -54,15 +57,20 @@ function dedupeKeyForRental(row) {
 
 /**
  * @param {Array<object>} openRentals - open rentals only (see filterRentalsForBillingBasisSnapshot)
- * @param {{ customerListId?: string, customerName?: string }} keys
+ * @param {{ customerListId?: string, customerName?: string, customerPkId?: string }} keys
  */
-export function mergeOpenRentalsForBillingBasis(openRentals, { customerListId, customerName }) {
+export function mergeOpenRentalsForBillingBasis(openRentals, { customerListId, customerName, customerPkId }) {
   const listId = String(customerListId || '').trim();
   const name = String(customerName || '').trim();
+  const pkTrim = String(customerPkId || '').trim();
 
   let rentalById = [];
   if (listId) {
     rentalById = (openRentals || []).filter((r) => String(r.customer_id || '').trim() === listId);
+  }
+  let rentalByPk = [];
+  if (pkTrim && RENTAL_CUSTOMER_PK_UUID_RE.test(pkTrim)) {
+    rentalByPk = (openRentals || []).filter((r) => String(r.customer_id || '').trim() === pkTrim);
   }
   let rentalByName = [];
   let rentalByNameAsId = [];
@@ -82,6 +90,7 @@ export function mergeOpenRentalsForBillingBasis(openRentals, { customerListId, c
     });
   };
   push(rentalById);
+  push(rentalByPk);
   push(rentalByName);
   push(rentalByNameAsId);
 
