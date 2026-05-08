@@ -1099,7 +1099,7 @@ export default function LeaseAgreements() {
                       <TextField
                         {...params}
                         label="Customer"
-                        placeholder="Type to search customer..."
+                        placeholder="Type customer name or ID..."
                       />
                     )}
                     noOptionsText="No matching customers"

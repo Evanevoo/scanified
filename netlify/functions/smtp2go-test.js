@@ -31,7 +31,7 @@ exports.handler = async (event, _context) => {
     }
 
     // Create transporter with SMTP2GO settings
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       host: 'mail.smtp2go.com',
       port: 587,
       secure: false,

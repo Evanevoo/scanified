@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import { useTheme } from '../context/ThemeContext';
@@ -36,7 +36,6 @@ import {
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
   resolvedRentalProductCode,
-  subscriptionBillingLookupKeys,
 } from '../services/billingFromAssets';
 import {
   mergeOpenRentalsForBillingBasis,
@@ -51,7 +50,7 @@ import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip, IconButton,
-  Button, TextField, InputAdornment, Tooltip, LinearProgress, Stack,
+  Button, TextField, InputAdornment, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Alert, TablePagination,
 } from '@mui/material';
@@ -398,7 +397,6 @@ export default function Subscriptions() {
   const { organizationColors } = useTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
@@ -411,8 +409,8 @@ export default function Subscriptions() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
-  /** Open rentals from SubscriptionContext (same source as the rest of the app; updates on navigate / refresh). */
-  const legacyRentalsRaw = useMemo(() => ctx.rentals || [], [ctx.rentals]);
+  /** Raw DB rows; folded into `legacyRows` in useMemo so bottle realtime updates do not re-hit Supabase. */
+  const [legacyRentalsRaw, setLegacyRentalsRaw] = useState([]);
   const [legacyLeaseRaw, setLegacyLeaseRaw] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
@@ -425,6 +423,11 @@ export default function Subscriptions() {
   const [emailInitialForm, setEmailInitialForm] = useState({ to: '', from: '', subject: '', message: '' });
   /** Bumps on each Email open so EmailInvoiceDialog remounts and always shows the latest saved template. */
   const [emailDialogMountKey, setEmailDialogMountKey] = useState('email-dlg-closed');
+  const blurActiveElement = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const active = document.activeElement;
+    if (active && typeof active.blur === 'function') active.blur();
+  }, []);
   const [termsFilter, setTermsFilter] = useState('all');
   /** Monthly QuickBooks CSV: all | net30 | credit_card */
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
@@ -450,6 +453,13 @@ export default function Subscriptions() {
   const [zipExportBillingPeriod, setZipExportBillingPeriod] = useState(null);
   const [zipExportProgress, setZipExportProgress] = useState({ done: 0, total: 0 });
   const [cycleInvoiceLookup, setCycleInvoiceLookup] = useState(emptyCycleInvoiceLookup);
+  /** Bumps after saving a custom invoice # so the grid refetches cycle invoice status. */
+  const [invoiceLookupRefreshKey, setInvoiceLookupRefreshKey] = useState(0);
+  const [invoiceNoDialogOpen, setInvoiceNoDialogOpen] = useState(false);
+  const [invoiceNoEditRow, setInvoiceNoEditRow] = useState(null);
+  const [invoiceNoDraft, setInvoiceNoDraft] = useState('');
+  const [savingInvoiceNo, setSavingInvoiceNo] = useState(false);
+  const [invoiceNoSaveError, setInvoiceNoSaveError] = useState('');
   useEffect(() => {
     if (tab >= SUBSCRIPTION_TAB_FILTERS.length) setTab(0);
   }, [tab]);
@@ -1006,7 +1016,6 @@ export default function Subscriptions() {
               mergedVirtualCustomer?.Name ||
               group.assignedName ||
               '',
-            customerPkId: mergedVirtualCustomer?.id || null,
           }
         );
         const rentalSummary = summarizeMergedOpenRentalsByProduct(
@@ -1054,11 +1063,25 @@ export default function Subscriptions() {
 
   useEffect(() => {
     if (!organization?.id) {
+      setLegacyRentalsRaw([]);
       setLegacyLeaseRaw([]);
       return;
     }
     let active = true;
     (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rentals')
+          .select('id, customer_id, customer_name, bottle_id, bottle_barcode, product_code, product_type, asset_type, rental_type, rental_amount, rental_end_date, is_dns, dns_description, dns_product_code')
+          .eq('organization_id', organization.id)
+          .is('rental_end_date', null);
+        if (!active) return;
+        if (error) throw error;
+        setLegacyRentalsRaw(data || []);
+      } catch {
+        if (active) setLegacyRentalsRaw([]);
+      }
+      if (!active) return;
       try {
         const { data: leaseData, error: leaseErr } = await supabase
           .from('lease_agreements')
@@ -1076,7 +1099,7 @@ export default function Subscriptions() {
       }
     })();
     return () => { active = false; };
-  }, [organization?.id, location.pathname]);
+  }, [organization?.id]);
 
   const legacyRows = useMemo(() => {
     let rows = [];
@@ -1188,7 +1211,6 @@ export default function Subscriptions() {
           itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
           totalPerCycle: baseAnnual,
           lease_agreement_annual: baseAnnual,
-          /** Bottles covered by this agreement; caps lease Items + annual vs assigned inventory. */
           lease_max_asset_count: leaseMaxAssetCount,
           lease_bottle_id: a.bottle_id || null,
           lease_end_date: a.end_date || null,
@@ -1273,45 +1295,15 @@ export default function Subscriptions() {
 
       return true;
     });
-
-    /** Match legacy rentals roll-up to subscription rows even when UUID vs CustomerListID differs (same as customer directory aliases). */
-    const lookupKeysForRentalPricingRow = (row) => {
-      const keys = new Set();
-      const add = (v) => {
-        if (v == null || v === '') return;
-        keys.add(normalize(v));
-        keys.add(normalizeName(v));
-      };
-      add(row.customer_id);
-      const c = row.customer;
-      if (c) {
-        add(c.CustomerListID);
-        add(c.id);
-        add(c.name);
-        add(c.Name);
-        for (const lk of subscriptionBillingLookupKeys(c, ctx.customers || [])) {
-          if (lk != null && String(lk).trim() !== '') keys.add(String(lk).trim());
-        }
-      }
-      return keys;
-    };
-
-    const legacyTotalsByCustomer = new Map();
-    const legacyCountsByCustomer = new Map();
-    const legacyProductCountsByCustomer = new Map();
-    for (const r of legacyRows || []) {
-      if (r.legacySource === 'lease_agreements') continue;
-      const t = parseFloat(r.totalPerCycle) || 0;
-      const n = parseFloat(r.itemCount) || 0;
-      const pc = r.productCounts && typeof r.productCounts === 'object' ? r.productCounts : null;
-      for (const k of lookupKeysForRentalPricingRow(r)) {
-        legacyTotalsByCustomer.set(k, Math.max(legacyTotalsByCustomer.get(k) || 0, t));
-        legacyCountsByCustomer.set(k, Math.max(legacyCountsByCustomer.get(k) || 0, n));
-        if (pc && Object.keys(pc).length > 0) {
-          legacyProductCountsByCustomer.set(k, pc);
-        }
-      }
-    }
+    const legacyTotalsByCustomer = new Map(
+      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
+    );
+    const legacyCountsByCustomer = new Map(
+      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.itemCount) || 0])
+    );
+    const legacyProductCountsByCustomer = new Map(
+      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), r.productCounts || null])
+    );
 
     // Pre-build lookup maps ONCE (outside the per-row loop) for O(1) access.
     const byBottleId = new Map(
@@ -1357,12 +1349,10 @@ export default function Subscriptions() {
           const hasCap = Number.isFinite(cap) && cap > 0;
 
           if (hasCap) {
-            // Agreement annual is for `cap` bottles; only those units are on lease (e.g. 5 of 7 assigned).
             const covered = assigned <= 0 ? 0 : Math.min(assigned, cap);
             displayItems = covered;
             displayedAnnual = safeBase * (covered / cap);
           } else {
-            // Legacy agreements with no max: keep prior behavior (treat annual as per assigned bottle).
             const effective = assigned > 0 ? assigned : 1;
             displayedAnnual = safeBase * effective;
             displayItems = effective;
@@ -1397,24 +1387,13 @@ export default function Subscriptions() {
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
-
-      let legacyOpenRentalCountMax = 0;
-      for (const k of lookupKeysForRentalPricingRow(row)) {
-        legacyOpenRentalCountMax = Math.max(legacyOpenRentalCountMax, legacyCountsByCustomer.get(k) || 0);
-      }
-      // Rentals grid must not under-count vs Customer Detail: open `rentals` rows (incl. DNS) are grouped in legacyRows
-      // but were only merged into isVirtual rows before, so subscribed customers could show bottle count only.
-      if (!preserveLeaseContractTotal && period === 'monthly') {
-        if (legacyOpenRentalCountMax > computedItemCount) {
-          computedItemCount = legacyOpenRentalCountMax;
-        }
+      if (row.isVirtual) {
+        const legacyCount = legacyCountsByCustomer.get(customerKey) || 0;
+        if (legacyCount > computedItemCount) computedItemCount = legacyCount;
         if (!effectiveProductCounts) {
-          for (const k of lookupKeysForRentalPricingRow(row)) {
-            const legacyMix = legacyProductCountsByCustomer.get(k);
-            if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
-              effectiveProductCounts = legacyMix;
-              break;
-            }
+          const legacyMix = legacyProductCountsByCustomer.get(customerKey);
+          if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
+            effectiveProductCounts = legacyMix;
           }
         }
       }
@@ -1772,7 +1751,7 @@ export default function Subscriptions() {
         const { periodStart: virtualCycleStart, periodEnd: virtualCycleEnd } = getCurrentCycleRange();
         const { data } = await supabase
           .from('invoices')
-          .select('customer_id, invoice_number, status, updated_at')
+          .select('customer_id, invoice_number, status, created_at')
           .eq('organization_id', organization.id)
           .eq('period_start', virtualCycleStart)
           .eq('period_end', virtualCycleEnd)
@@ -1784,7 +1763,7 @@ export default function Subscriptions() {
           mapByCustomer[key] = {
             invoice_number: row.invoice_number,
             status: String(row.status || '').toLowerCase(),
-            updated_at: row.updated_at || null,
+            updated_at: row.created_at || null,
           };
         }
       }
@@ -1843,7 +1822,7 @@ export default function Subscriptions() {
     });
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `cycleInvoiceLookupKey` replaces `allRows` so we do not refetch when row arrays are recreated with the same customers/subscriptions
-  }, [organization?.id, cycleInvoiceLookupKey, getCurrentCycleRange, getPdfBillingPeriodForSub]);
+  }, [organization?.id, cycleInvoiceLookupKey, getCurrentCycleRange, getPdfBillingPeriodForSub, invoiceLookupRefreshKey]);
 
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
@@ -2652,6 +2631,173 @@ export default function Subscriptions() {
     [organization?.id, getCurrentCycleRange, getPdfBillingPeriodForSub],
   );
 
+  /**
+   * Persist a user-chosen invoice # for the current billing cycle so PDF, email, and Excel
+   * all read it via resolveInvoiceNumberForRentalPdf / resolveRentalInvoiceNumberForActions.
+   */
+  const persistCustomInvoiceNumber = useCallback(
+    async (sub, newNumberRaw) => {
+      const newNumber = String(newNumberRaw || '').trim();
+      const takenMsg = (n) =>
+        `Invoice number "${n}" is already taken. Use a different number.`;
+      if (!newNumber) {
+        return { success: false, error: 'Invoice number is required.' };
+      }
+      if (!organization?.id) {
+        return { success: false, error: 'Organization not loaded.' };
+      }
+      const cid = String(sub?.customer_id || '').trim();
+      if (!cid) {
+        return { success: false, error: 'This row has no customer id.' };
+      }
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      if (!periodStart || !periodEnd) {
+        return { success: false, error: 'Could not determine billing period for this row.' };
+      }
+      const { dueDate } = getCurrentCycleRange();
+      const today = new Date().toISOString().split('T')[0];
+      const total = parseFloat(sub?.totalPerCycle) || 0;
+      const gstAmt = +(total * 0.05).toFixed(2);
+      const pstAmt = +(total * 0.06).toFixed(2);
+      const taxAmount = +(gstAmt + pstAmt).toFixed(2);
+      const totalAmount = +(total + taxAmount).toFixed(2);
+      const customerName = sub?.customer?.name || sub?.customer?.Name || cid;
+
+      const isVirtualBilling = Boolean(sub?.isVirtual);
+      const rawSid = sub?.id != null ? String(sub.id).trim() : '';
+      const subIdOk =
+        rawSid
+        && !rawSid.startsWith('virtual-')
+        && !rawSid.startsWith('legacy-');
+
+      if (!isVirtualBilling && !subIdOk) {
+        return {
+          success: false,
+          error: 'This rental row cannot store an invoice number (missing subscription id).',
+        };
+      }
+
+      try {
+        if (isVirtualBilling) {
+          const { data: existingInv } = await supabase
+            .from('invoices')
+            .select('id')
+            .eq('organization_id', organization.id)
+            .eq('customer_id', cid)
+            .eq('period_start', periodStart)
+            .eq('period_end', periodEnd)
+            .maybeSingle();
+
+          if (existingInv?.id) {
+            const { data: conflict } = await supabase
+              .from('invoices')
+              .select('id')
+              .eq('organization_id', organization.id)
+              .eq('invoice_number', newNumber)
+              .neq('id', existingInv.id)
+              .maybeSingle();
+            if (conflict?.id) {
+              return { success: false, error: takenMsg(newNumber) };
+            }
+            const { error } = await supabase
+              .from('invoices')
+              .update({ invoice_number: newNumber })
+              .eq('id', existingInv.id);
+            if (error) throw error;
+          } else {
+            const { data: conflict } = await supabase
+              .from('invoices')
+              .select('id')
+              .eq('organization_id', organization.id)
+              .eq('invoice_number', newNumber)
+              .maybeSingle();
+            if (conflict?.id) {
+              return { success: false, error: takenMsg(newNumber) };
+            }
+            const { error } = await supabase.from('invoices').insert({
+              organization_id: organization.id,
+              customer_id: cid,
+              customer_name: customerName,
+              period_start: periodStart,
+              period_end: periodEnd,
+              invoice_date: today,
+              due_date: dueDate,
+              subtotal: total,
+              tax_amount: taxAmount,
+              total_amount: totalAmount,
+              status: 'pending',
+              invoice_number: newNumber,
+            });
+            if (error) throw error;
+          }
+        } else {
+          const subId = rawSid;
+          const { data: existingSi } = await supabase
+            .from('subscription_invoices')
+            .select('id')
+            .eq('organization_id', organization.id)
+            .eq('subscription_id', subId)
+            .eq('period_start', periodStart)
+            .eq('period_end', periodEnd)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (existingSi?.id) {
+            const { data: conflict } = await supabase
+              .from('subscription_invoices')
+              .select('id')
+              .eq('organization_id', organization.id)
+              .eq('invoice_number', newNumber)
+              .neq('id', existingSi.id)
+              .maybeSingle();
+            if (conflict?.id) {
+              return { success: false, error: takenMsg(newNumber) };
+            }
+            const { error } = await supabase
+              .from('subscription_invoices')
+              .update({ invoice_number: newNumber, updated_at: new Date().toISOString() })
+              .eq('id', existingSi.id);
+            if (error) throw error;
+          } else {
+            const { data: conflict } = await supabase
+              .from('subscription_invoices')
+              .select('id')
+              .eq('organization_id', organization.id)
+              .eq('invoice_number', newNumber)
+              .maybeSingle();
+            if (conflict?.id) {
+              return { success: false, error: takenMsg(newNumber) };
+            }
+            const { error } = await supabase.from('subscription_invoices').insert({
+              organization_id: organization.id,
+              subscription_id: subId,
+              customer_id: cid,
+              invoice_number: newNumber,
+              status: 'draft',
+              period_start: periodStart,
+              period_end: periodEnd,
+              subtotal: total,
+              tax_amount: taxAmount,
+              total_amount: totalAmount,
+              due_date: dueDate,
+            });
+            if (error) throw error;
+          }
+        }
+        return { success: true };
+      } catch (e) {
+        const code = String(e?.code || '');
+        const msg = String(e?.message || '');
+        if (code === '23505' || msg.includes('unique') || msg.includes('duplicate')) {
+          return { success: false, error: takenMsg(newNumber) };
+        }
+        return { success: false, error: e?.message || 'Failed to save invoice number.' };
+      }
+    },
+    [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange],
+  );
+
   /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
@@ -2661,16 +2807,18 @@ export default function Subscriptions() {
       if (fromLastCsv) return fromLastCsv;
 
       const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
-      let invNo = String(sub?.invoice_number || '').trim();
+      // Prefer DB (subscription_invoices / invoices) so custom invoice numbers always win over stale sub.invoice_number.
+      let invNo = '';
+      const fromDb = await resolveInvoiceNumberForRentalPdf(
+        supabase,
+        organization.id,
+        sub,
+        periodStart,
+        periodEnd
+      );
+      if (fromDb) invNo = String(fromDb).trim();
       if (!invNo) {
-        const fromDb = await resolveInvoiceNumberForRentalPdf(
-          supabase,
-          organization.id,
-          sub,
-          periodStart,
-          periodEnd
-        );
-        invNo = fromDb ? String(fromDb).trim() : '';
+        invNo = String(sub?.invoice_number || '').trim();
       }
       if (!invNo) {
         const csvPeriod =
@@ -2708,6 +2856,53 @@ export default function Subscriptions() {
       repairPlaceholderSubscriptionInvoiceNumber,
     ]
   );
+
+  const openInvoiceNumberDialog = useCallback(
+    async (sub) => {
+      blurActiveElement();
+      setActionError(null);
+      setInvoiceNoSaveError('');
+      setInvoiceNoEditRow(sub);
+      setInvoiceNoDraft('');
+      setInvoiceNoDialogOpen(true);
+      try {
+        const n = await resolveRentalInvoiceNumberForActions(sub);
+        setInvoiceNoDraft(n || '');
+      } catch {
+        setInvoiceNoDraft('');
+      }
+    },
+    [blurActiveElement, resolveRentalInvoiceNumberForActions],
+  );
+
+  const handleSaveInvoiceNumber = useCallback(async () => {
+    if (!invoiceNoEditRow) return;
+    setSavingInvoiceNo(true);
+    setActionError(null);
+    setInvoiceNoSaveError('');
+    try {
+      const result = await persistCustomInvoiceNumber(invoiceNoEditRow, invoiceNoDraft);
+      if (!result.success) {
+        const err = result.error || 'Could not save invoice number.';
+        setInvoiceNoSaveError(err);
+        setActionError(err);
+        return;
+      }
+      setInvoiceLookupRefreshKey((k) => k + 1);
+      setInvoiceNoDialogOpen(false);
+      setInvoiceNoEditRow(null);
+      setInvoiceNoSaveError('');
+      setActionSuccess(
+        'Invoice number saved. PDF, email, and Excel will use this number for this billing cycle.',
+      );
+    } catch (e) {
+      const err = e?.message || 'Failed to save invoice number.';
+      setInvoiceNoSaveError(err);
+      setActionError(err);
+    } finally {
+      setSavingInvoiceNo(false);
+    }
+  }, [invoiceNoEditRow, invoiceNoDraft, persistCustomInvoiceNumber]);
 
   const getLineItemsForRow = useCallback((row) => {
     if (row?.productCounts && Object.keys(row.productCounts).length > 0) {
@@ -3091,6 +3286,7 @@ export default function Subscriptions() {
   }, [buildInvoicePdfForRow, getCurrentCycleRange, resolveRentalInvoiceNumberForActions, matchCustomerRecordBySubscriptionId]);
 
   const openEmailDialogForRow = async (sub) => {
+    blurActiveElement();
     setActionError(null);
     setActionSuccess(null);
     try {
@@ -3904,7 +4100,10 @@ export default function Subscriptions() {
               size="small"
               variant="contained"
               startIcon={<AddIcon sx={{ fontSize: 16 }} />}
-              onClick={() => setCreateOpen(true)}
+              onClick={() => {
+                blurActiveElement();
+                setCreateOpen(true);
+              }}
               sx={{
                 borderRadius: 1.5,
                 textTransform: 'none',
@@ -4173,7 +4372,7 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       {(() => {
                         const cid = String(sub.customer_id || '').trim();
                         const sid = String(sub.id || '').trim();
@@ -4194,7 +4393,36 @@ export default function Subscriptions() {
                         const st = String(cycleInv?.status || '').toLowerCase();
                         return (
                           <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
-                            {invNo ? (
+                            {cid ? (
+                              <Tooltip title="Edit invoice # (PDF, email, Excel use this for the cycle)">
+                                <Typography
+                                  component="button"
+                                  type="button"
+                                  variant="body2"
+                                  onClick={() => openInvoiceNumberDialog(sub)}
+                                  sx={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 600,
+                                    margin: 0,
+                                    border: 'none',
+                                    background: 'none',
+                                    padding: 0,
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    color: invNo ? 'text.primary' : 'text.secondary',
+                                    borderBottom: '1px dotted',
+                                    borderColor: 'action.disabled',
+                                    lineHeight: 1.4,
+                                    '&:hover': {
+                                      color: 'primary.main',
+                                      borderColor: 'primary.main',
+                                    },
+                                  }}
+                                >
+                                  {invNo || 'Not set'}
+                                </Typography>
+                              </Tooltip>
+                            ) : invNo ? (
                               <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{invNo}</Typography>
                             ) : (
                               <Typography variant="caption" sx={{ color: 'text.disabled' }}>No invoice row</Typography>
@@ -4244,7 +4472,10 @@ export default function Subscriptions() {
                           size="small"
                           variant="text"
                           startIcon={<EmailIcon fontSize="small" />}
-                          onClick={() => openEmailDialogForRow(sub)}
+                          onClick={() => {
+                            blurActiveElement();
+                            openEmailDialogForRow(sub);
+                          }}
                           disabled={saving || (parseFloat(sub.totalPerCycle) || 0) <= 0}
                           sx={{
                             textTransform: 'none',
@@ -4403,6 +4634,67 @@ export default function Subscriptions() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog
+        open={invoiceNoDialogOpen}
+        onClose={() => {
+          if (!savingInvoiceNo) {
+            setInvoiceNoDialogOpen(false);
+            setInvoiceNoEditRow(null);
+            setInvoiceNoSaveError('');
+          }
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>Invoice number</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            This value is stored for the current billing cycle and is used when you download PDF, send email, or export Excel for this customer.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Invoice #"
+            value={invoiceNoDraft}
+            onChange={(e) => {
+              setInvoiceNoDraft(e.target.value);
+              if (invoiceNoSaveError) setInvoiceNoSaveError('');
+            }}
+            disabled={savingInvoiceNo}
+            placeholder="e.g. W00142"
+            InputProps={{ sx: { fontFamily: 'monospace' } }}
+          />
+          {invoiceNoSaveError ? (
+            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setInvoiceNoSaveError('')}>
+              {invoiceNoSaveError}
+            </Alert>
+          ) : null}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setInvoiceNoDialogOpen(false);
+              setInvoiceNoEditRow(null);
+              setInvoiceNoSaveError('');
+            }}
+            disabled={savingInvoiceNo}
+            sx={{ textTransform: 'none' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveInvoiceNumber}
+            disabled={savingInvoiceNo || !String(invoiceNoDraft || '').trim()}
+            sx={{ textTransform: 'none', bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
+            startIcon={savingInvoiceNo ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {savingInvoiceNo ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <EmailInvoiceDialog
         key={emailDialogMountKey}
         open={emailOpen}

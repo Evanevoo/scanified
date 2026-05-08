@@ -757,7 +757,7 @@ const BottleManagement = () => {
             if (rowIndicatesDeliveredNotScanned(row)) {
               if (!customerName?.trim() || !customerId) {
                 logger.warn(
-                  `Bottle upload row ${rowIndex + 1}: Delivered Not-Scanned skipped — need customer name and ID`
+                  `Bottle upload row ${rowIndex + 1}: DNS skipped — need customer name and ID`
                 );
               } else {
                 const productCode =
@@ -785,7 +785,7 @@ const BottleManagement = () => {
                 const dnsDescription =
                   (descText && descText.trim()) ||
                   [category, grp, typeVal, productCode].filter(Boolean).join(' · ') ||
-                  `${productCode} – Delivered Not Scanned`;
+                  `${productCode} – DNS`;
                 const qtyRaw = getColumnValue(row, ['Qty', 'Quantity', 'quantity', 'Count', 'count']);
                 let repeat = 1;
                 const qParsed = parseInt(qtyRaw, 10);
