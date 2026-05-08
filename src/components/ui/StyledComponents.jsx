@@ -11,13 +11,23 @@ import {
   Typography,
   styled
 } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import { commonStyles } from '../../styles/theme';
 
-// Styled Card Component
+// Styled Card Component (8px grid padding; minimal border + hover)
 export const StyledCard = styled(MuiCard)(({ theme }) => ({
   ...commonStyles.card,
   padding: theme.spacing(3),
-  marginBottom: theme.spacing(3)
+  marginBottom: theme.spacing(3),
+  border: `1px solid ${theme.palette.divider}`,
+  transition: theme.transitions.create(['box-shadow', 'border-color', 'transform'], {
+    duration: theme.transitions.duration.shorter,
+    easing: theme.transitions.easing.easeOut,
+  }),
+  '&:hover': {
+    ...commonStyles.card['&:hover'],
+    borderColor: alpha(theme.palette.primary.main, 0.28),
+  },
 }));
 
 // Styled Section Component
@@ -61,21 +71,43 @@ export const StyledTableContainer = styled(MuiTableContainer)(({ theme }) => ({
   ...commonStyles.tableContainer
 }));
 
-// Page Header Component
+// Page Header Component — clear hierarchy (title / subtitle / actions)
 export const PageHeader = ({ title, subtitle, actions }) => (
-  <Box sx={{ mb: 4 }}>
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-      <Typography variant="h4" sx={{ fontWeight: 700 }}>
+  <Box sx={{ mb: 3 }}>
+    <Box
+      sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: 2,
+        mb: subtitle ? 1 : 0,
+      }}
+    >
+      <Typography
+        variant="h4"
+        component="h1"
+        sx={{
+          fontWeight: 700,
+          letterSpacing: '-0.02em',
+          lineHeight: 1.2,
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
         {title}
       </Typography>
       {actions && (
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexShrink: 0, alignItems: 'center' }}>
           {actions}
         </Box>
       )}
     </Box>
     {subtitle && (
-      <Typography variant="body2" color="text.secondary">
+      <Typography
+        variant="subtitle1"
+        color="text.secondary"
+        sx={{ fontWeight: 400, maxWidth: 'min(100%, 720px)', lineHeight: 1.55 }}
+      >
         {subtitle}
       </Typography>
     )}
@@ -129,48 +161,65 @@ export const EmptyState = ({
 );
 
 // Info Card Component
-export const InfoCard = ({ 
-  title, 
-  value, 
-  subtitle, 
-  icon, 
+export const InfoCard = ({
+  title,
+  value,
+  subtitle,
+  icon,
   color = 'primary',
-  trend 
-}) => (
-  <StyledCard>
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-      <Box>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          {title}
-        </Typography>
-        <Typography variant="h4" sx={{ fontWeight: 700, color: `${color}.main`, mb: 0.5 }}>
-          {value}
-        </Typography>
-        {subtitle && (
-          <Typography variant="caption" color="text.secondary">
-            {subtitle}
+  trend,
+}) => {
+  const theme = useTheme();
+  const paletteColor = theme.palette[color] ?? theme.palette.primary;
+
+  return (
+    <StyledCard>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, fontWeight: 600 }}>
+            {title}
           </Typography>
-        )}
-        {trend && (
-          <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-            {trend}
+          <Typography variant="h4" sx={{ fontWeight: 700, color: `${color}.main`, mb: 0.5, letterSpacing: '-0.02em' }}>
+            {value}
+          </Typography>
+          {subtitle && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {subtitle}
+            </Typography>
+          )}
+          {trend && (
+            <Box sx={{ display: 'flex', alignItems: 'center', mt: 1.5, gap: 0.5 }}>
+              {trend}
+            </Box>
+          )}
+        </Box>
+        {icon && (
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 2,
+              backgroundColor: alpha(paletteColor.main, 0.12),
+              color: paletteColor.main,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              transition: theme.transitions.create(['background-color', 'transform'], {
+                duration: theme.transitions.duration.shorter,
+              }),
+              '&:hover': {
+                backgroundColor: alpha(paletteColor.main, 0.18),
+                transform: 'scale(1.04)',
+              },
+            }}
+          >
+            {icon}
           </Box>
         )}
       </Box>
-      {icon && (
-        <Box sx={{ 
-          p: 1.5, 
-          borderRadius: 2, 
-          backgroundColor: `${color}.light`,
-          color: `${color}.main`,
-          opacity: 0.1
-        }}>
-          {icon}
-        </Box>
-      )}
-    </Box>
-  </StyledCard>
-);
+    </StyledCard>
+  );
+};
 
 // Form Section Component
 export const FormSection = ({ title, children }) => (

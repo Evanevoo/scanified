@@ -365,9 +365,25 @@ export default function MainLayout({ children }) {
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              flex: 1,
+              minWidth: 0,
+              justifyContent: 'flex-end',
+            }}
+          >
             {topNavLinks.length > 0 && (
-              <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 0, flexShrink: 0 }}>
+              <Box
+                sx={{
+                  display: { xs: 'none', md: 'flex' },
+                  alignItems: 'center',
+                  gap: 0,
+                  flexShrink: 0,
+                }}
+              >
                 {topNavLinks.map((link) => {
                   const active = isTopNavActive(link.to);
                   return (
@@ -381,8 +397,8 @@ export default function MainLayout({ children }) {
                       fontSize: '0.875rem',
                       textTransform: 'none',
                       px: 2,
-                      py: 1,
-                      minHeight: 48,
+                      py: 0,
+                      minHeight: 40,
                       borderRadius: 0,
                       borderBottom: active ? `2px solid ${primaryColor}` : '2px solid transparent',
                       transition: 'all 0.2s',
@@ -399,7 +415,15 @@ export default function MainLayout({ children }) {
               </Box>
             )}
 
-            <Box sx={{ width: '100%', maxWidth: 400, position: 'relative', minWidth: 0 }} ref={searchRef}>
+            <Box
+              sx={{
+                flex: '1 1 0%',
+                minWidth: 0,
+                maxWidth: { xs: 'none', sm: 400 },
+                position: 'relative',
+              }}
+              ref={searchRef}
+            >
               <SearchInputWithIcon
                 placeholder="Search customers & assets — or press Ctrl+K for pages"
                 value={searchTerm}
@@ -412,7 +436,7 @@ export default function MainLayout({ children }) {
                     setShowSuggestions(true);
                   }
                 }}
-                className="w-full"
+                className="h-10 min-h-[40px] w-full"
               />
               {showSuggestions && suggestions.length > 0 && (
                 <Paper
@@ -463,6 +487,14 @@ export default function MainLayout({ children }) {
               )}
             </Box>
 
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                flexShrink: 0,
+              }}
+            >
             <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }} aria-label="Notifications">
               <NotificationsIcon />
             </IconButton>
@@ -478,11 +510,14 @@ export default function MainLayout({ children }) {
                 display: { xs: 'none', sm: 'inline-flex' },
                 fontWeight: 600,
                 color: 'text.primary',
+                minHeight: 40,
+                py: 0.5,
                 '&:hover': { bgcolor: 'action.hover' },
               }}
             >
               {logoutLoading ? 'Signing out...' : 'Sign out'}
             </Button>
+            </Box>
           </Box>
         </Toolbar>
       </AppBar>

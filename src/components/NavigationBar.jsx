@@ -124,11 +124,23 @@ export default function NavigationBar() {
             bgcolor: 'white',
             backdropFilter: 'blur(10px)',
             borderBottom: `2px solid ${marketingTokens.brandTeal}`,
-            fontFamily: marketingTokens.fontStack
+            fontFamily: marketingTokens.fontStack,
+            minHeight: 64,
           }}
         >
           <Container maxWidth="lg">
-            <Toolbar sx={{ py: 1 }}>
+            <Toolbar
+              disableGutters
+              sx={{
+                minHeight: 64,
+                height: 64,
+                py: 0,
+                px: { xs: 0.5, sm: 0 },
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+              }}
+            >
               {/* Logo */}
               <Typography 
                 variant="h5" 
@@ -138,7 +150,9 @@ export default function NavigationBar() {
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 1
+                  gap: 1,
+                  lineHeight: 1.2,
+                  flexShrink: 0,
                 }}
                 onClick={() => navigate('/')}
               >
@@ -146,7 +160,7 @@ export default function NavigationBar() {
               </Typography>
 
               {/* Desktop Navigation */}
-              <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, justifyContent: 'center', gap: 1 }}>
+              <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, justifyContent: 'center', alignItems: 'center', gap: 1, minWidth: 0 }}>
                 {navigationItems.map((item) => (
                   item.items ? (
                     <Box key={item.label}>
@@ -158,6 +172,7 @@ export default function NavigationBar() {
                           fontWeight: 500,
                           textTransform: 'none',
                           px: 2,
+                          minHeight: 40,
                           '&:hover': {
                             bgcolor: 'rgba(0, 0, 0, 0.04)',
                             color: '#000000'
@@ -203,6 +218,7 @@ export default function NavigationBar() {
                         fontWeight: isActive(item.path) ? 600 : 500,
                         textTransform: 'none',
                         px: 2,
+                        minHeight: 40,
                         position: 'relative',
                         '&:hover': {
                           bgcolor: 'rgba(0, 0, 0, 0.04)',
@@ -228,13 +244,14 @@ export default function NavigationBar() {
               </Box>
 
               {/* CTA Buttons */}
-              <Stack direction="row" spacing={2} sx={{ display: { xs: 'none', md: 'flex' } }}>
+              <Stack direction="row" spacing={2} sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', flexShrink: 0 }}>
                 <Button
                   variant="outlined"
                   onClick={() => navigate('/login')}
                   sx={{
                     textTransform: 'none',
                     fontWeight: 600,
+                    minHeight: 40,
                     borderWidth: 2,
                     borderColor: '#000000',
                     color: '#000000',
@@ -253,6 +270,7 @@ export default function NavigationBar() {
                   sx={{
                     textTransform: 'none',
                     fontWeight: 600,
+                    minHeight: 40,
                     bgcolor: '#000000',
                     color: 'white',
                     boxShadow: 'none',
@@ -270,7 +288,13 @@ export default function NavigationBar() {
               <IconButton
                 edge="end"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                sx={{ display: { xs: 'flex', md: 'none' } }}
+                sx={{
+                  display: { xs: 'flex', md: 'none' },
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 44,
+                  height: 44,
+                }}
               >
                 {mobileMenuOpen ? <CloseIcon /> : <MenuIcon />}
               </IconButton>

@@ -34,23 +34,9 @@ import {
 import {
   bottleProductCode,
   buildBottleLookupMaps,
-  buildOpenRentalMatchOptionsForSubscription,
-  expandBillingNameLookupKeys,
-  isCustomerOwnedForBilling,
-  isDnsRentalExcludedFromBillableCount,
-  isRentalOpen,
-  openRentalMatchesCustomer,
-  rentalIsDnsForBilling,
-  openRentalBillableUnitKey,
-  rentalCustomerIndexKeys,
-  resolveBottleForRental,
+  groupBillableUnitCountsByProductCode,
   resolvedRentalProductCode,
-  subscriptionBillingLookupKeys,
 } from '../services/billingFromAssets';
-import {
-  computeCustomerRentalHistory,
-  firstDayOfMonth as ymFirstDay,
-} from '../services/customerRentalHistory';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import JSZip from 'jszip';
@@ -81,6 +67,20 @@ function isCodPaymentTerm(t) {
 
 function isCreditCardPaymentTerm(t) {
   return isCodPaymentTerm(t) || /\bvisa\b|\bmastercard\b|\bmc\b|\bamex\b|american express|\bdiscover\b|credit\s*card|card\s*payment|\bdebit\s*card\b/.test(t);
+}
+
+/** Same customer key as computeSubscriptionBillingCycleTotal / groupBillableUnitCountsByProductCode. */
+function subscriptionMatchKeyForInvoiceRow(row, customerRecord) {
+  return (
+    String(
+      row?.customer_id ||
+        customerRecord?.CustomerListID ||
+        customerRecord?.id ||
+        customerRecord?.name ||
+        customerRecord?.Name ||
+        '',
+    ).trim() || String(row?.customer_id || '')
+  );
 }
 
 function classifyInvoiceTermsForExport(paymentTermsRaw) {
@@ -300,12 +300,6 @@ function getInvoiceNumberFromLastCsvMap(targetSub) {
   }
 }
 
-function previousCalendarMonthYm() {
-  const n = new Date();
-  const d = new Date(n.getFullYear(), n.getMonth() - 1, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
 /** Short label for lease agreement end date (matches common Jan 1 renewal wording). */
 function formatLeaseAgreementExpiry(endDateStr) {
   if (!endDateStr) return '';
@@ -428,8 +422,8 @@ export default function Subscriptions() {
   const [termsFilter, setTermsFilter] = useState('all');
   /** Monthly QuickBooks CSV: all | net30 | credit_card */
   const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
-  /** QuickBooks CSV: `live` = same totals as table; `YYYY-MM` = counts/pricing as of that month-end */
-  const [qbCsvBillingMonth, setQbCsvBillingMonth] = useState(() => previousCalendarMonthYm());
+  /** QuickBooks CSV / invoice PDF: `live` = same totals as table (default). `YYYY-MM` = counts/pricing as of that month-end. */
+  const [qbCsvBillingMonth, setQbCsvBillingMonth] = useState(() => 'live');
   const qbCsvMonthMenuOptions = useMemo(() => {
     const opts = [{ value: 'live', label: 'Current table (live)' }];
     const now = new Date();
@@ -787,199 +781,6 @@ export default function Subscriptions() {
       defaultYearly: defaultUnitRateByPeriod.yearly,
     };
 
-    /**
-     * Performance: pre-bucket bottles + open rentals by customer-link keys ONCE.
-     * Avoids O(subscriptions × (bottles + rentals)) inside the per-subscription map.
-     * Each bucket: { byProduct: Map<productCode, count>, businessKeys: Set<string> } (DNS dedupe).
-     */
-    const bottlesByCustomerKey = new Map();
-    const rentalsByCustomerKey = new Map();
-    /** One product class per billable rental row — avoids double-count when the same row is indexed under id + name keys. */
-    const rentalProductByBusinessKey = new Map();
-    const ensureBottleBucket = (key) => {
-      if (!key) return null;
-      let b = bottlesByCustomerKey.get(key);
-      if (!b) { b = new Map(); bottlesByCustomerKey.set(key, b); }
-      return b;
-    };
-    const ensureRentalBucket = (key) => {
-      if (!key) return null;
-      let r = rentalsByCustomerKey.get(key);
-      if (!r) { r = { byProduct: new Map(), businessKeys: new Set() }; rentalsByCustomerKey.set(key, r); }
-      return r;
-    };
-
-    const { byId: invBottleById, byBarcode: invBottleByBarcode } = buildBottleLookupMaps(ctx.bottles || []);
-
-    for (const bottle of (ctx.bottles || [])) {
-      if (isCustomerOwnedForBilling(bottle)) continue;
-      const productRaw = bottleProductCode(bottle);
-      const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
-      // One bucket per bottle: avoid double-count when both assigned_customer and customer_id/name
-      // resolve to different normalized keys for the same subscription row.
-      const primaryKey =
-        normalize(bottle.assigned_customer || bottle.customer_id) ||
-        normalizeName(bottle.customer_name);
-      if (!primaryKey) continue;
-      const bucket = ensureBottleBucket(primaryKey);
-      if (!bucket) continue;
-      bucket.set(productKey, (bucket.get(productKey) || 0) + 1);
-    }
-
-    for (const rental of (ctx.rentals || [])) {
-      if (!isRentalOpen(rental)) continue;
-      if (isDnsRentalExcludedFromBillableCount(rental)) continue;
-      if (
-        !rentalIsDnsForBilling(rental)
-        && isCustomerOwnedForBilling(resolveBottleForRental(rental, invBottleById, invBottleByBarcode))
-      )
-        continue;
-      const productRaw = resolvedRentalProductCode(rental, invBottleById, invBottleByBarcode);
-      const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
-      const businessKey = openRentalBillableUnitKey(rental, invBottleById, invBottleByBarcode);
-      const linkKeys = rentalCustomerIndexKeys(rental, ctx.customers || [], invBottleById, invBottleByBarcode);
-      rentalProductByBusinessKey.set(businessKey, productKey);
-      for (const k of linkKeys) {
-        const bucket = ensureRentalBucket(k);
-        if (!bucket) continue;
-        if (bucket.businessKeys.has(businessKey)) continue;
-        bucket.businessKeys.add(businessKey);
-        bucket.byProduct.set(productKey, (bucket.byProduct.get(productKey) || 0) + 1);
-      }
-    }
-
-    const customerKeysForSubscription = (sub, customer) => {
-      const keys = new Set();
-      const addId = (v) => { const n = normalize(v); if (n) keys.add(n); };
-      addId(sub?.customer_id);
-      for (const nk of expandBillingNameLookupKeys(sub?.customer_name)) {
-        if (nk) keys.add(nk);
-      }
-      if (customer) {
-        // Subscription rows often omit customer_name; merged directory row carries the display name.
-        // Without this, DNS / legacy rentals keyed by name segments never intersect subscription keys.
-        for (const nk of expandBillingNameLookupKeys(customer?.name || customer?.Name)) {
-          if (nk) keys.add(nk);
-        }
-        for (const k of subscriptionBillingLookupKeys(customer, ctx.customers || [])) {
-          keys.add(k);
-        }
-      }
-      return keys;
-    };
-
-    const lookupBillableGroups = (sub, customer) => {
-      const keys = customerKeysForSubscription(sub, customer);
-      const matchedBusinessKeys = new Set();
-      for (const k of keys) {
-        const rb = rentalsByCustomerKey.get(k);
-        if (!rb) continue;
-        for (const bk of rb.businessKeys) matchedBusinessKeys.add(bk);
-      }
-
-      // DNS rows can match the subscription customer via hierarchy / bottle assignment but miss
-      // rentalsByCustomerKey buckets (stale rental fields). Same rules as CustomerDetail open rows.
-      const dnsMatchOpts = buildOpenRentalMatchOptionsForSubscription(
-        ctx.bottles || [],
-        sub.customer_id,
-        customer,
-        ctx.customers || [],
-      );
-      for (const rental of ctx.rentals || []) {
-        if (!isRentalOpen(rental) || isDnsRentalExcludedFromBillableCount(rental)) continue;
-        if (!rentalIsDnsForBilling(rental)) continue;
-        const dnsBk = openRentalBillableUnitKey(rental, invBottleById, invBottleByBarcode);
-        if (!String(dnsBk).startsWith('dns:')) continue;
-        if (matchedBusinessKeys.has(dnsBk)) continue;
-        // Match path 1: the existing CustomerDetail-style match (descendants + bottle recovery).
-        let matched = openRentalMatchesCustomer(rental, sub.customer_id, customer, dnsMatchOpts);
-        // Match path 2: rental's own customer index keys overlap any of the subscription's expanded
-        // keys (covers DNS rows whose customer_id resolves to a parent / ancestor row, where
-        // openRentalMatchesCustomer only walks descendants).
-        if (!matched) {
-          const rentalKeys = rentalCustomerIndexKeys(
-            rental,
-            ctx.customers || [],
-            invBottleById,
-            invBottleByBarcode,
-          );
-          for (const rk of rentalKeys) {
-            if (keys.has(rk)) { matched = true; break; }
-          }
-        }
-        if (!matched) {
-          const sid = String(sub?.customer_id ?? '').trim().toLowerCase();
-          const rid = String(rental?.customer_id ?? '').trim().toLowerCase();
-          if (sid && rid && sid === rid) matched = true;
-        }
-        if (!matched) continue;
-        matchedBusinessKeys.add(dnsBk);
-        const productRaw = resolvedRentalProductCode(rental, invBottleById, invBottleByBarcode);
-        const productKey = productRaw ? normalize(productRaw) : '__unclassified__';
-        rentalProductByBusinessKey.set(dnsBk, productKey);
-      }
-
-      const bottleProducts = new Map();
-      for (const k of keys) {
-        const bb = bottlesByCustomerKey.get(k);
-        if (!bb) continue;
-        for (const [pc, count] of bb.entries()) {
-          bottleProducts.set(pc, (bottleProducts.get(pc) || 0) + count);
-        }
-      }
-      const bottleSum = [...bottleProducts.values()].reduce((a, b) => a + b, 0);
-
-      const dnsBusinessKeys = new Set();
-      const nonDnsBusinessKeys = new Set();
-      for (const bk of matchedBusinessKeys) {
-        if (String(bk).startsWith('dns:')) dnsBusinessKeys.add(bk);
-        else nonDnsBusinessKeys.add(bk);
-      }
-
-      const rentalMapFromKeySet = (keySet) => {
-        const m = new Map();
-        for (const bk of keySet) {
-          const pc = rentalProductByBusinessKey.get(bk) || '__unclassified__';
-          m.set(pc, (m.get(pc) || 0) + 1);
-        }
-        return m;
-      };
-
-      const nonDnsRentalMap = rentalMapFromKeySet(nonDnsBusinessKeys);
-      const dnsRentalMap = rentalMapFromKeySet(dnsBusinessKeys);
-      const nonDnsSum = [...nonDnsRentalMap.values()].reduce((a, b) => a + b, 0);
-      const fullRentalSum = nonDnsSum + [...dnsRentalMap.values()].reduce((a, b) => a + b, 0);
-
-      const mapToOut = (m) => {
-        const out = [];
-        for (const [productCode, count] of m.entries()) {
-          if (count > 0) out.push({ productCode, count });
-        }
-        return out;
-      };
-
-      const mergeMaps = (a, b) => {
-        const m = new Map(a);
-        for (const [pc, c] of b) {
-          m.set(pc, (m.get(pc) || 0) + c);
-        }
-        return m;
-      };
-
-      if (bottleSum === 0 && fullRentalSum === 0) return [];
-      if (bottleSum === 0) {
-        return mapToOut(mergeMaps(nonDnsRentalMap, dnsRentalMap));
-      }
-      if (fullRentalSum === 0) {
-        return mapToOut(bottleProducts);
-      }
-      if (nonDnsSum >= bottleSum) {
-        return mapToOut(mergeMaps(nonDnsRentalMap, dnsRentalMap));
-      }
-      // Assigned bottles outnumber open non-DNS rentals — keep bottle totals and add DNS-only rows (e.g. 40 + 1 DNS).
-      return mapToOut(mergeMaps(bottleProducts, dnsRentalMap));
-    };
-
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
       const baseCustomer =
@@ -1015,15 +816,12 @@ export default function Subscriptions() {
       /** Lease contract $ only when customer is lease mode or row matches a contract (not legacy-import alone). */
       const useLeaseContractIfPresent =
         customer?.billing_mode === 'lease' || matchesLeaseContract;
-      const totalPerCycle = computeSubscriptionBillingCycleTotal(
-        { ...sub, billing_period: effectiveBillingPeriod },
-        customer,
-        pricingCtx,
-        { ...billingData, useLeaseContractIfPresent }
-      );
+
+      let totalPerCycle = 0;
       let itemCount = 0;
-      /** Per SKU / rental-class counts — drives invoice PDF/email lines with correct resolveDisplayUnitPrice per asset type. */
+      /** Per SKU from groupBillableUnitCountsByProductCode (bottles + open rentals, billable rules). */
       let productCounts = null;
+
       if (customer?.billing_mode === 'lease' || (activeLease && useLeaseContractIfPresent)) {
         const leaseLines = activeLease
           ? (ctx.leaseContractItems || []).filter((i) => i.contract_id === activeLease.id)
@@ -1038,16 +836,49 @@ export default function Subscriptions() {
             productCounts[code] = (productCounts[code] || 0) + qty;
           }
         }
+        totalPerCycle = computeSubscriptionBillingCycleTotal(
+          { ...sub, billing_period: effectiveBillingPeriod },
+          customer,
+          pricingCtx,
+          { ...billingData, useLeaseContractIfPresent },
+        );
       } else {
-        const groups = lookupBillableGroups(sub, customer);
-        itemCount = groups.reduce((s, g) => s + g.count, 0);
-        productCounts = {};
-        for (const g of groups) {
-          if (g.count <= 0) continue;
-          const key = g.productCode || '__unclassified__';
-          productCounts[key] = (productCounts[key] || 0) + g.count;
+        const subscriptionMatchKey =
+          String(
+            sub.customer_id ||
+              customer?.CustomerListID ||
+              customer?.id ||
+              customer?.name ||
+              customer?.Name ||
+              ''
+          ).trim() || sub.customer_id;
+        const groups = groupBillableUnitCountsByProductCode(
+          billingData.bottles,
+          billingData.rentals,
+          subscriptionMatchKey,
+          customer,
+          { allCustomers: billingData.customers },
+        );
+        totalPerCycle = computeSubscriptionBillingCycleTotal(
+          { ...sub, billing_period: effectiveBillingPeriod },
+          customer,
+          pricingCtx,
+          {
+            ...billingData,
+            useLeaseContractIfPresent,
+            ...(groups.length > 0 ? { precomputedGroups: groups } : {}),
+          },
+        );
+        itemCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+        if (groups.length > 0) {
+          productCounts = {};
+          for (const g of groups) {
+            if (g.count <= 0) continue;
+            const key = g.productCode || '__unclassified__';
+            productCounts[key] = (productCounts[key] || 0) + g.count;
+          }
+          if (Object.keys(productCounts).length === 0) productCounts = null;
         }
-        if (Object.keys(productCounts).length === 0) productCounts = null;
       }
       return {
         ...sub,
@@ -2251,27 +2082,21 @@ export default function Subscriptions() {
         if (!rErr && data?.length) snapshotRentals = data;
       } catch { /* fall back to ctx.rentals */ }
 
-      // ── Strict per-customer end-of-month counts via computeCustomerRentalHistory.
-      //    No parent/child rollup; name matching only when unique across orgs. ──
-      const periodStartYmd = ymFirstDay(qbCsvBillingMonth);
-      const lookupSnapshotGroups = (matchKey, customer) => {
-        const custRecord = matchCustomerRecordBySubscriptionId(matchKey) || customer || {
-          id: matchKey,
-          CustomerListID: matchKey,
-        };
-        const history = computeCustomerRentalHistory({
-          rentals: snapshotRentals,
-          bottles: billingData.bottles,
-          customerRecord: custRecord,
-          allCustomers: billingData.customers,
-          periodStart: periodStartYmd,
-          periodEnd: pe,
-        });
-        return history
-          .filter((h) => h.endCount > 0)
-          .map((h) => ({ productCode: h.productCode, count: h.endCount }));
+      // Billable units = assigned bottles + open rentals as of month-end (same as computeSubscriptionBillingCycleTotal).
+      const lookupSnapshotGroups = (mergedCust, row) => {
+        const matchKey = subscriptionMatchKeyForInvoiceRow(row, mergedCust);
+        return groupBillableUnitCountsByProductCode(
+          billingData.bottles,
+          snapshotRentals,
+          matchKey,
+          mergedCust,
+          {
+            allCustomers: billingData.customers,
+            asOfPeriodEnd: pe,
+            allowAssignedBottleRecovery: true,
+          },
+        );
       };
-      // ── End strict counts ──
 
       const snapshotGroupsCache = new Map();
       const mapped = [];
@@ -2285,15 +2110,6 @@ export default function Subscriptions() {
         });
         const useLeaseContractIfPresent =
           row.customer?.billing_mode === 'lease' || matchesLeaseContract;
-        const subscriptionMatchKey =
-          String(
-            row.customer_id ||
-              row.customer?.CustomerListID ||
-              row.customer?.id ||
-              row.customer?.name ||
-              row.customer?.Name ||
-              ''
-          ).trim() || row.customer_id;
         const contract = findActiveLeaseContract(
           billingData.leaseContracts,
           row.customer_id,
@@ -2311,15 +2127,33 @@ export default function Subscriptions() {
           mapped.push({ ...row, totalPerCycle: total, itemCount: row.itemCount });
           continue;
         }
-        const gCacheKey = `${pe}\t${subscriptionMatchKey}`;
+        const baseCust =
+          matchCustomerRecordBySubscriptionId(row.customer_id) ||
+          row.customer || {
+            id: row.customer_id,
+            CustomerListID: row.customer_id,
+          };
+        const mergedCust = mergeCustomerDirectoryFields(
+          baseCust,
+          row.customer_id,
+          matchCustomerRecordBySubscriptionId,
+        );
+        const listId = String(
+          row.customer_id || mergedCust?.CustomerListID || mergedCust?.id || '',
+        ).trim();
+        const nameKey = String(mergedCust?.name || mergedCust?.Name || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLowerCase();
+        const gCacheKey = `${pe}\t${listId}\t${nameKey}`;
         let groups = snapshotGroupsCache.get(gCacheKey);
         if (!groups) {
-          groups = lookupSnapshotGroups(subscriptionMatchKey, row.customer);
+          groups = lookupSnapshotGroups(mergedCust, row);
           snapshotGroupsCache.set(gCacheKey, groups);
         }
         const total = computeSubscriptionBillingCycleTotal(
           { ...row, billing_period: row.billing_period },
-          row.customer,
+          mergedCust,
           pricingCtxExport,
           {
             ...billingData,
@@ -2727,19 +2561,36 @@ export default function Subscriptions() {
         name: row.customer_name || row.customer_id,
         Name: row.customer_name,
       };
+    const customerMerged = mergeCustomerDirectoryFields(
+      rawCustomer,
+      row.customer_id,
+      matchCustomerRecordBySubscriptionId,
+    );
     const customerRecord = {
-      ...rawCustomer,
-      purchase_order: rawCustomer.purchase_order ?? row?.customer?.purchase_order ?? null,
+      ...customerMerged,
+      purchase_order:
+        customerMerged.purchase_order
+        ?? rawCustomer.purchase_order
+        ?? row?.customer?.purchase_order
+        ?? null,
     };
 
-    let lineItems = getLineItemsForRow(row);
-    let hasDetail =
-      (Array.isArray(row?.items) && row.items.length > 0) ||
-      (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+    /** Enriched row shape so asset list / returns use the same customer as Customer Detail. */
+    const rowForBilling = { ...row, customer: customerRecord };
+
+    let lineItems = [];
+    let hasDetail = false;
 
     let rentalsForSnapshot = ctx.rentals || [];
+    /** When `live`, invoice lines must match Subscriptions grid (`productCounts` / open-rental rollup). When a past month is selected, use month-end snapshot (bottles + rentals as-of). */
+    const pdfBillingLive = String(qbCsvBillingMonth || '').trim().toLowerCase() === 'live';
     const billingMode = String(customerRecord?.billing_mode || '').toLowerCase();
-    if (billingMode !== 'lease') {
+    if (billingMode === 'lease') {
+      lineItems = getLineItemsForRow(row);
+      hasDetail =
+        (Array.isArray(row?.items) && row.items.length > 0) ||
+        (row?.productCounts && Object.keys(row.productCounts || {}).length > 0);
+    } else {
       try {
         let orgRentals;
         let rErr = null;
@@ -2753,35 +2604,47 @@ export default function Subscriptions() {
           orgRentals = res.data;
           rErr = res.error;
         }
-        if (!rErr && orgRentals?.length) {
+        if (!rErr && Array.isArray(orgRentals)) {
           rentalsForSnapshot = orgRentals;
-          const subscriptionMatchKey =
-            String(
-              row.customer_id ||
-                customerRecord?.CustomerListID ||
-                customerRecord?.id ||
-                customerRecord?.name ||
-                customerRecord?.Name ||
-                ''
-            ).trim() || row.customer_id;
+        }
+
+        // Live PDF: same SKU lines and totals as the grid (enriched row.productCounts).
+        if (
+          pdfBillingLive &&
+          row?.productCounts &&
+          Object.keys(row.productCounts).length > 0
+        ) {
+          lineItems = getLineItemsForRow(row);
+          hasDetail = lineItems.length > 0;
+        } else {
+          const listId = String(
+            row.customer_id || customerRecord?.CustomerListID || customerRecord?.id || '',
+          ).trim();
+          const custName = String(customerRecord?.name || customerRecord?.Name || '').trim();
+          const nameKey = custName.replace(/\s+/g, ' ').toLowerCase();
           const zipGroupsCache = pdfBuildOpts.zipGroupsCache;
-          const gCacheKey = `${periodEnd}\t${subscriptionMatchKey}`;
+          const gCacheKey = `${pdfBillingLive ? 'live' : periodEnd}\t${listId}\t${nameKey}`;
           let groups = zipGroupsCache?.get(gCacheKey);
           if (!groups) {
-            // Strict per-customer end-of-period counts (matches QB CSV exactly).
-            // No parent/child rollup; name matching only when unique across the org.
-            const histPeriodStart = ymFirstDay(String(periodEnd || '').slice(0, 7)) || periodStart;
-            const history = computeCustomerRentalHistory({
-              rentals: orgRentals,
-              bottles: ctx.bottles || [],
+            const rentalRowsForBilling = pdfBillingLive
+              ? ((ctx.rentals && ctx.rentals.length > 0)
+                  ? ctx.rentals
+                  : ((!rErr && Array.isArray(orgRentals)) ? orgRentals : (ctx.rentals || [])))
+              : ((!rErr && Array.isArray(orgRentals)) ? orgRentals : (ctx.rentals || []));
+            const groupOpts = pdfBillingLive
+              ? { allCustomers: ctx.customers || [] }
+              : {
+                  allCustomers: ctx.customers || [],
+                  asOfPeriodEnd: periodEnd,
+                  allowAssignedBottleRecovery: true,
+                };
+            groups = groupBillableUnitCountsByProductCode(
+              ctx.bottles || [],
+              rentalRowsForBilling,
+              subscriptionMatchKeyForInvoiceRow(row, customerRecord),
               customerRecord,
-              allCustomers: ctx.customers || [],
-              periodStart: histPeriodStart,
-              periodEnd,
-            });
-            groups = history
-              .filter((h) => h.endCount > 0)
-              .map((h) => ({ productCode: h.productCode, count: h.endCount }));
+              groupOpts,
+            );
             if (zipGroupsCache) zipGroupsCache.set(gCacheKey, groups);
           }
           if (groups.length > 0) {
@@ -2811,10 +2674,24 @@ export default function Subscriptions() {
       } catch (e) {
         console.warn('Invoice PDF: could not load rentals for period snapshot', e);
       }
+      if (!hasDetail || lineItems.length === 0) {
+        lineItems = getLineItemsForRow(row);
+        hasDetail =
+          (Array.isArray(row?.items) && row.items.length > 0) ||
+          (row?.productCounts && Object.keys(row.productCounts || {}).length > 0) ||
+          lineItems.length > 0;
+      }
     }
 
     const lineSum = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
-    const total = hasDetail && lineSum > 0 ? lineSum : (parseFloat(row.totalPerCycle) || 0);
+    const rowTotal = parseFloat(row.totalPerCycle) || 0;
+    /** Live rental invoices: match grid subtotal. Lease / historical month: use computed lines. */
+    const total =
+      billingMode !== 'lease' && pdfBillingLive && rowTotal > 0
+        ? rowTotal
+        : hasDetail && lineSum > 0
+          ? lineSum
+          : rowTotal;
     const gstRate = 0.05;
     const pstRate = 0.06;
     const gst = +(total * gstRate).toFixed(2);
@@ -2822,7 +2699,7 @@ export default function Subscriptions() {
     const tax = +(gst + pst).toFixed(2);
     const taxRate = +(gstRate + pstRate).toFixed(2);
     const grandTotal = +(total + tax).toFixed(2);
-    let openAssets = buildOpenAssetRowsForInvoice(row, ctx.bottles, rentalsForSnapshot, {
+    let openAssets = buildOpenAssetRowsForInvoice(rowForBilling, ctx.bottles, rentalsForSnapshot, {
       asOfPeriodEnd: periodEnd,
     });
     if (Array.isArray(row?.bottleIdentifiers) && row.bottleIdentifiers.length > 0) {
@@ -2844,9 +2721,9 @@ export default function Subscriptions() {
       const rk = invoiceReturnsCacheKey(periodStart, periodEnd);
       const bulk = returnsByKey?.get(rk);
       if (bulk && Array.isArray(bulk)) {
-        returnsInPeriod = bulk.filter((r) => rentalRowMatchesInvoiceCustomer(r, row));
+        returnsInPeriod = bulk.filter((r) => rentalRowMatchesInvoiceCustomer(r, rowForBilling));
       } else {
-        returnsInPeriod = await fetchReturnsInInvoicePeriod(supabase, organization.id, row, periodStart, periodEnd);
+        returnsInPeriod = await fetchReturnsInInvoicePeriod(supabase, organization.id, rowForBilling, periodStart, periodEnd);
       }
     } catch (e) {
       console.warn('Invoice PDF: could not load returns in period', e);
@@ -2980,6 +2857,12 @@ export default function Subscriptions() {
         '# of Bottles',
       ];
 
+      const lineQtySum = Array.isArray(invoiceBundle?.lineItems)
+        ? invoiceBundle.lineItems.reduce((s, li) => s + (Number(li.qty) || 0), 0)
+        : 0;
+      const bottleCountExcel =
+        lineQtySum > 0 ? lineQtySum : (parseFloat(sub.itemCount) || 0);
+
       const singleRowOrdered = [{
         'Invoice#': invoiceBundle?.invoiceNumber || invNo,
         'Customer Number': sub.customer_id || '',
@@ -2991,7 +2874,7 @@ export default function Subscriptions() {
         'Due date': dueDate,
         'Rate': total,
         'Name': sub.customer?.name || sub.customer?.Name || sub.customer_id || '',
-        '# of Bottles': parseFloat(sub.itemCount) || 0,
+        '# of Bottles': bottleCountExcel,
       }];
 
       const wb = XLSX.utils.book_new();
@@ -3684,7 +3567,14 @@ export default function Subscriptions() {
 
   const headerCards = useMemo(() => [
     { label: 'Active Rentals', value: activeRentalCount, icon: <People />, color: '#10B981' },
-    { label: 'Active Assets', value: activeRentalAssetCount, icon: <People />, color: '#0EA5E9' },
+    {
+      label: 'Billed units (Σ)',
+      value: activeRentalAssetCount,
+      icon: <People />,
+      color: '#0EA5E9',
+      tooltip:
+        'Sum of the Items column for every active subscription in your organization (all customers). This is not one customer’s bottle count.',
+    },
     { label: 'Outstanding', value: formatCurrency(ctx.outstandingBalance), icon: <AccountBalance />, color: ctx.outstandingBalance > 0 ? '#EF4444' : '#10B981' },
     { label: 'Next Billing', value: derivedNextBilling ? formatDate(derivedNextBilling) : '—', icon: <Schedule />, color: '#F59E0B' },
   ], [activeRentalCount, activeRentalAssetCount, ctx.outstandingBalance, derivedNextBilling]);
@@ -3946,17 +3836,33 @@ export default function Subscriptions() {
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {headerCards.map((c, i) => (
           <Grid item xs={6} sm={4} md key={i}>
-            <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                  <Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.label}</Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5, fontSize: '1.4rem' }}>{c.value}</Typography>
-                  </Box>
-                  <Box sx={{ bgcolor: `${c.color}18`, color: c.color, p: 1, borderRadius: 2, display: 'flex' }}>{c.icon}</Box>
-                </Stack>
-              </CardContent>
-            </Card>
+            {c.tooltip ? (
+              <Tooltip title={c.tooltip} enterDelay={400}>
+                <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, cursor: 'help' }}>
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                      <Box>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.label}</Typography>
+                        <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5, fontSize: '1.4rem' }}>{c.value}</Typography>
+                      </Box>
+                      <Box sx={{ bgcolor: `${c.color}18`, color: c.color, p: 1, borderRadius: 2, display: 'flex' }}>{c.icon}</Box>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Tooltip>
+            ) : (
+              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Box>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.label}</Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5, fontSize: '1.4rem' }}>{c.value}</Typography>
+                    </Box>
+                    <Box sx={{ bgcolor: `${c.color}18`, color: c.color, p: 1, borderRadius: 2, display: 'flex' }}>{c.icon}</Box>
+                  </Stack>
+                </CardContent>
+              </Card>
+            )}
           </Grid>
         ))}
       </Grid>
@@ -4022,7 +3928,16 @@ export default function Subscriptions() {
                 <TableCell>Period</TableCell>
                 <TableCell>Terms</TableCell>
                 <TableCell sx={{ maxWidth: 140 }}>P.O.</TableCell>
-                <TableCell align="center">Items</TableCell>
+                <TableCell align="center">
+                  <Tooltip
+                    title="Billable units for this subscription (bottles + open rentals, billable rules). Invoice PDF and QB month export use Customer Detail–style merged open rentals (billing basis) as of period end."
+                    enterDelay={500}
+                  >
+                    <Box component="span" sx={{ cursor: 'help', borderBottom: '1px dotted', borderColor: 'text.secondary' }}>
+                      Items
+                    </Box>
+                  </Tooltip>
+                </TableCell>
                 <TableCell align="right">Total / Cycle</TableCell>
                 <TableCell>Invoice #</TableCell>
                 <TableCell>Status</TableCell>

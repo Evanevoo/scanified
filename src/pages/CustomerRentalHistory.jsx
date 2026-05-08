@@ -78,7 +78,7 @@ export default function CustomerRentalHistory() {
       const [custRes, rentalRes, bottleRes] = await Promise.all([
         supabase
           .from('customers')
-          .select('id, CustomerListID, name, Name')
+          .select('id, CustomerListID, name')
           .eq('organization_id', organization.id),
         supabase
           .from('rentals')

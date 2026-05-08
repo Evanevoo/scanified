@@ -1,0 +1,64 @@
+---
+description: Scanified design tokens and Figma-to-code conventions (MUI + marketing)
+alwaysApply: true
+---
+
+# Figma ↔ code (gas-cylinder-app)
+
+## Source of truth
+
+- **MUI app theme (web)**: `src/styles/theme.js` — `brandColors`, `theme`, `commonStyles`. Prefer these over hardcoded hex in app screens.
+- **Extended palettes / accents**: `src/theme/theme.js`, `src/theme/index.js`, `src/theme/themes.js` for multi-theme and accent maps.
+- **Marketing / Tailwind-style docs**: `DESIGN_SYSTEM.md` for landing-style utilities (align Figma frames to those classes when building marketing pages).
+- **Component patterns**: `src/styles/STYLE_GUIDE.md` and `src/components/ui/StyledComponents.jsx` — reuse `StyledCard`, `PageHeader`, `PrimaryButton`, `StatusChip`, `InfoCard`, etc., instead of one-off MUI layouts.
+
+## Color tokens (Scanified)
+
+Map Figma variables / styles to code using these names and hex values:
+
+| Role | Hex | Notes |
+|------|-----|--------|
+| Primary (teal) | `#40B5AD` | Main actions, links, brand |
+| Primary dark / hover | `#2E9B94` | Hover for primary |
+| Primary light | `#5FCDC5` | Highlights, gradients |
+| Secondary (purple) | `#8B7BA8` | Secondary brand |
+| Success | `#10B981` | Positive / active / available where theme uses success |
+| Warning | `#F59E0B` | Pending / maintenance |
+| Error | `#EF4444` | Errors / inactive / retired |
+| Info | `#3B82F6` | Informational chips (e.g. rented) per `theme` |
+| Text primary | `#1F2937` | Body and headings on light |
+| Text secondary | `#6B7280` | Supporting text |
+| Divider / border | `#E5E7EB` | Borders, dividers |
+| Background default | `#FFFFFF` | Surfaces |
+
+Do not introduce new brand primaries without updating `brandColors` and design docs.
+
+## Typography
+
+- **Font stack (MUI)**: Inter, Roboto, Helvetica, Arial, sans-serif (`src/styles/theme.js` typography).
+- **Scale (MUI theme)**: h1 32 / 700 through body1 16 / body2 14 — match Figma text styles to these variants where possible.
+- **Marketing headings** (when building static/marketing pages): follow `DESIGN_SYSTEM.md` responsive classes (e.g. H1 `text-5xl md:text-6xl`).
+
+## Shape, spacing, elevation
+
+- **Default border radius**: 8px buttons/inputs; 12px cards and sections (`commonStyles`, theme `shape.borderRadius` where applicable).
+- **Spacing**: Prefer MUI `theme.spacing(n)` (8px unit). Marketing: section `py-24`, card `p-6`, grids `gap-6` per `DESIGN_SYSTEM.md`.
+- **Cards**: Light shadow + hover elevation per `commonStyles.card`; border subtle gray; optional teal border tint at low opacity for emphasis.
+
+## Figma file hygiene
+
+- Name color styles with the **role** (e.g. `Primary/Default`, `Text/Secondary`) aligned to the table above.
+- Use **Auto layout** for buttons, cards, and lists to mirror flex/grid in code.
+- Export icons as SVG when matching `@mui/icons-material` or existing assets in `public/`.
+
+## Implementation checklist (design → code)
+
+1. Match colors to `brandColors` / MUI `palette`, not arbitrary hex in JSX `sx` unless documented.
+2. Prefer shared components from `StyledComponents.jsx` before raw `Card`, `Button`, `Typography` compositions.
+3. Status UI: use `StatusChip` + semantic statuses (`active`, `rented`, …) per `commonStyles.statusChip` mapping.
+4. Touch targets and focus: preserve WCAG-style focus rings (`focus-visible:ring` patterns in `DESIGN_SYSTEM.md` for marketing); MUI focus overrides live in component theme overrides.
+5. **Mobile apps** (`gas-cylinder-mobile`, `gas-cylinder-android`): themes may differ from web — check each package’s `ThemeContext` before assuming Scanified teal everywhere.
+
+## Figma MCP
+
+Custom rules complement the Figma plugin: **connect the Figma MCP server** in Cursor to sync variables and inspect files programmatically. Without MCP, apply this document manually when implementing from Figma URLs or screenshots.

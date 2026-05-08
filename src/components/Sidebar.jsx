@@ -517,7 +517,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     }}>
         {/* Sidebar collapse toggle */}
         {onToggleCollapse && (
-          <Box sx={{ py: 1.5, px: 1, display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-end' }}>
+          <Box sx={{ py: 1.5, px: 2, display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-end', alignItems: 'center' }}>
             <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               <IconButton
                 size="small"
@@ -543,6 +543,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
+                  minHeight: 40,
+                  alignItems: 'center',
                   bgcolor: (theme) =>
                     theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.06)' : '#f6f5f3',
                   fontSize: '0.875rem',

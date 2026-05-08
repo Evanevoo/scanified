@@ -22,8 +22,10 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Autocomplete
 } from '@mui/material';
+import { createFilterOptions } from '@mui/material/Autocomplete';
 import {
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
@@ -38,6 +40,13 @@ import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocatio
 
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
 const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost'];
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const customerAutocompleteFilter = createFilterOptions({
+  stringify: (option) =>
+    `${String(option?.name || '')} ${String(option?.CustomerListID || '')}`.toLowerCase(),
+  trim: true,
+});
 const normalizeStatus = (s) => {
   if (s == null || s === '') return 'empty';
   const v = String(s).toLowerCase().trim();
@@ -216,14 +225,9 @@ export default function AssetDetail() {
       user_id: profile?.id || null,
       action,
       details,
-      created_at: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     };
-    const tableAwarePayload = {
-      ...basePayload,
-      table_name: 'bottles',
-      record_id: bottleId,
-    };
-    const { error } = await supabase.from('audit_logs').insert(tableAwarePayload);
+    const { error } = await supabase.from('audit_logs').insert(basePayload);
     if (error) {
       logger.warn('Primary bottle audit insert failed, retrying minimal payload:', error);
       const { error: fallbackError } = await supabase.from('audit_logs').insert(basePayload);
@@ -293,7 +297,7 @@ export default function AssetDetail() {
       const updateData = {
         assigned_customer: nextId || null,
         customer_name: nextName || null,
-        customer_uuid: nextId || null,
+        customer_uuid: UUID_RE.test(nextId) ? nextId : null,
         status: effectiveStatus,
       };
       if (!nextId) {
@@ -675,11 +679,7 @@ export default function AssetDetail() {
         return [...new Set([raw, stripped])];
       })();
       const barcodeOrClause = barcodeVariants
-        .flatMap((b) => [
-          `barcode_number.eq.${b}`,
-          `bottle_barcode.eq.${b}`,
-          `cylinder_barcode.eq.${b}`
-        ])
+        .map((b) => `bottle_barcode.eq.${b}`)
         .join(',');
 
       if (barcodeNumber) {
@@ -710,18 +710,22 @@ export default function AssetDetail() {
             supabase
               .from('cylinder_scans')
               .select('*')
-              .or(barcodeOrClause)
               .eq('organization_id', profile.organization_id)
               .order('created_at', { ascending: false })
-              .limit(50),
+              .limit(200),
           'cylinder_scans'
         );
-        cylinderScanRows.forEach((scan) => {
+        const matchesCylinderScanBarcode = (scan) => {
+          const haystack = JSON.stringify([scan?.ship_cylinders, scan?.return_cylinders]).toLowerCase();
+          return barcodeVariants.some((b) => haystack.includes(String(b).toLowerCase()));
+        };
+        const filteredCylinderRows = cylinderScanRows.filter(matchesCylinderScanBarcode).slice(0, 50);
+        filteredCylinderRows.forEach((scan) => {
           allHistory.push({
             ...scan,
             id: scan.id || `${scan.created_at || nowIso}_cylinder_scan`,
             history_type: 'cylinder_scan',
-            barcode_number: scan.barcode_number || scan.cylinder_barcode || scan.bottle_barcode || barcodeNumber,
+            barcode_number: barcodeNumber,
             customer_id: scan.customer_id || null,
             customer_name: scan.customer_name || null,
             location: scan.location || null,
@@ -812,14 +816,14 @@ export default function AssetDetail() {
       }
 
       // Optional transfer activity source
-      if (profile?.organization_id && (sourceAsset.id || barcodeNumber)) {
+      if (profile?.organization_id && sourceAsset.id) {
         const transferRows = await runOptionalQuery(
           () =>
             supabase
               .from('transfer_history')
               .select('*')
               .eq('organization_id', profile.organization_id)
-              .or(`bottle_id.eq.${sourceAsset.id},bottle_barcode.eq.${barcodeNumber}`)
+              .contains('asset_ids', [sourceAsset.id])
               .order('created_at', { ascending: false })
               .limit(50),
           'transfer_history'
@@ -829,14 +833,14 @@ export default function AssetDetail() {
             ...item,
             id: `transfer_${item.id}`,
             history_type: 'transfer',
-            barcode_number: item.bottle_barcode || barcodeNumber,
-            customer_id: item.customer_id || null,
-            customer_name: item.customer_name || null,
-            location: item.to_location || item.location || item.from_location || null,
-            created_at: item.created_at || item.transfer_date || nowIso,
+            barcode_number: barcodeNumber,
+            customer_id: item.to_customer_id || item.from_customer_id || null,
+            customer_name: item.to_customer_name || item.from_customer_name || null,
+            location: null,
+            created_at: item.transferred_at || item.created_at || nowIso,
             action: item.action || item.transfer_type || 'TRANSFER',
             mode: 'TRANSFER',
-            notes: item.notes || null,
+            notes: item.reason || null,
             order_number: item.order_number || null
           });
         });
@@ -850,43 +854,18 @@ export default function AssetDetail() {
               .from('audit_logs')
               .select('*')
               .eq('organization_id', profile.organization_id)
-              .eq('table_name', 'bottles')
-              .eq('record_id', sourceAsset.id)
-              .order('created_at', { ascending: false })
+              .eq('action', 'BOTTLE_UPDATE')
+              .order('timestamp', { ascending: false })
               .limit(50),
           'audit_logs'
         );
-        if (!auditRows.length) {
-          auditRows = await runOptionalQuery(
-            () =>
-              supabase
-                .from('audit_logs')
-                .select('*')
-                .eq('organization_id', profile.organization_id)
-                .eq('record_id', sourceAsset.id)
-                .order('created_at', { ascending: false })
-                .limit(50),
-            'audit_logs_fallback'
-          );
-        }
-        if (!auditRows.length) {
-          const barcodeForAudit = String(barcodeNumber || '').trim();
-          if (barcodeForAudit) {
-            const auditByDetails = await runOptionalQuery(
-              () =>
-                supabase
-                  .from('audit_logs')
-                  .select('*')
-                  .eq('organization_id', profile.organization_id)
-                  .eq('action', 'BOTTLE_UPDATE')
-                  .or(`details->>bottle_id.eq.${sourceAsset.id},details->>barcode_number.eq.${barcodeForAudit}`)
-                  .order('created_at', { ascending: false })
-                  .limit(50),
-              'audit_logs_details_fallback'
-            );
-            auditRows = auditByDetails;
-          }
-        }
+        const barcodeForAudit = String(barcodeNumber || '').trim();
+        auditRows = (auditRows || []).filter((row) => {
+          const details = row?.details || {};
+          const detailBottleId = String(details?.bottle_id || '').trim();
+          const detailBarcode = String(details?.barcode_number || '').trim();
+          return detailBottleId === String(sourceAsset.id) || (barcodeForAudit && detailBarcode === barcodeForAudit);
+        });
         auditRows.forEach((item) => {
           const parsedDetails = normalizeAuditDetails(item.details);
           allHistory.push({
@@ -897,7 +876,7 @@ export default function AssetDetail() {
             customer_id: null,
             customer_name: null,
             location: item.location || sourceAsset.location || null,
-            created_at: item.created_at || nowIso,
+            created_at: item.timestamp || item.created_at || nowIso,
             action: item.action ? `AUDIT: ${item.action}` : 'AUDIT UPDATE',
             mode: item.action || 'AUDIT',
             notes: stringifyHistoryDetails(parsedDetails),
@@ -986,7 +965,9 @@ export default function AssetDetail() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (evt) => {
+    if (evt?.preventDefault) evt.preventDefault();
+    if (evt?.stopPropagation) evt.stopPropagation();
     try {
       setSaving(true);
       setError('');
@@ -1071,8 +1052,9 @@ export default function AssetDetail() {
       }
       if (editData.assigned_customer !== undefined) {
         updateData.assigned_customer = editData.assigned_customer || null;
-        // Legacy/customer views may still read customer_uuid; keep it in sync with assigned_customer.
-        updateData.customer_uuid = updateData.assigned_customer;
+        // Keep UUID mirror only when assigned customer is actually a UUID.
+        const assignedCustomerText = String(updateData.assigned_customer || '').trim();
+        updateData.customer_uuid = UUID_RE.test(assignedCustomerText) ? assignedCustomerText : null;
       }
       if (editData.customer_name !== undefined) {
         updateData.customer_name = editData.customer_name || null;
@@ -1194,7 +1176,11 @@ export default function AssetDetail() {
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
-      logger.error('Error updating asset:', error);
+      logger.error('Error updating asset:', {
+        error,
+        bottleId: id,
+        organizationId: profile?.organization_id,
+      });
       setError(error.message || 'Failed to update asset');
     } finally {
       setSaving(false);
@@ -1307,7 +1293,7 @@ export default function AssetDetail() {
                     product_code: asset.product_code || '',
                     gas_type: asset.gas_type || '',
                     status: asset.status || 'available',
-                    location: asset.location || '',
+                    location: String(asset.location || '').trim().toUpperCase(),
                     assigned_customer: asset.assigned_customer || '',
                     customer_name: asset.customer_name || '',
                     ownership: asset.ownership || '',
@@ -1705,7 +1691,9 @@ export default function AssetDetail() {
       )}
 
       {/* Edit Dialog */}
-      <Dialog open={editDialog} onClose={() => {
+      <Dialog
+        open={editDialog}
+        onClose={() => {
         setEditDialog(false);
         // Reset editData to current asset when closing (only editable fields)
         if (asset) {
@@ -1722,7 +1710,14 @@ export default function AssetDetail() {
             description: asset.description || ''
           });
         }
-      }} maxWidth="md" fullWidth>
+      }}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          component: 'form',
+          onSubmit: handleSave,
+        }}
+      >
         <DialogTitle>Edit {assetTitle}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
@@ -1827,7 +1822,7 @@ export default function AssetDetail() {
               <FormControl fullWidth>
                 <InputLabel>Location</InputLabel>
                 <Select
-                  value={editData.location || ''}
+                  value={String(editData.location || '').trim().toUpperCase()}
                   onChange={(e) => setEditData({ ...editData, location: e.target.value })}
                   label="Location"
                 >
@@ -1843,38 +1838,53 @@ export default function AssetDetail() {
               </FormControl>
             </Grid>
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Assign to Customer</InputLabel>
-                <Select
-                  value={editData.assigned_customer || ''}
-                  onChange={(e) => {
-                    const customerId = e.target.value;
-                    const customer = customers.find(c => c.CustomerListID === customerId);
-                    const next = {
-                      ...editData,
-                      assigned_customer: customerId || null,
-                      customer_name: customer?.name || null
-                    };
-                    if (customerId && customer && customer.customer_type !== 'VENDOR') {
-                      const loc = bottleLocationValueForCustomer(customer, locations);
-                      if (loc) next.location = loc;
-                    }
-                    setEditData(next);
-                  }}
-                  label="Assign to Customer"
-                  disabled={loadingCustomers}
-                >
-                  <MenuItem value="">
-                    <em>Unassign (No Customer)</em>
-                  </MenuItem>
-                  {customers.map((customer) => (
-                    <MenuItem key={customer.CustomerListID} value={customer.CustomerListID}>
-                      {customer.name} ({customer.CustomerListID})
-                      {customer.customer_type === 'VENDOR' && ' - Vendor'}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                options={customers}
+                loading={loadingCustomers}
+                clearOnEscape
+                value={
+                  customers.find((c) => c.CustomerListID === editData.assigned_customer) ||
+                  (editData.assigned_customer
+                    ? {
+                        CustomerListID: editData.assigned_customer,
+                        name: editData.customer_name || editData.assigned_customer,
+                        customer_type: null,
+                      }
+                    : null)
+                }
+                isOptionEqualToValue={(option, value) =>
+                  String(option?.CustomerListID || '') === String(value?.CustomerListID || '')
+                }
+                getOptionLabel={(option) => {
+                  const name = String(option?.name || '').trim();
+                  const listId = String(option?.CustomerListID || '').trim();
+                  const suffix = option?.customer_type === 'VENDOR' ? ' - Vendor' : '';
+                  if (name && listId) return `${name} (${listId})${suffix}`;
+                  if (name) return `${name}${suffix}`;
+                  return listId;
+                }}
+                filterOptions={(options, state) => customerAutocompleteFilter(options, state)}
+                onChange={(_, selectedCustomer) => {
+                  const customerId = selectedCustomer?.CustomerListID || null;
+                  const next = {
+                    ...editData,
+                    assigned_customer: customerId,
+                    customer_name: selectedCustomer?.name || null,
+                  };
+                  if (customerId && selectedCustomer && selectedCustomer.customer_type !== 'VENDOR') {
+                    const loc = bottleLocationValueForCustomer(selectedCustomer, locations);
+                    if (loc) next.location = loc;
+                  }
+                  setEditData(next);
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Assign to Customer"
+                    placeholder="Type customer name or ID (clear to unassign)"
+                  />
+                )}
+              />
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
@@ -1926,7 +1936,7 @@ export default function AssetDetail() {
               });
             }
           }}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained" disabled={saving}>
+          <Button onClick={(e) => handleSave(e)} type="button" variant="contained" disabled={saving}>
             {saving ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>

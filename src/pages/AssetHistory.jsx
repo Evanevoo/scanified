@@ -207,22 +207,21 @@ export default function AssetHistory() {
       if (Object.keys(fieldChanges).length > 0) {
         const baseAuditPayload = {
           action: 'BOTTLE_UPDATE',
-          table_name: 'bottles',
-          record_id: asset.id,
+          organization_id: asset.organization_id || organization?.id || profile?.organization_id || null,
+          user_id: profile?.id || null,
+          timestamp: new Date().toISOString(),
           details: {
             event_type: 'bottle_update',
             bottle_id: asset.id,
             barcode_number: editForm.barcode_number || asset.barcode_number || null,
             field_changes: fieldChanges,
           },
-          created_at: new Date().toISOString(),
         };
         const { error: auditError } = await supabase.from('audit_logs').insert(baseAuditPayload);
         if (auditError) {
           await supabase.from('audit_logs').insert({
             action: 'BOTTLE_UPDATE',
             details: baseAuditPayload.details,
-            created_at: baseAuditPayload.created_at,
           });
         }
       }
