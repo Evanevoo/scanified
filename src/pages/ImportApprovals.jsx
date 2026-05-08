@@ -95,6 +95,11 @@ function bottleScanOrderCustomerGroupKey(scan) {
   return `${orderNum}\t${customerKey}`;
 }
 
+function isHistoryOnlyManualOrder(orderNumber) {
+  const normalized = String(orderNumber || '').trim().toLowerCase();
+  return normalized === 'manual';
+}
+
 /** Prefer a row that has customer_list id so merged SHIP+RETURN groups keep IDs for import card matching. */
 function preferScanWithCustomerId(scans) {
   if (!scans?.length) return null;
@@ -1434,6 +1439,11 @@ export default function ImportApprovals() {
         logger.warn('⚠️ Scanned rows query error (bottle_scans):', scannedError);
       }
       
+      // Manual edits from bottle details are history-only events and should not become approval cards.
+      const actionableScannedRows = (scannedRows || []).filter(
+        (row) => !isHistoryOnlyManualOrder(row.order_number)
+      );
+
       // One row per (order, barcode, modeType). SHIP and RETURN counted independently; newest wins per (barcode+mode).
       const normBarcodeForMerge = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
       const orderForMerge = (o) => (o == null || o === '') ? '' : String(o).trim();
@@ -1454,7 +1464,7 @@ export default function ImportApprovals() {
         const newTime = new Date(r.created_at || 0).getTime();
         if (newTime >= existingTime) mergedByKey[k] = r;
       };
-      (scannedRows || []).forEach(mergeNewest);
+      actionableScannedRows.forEach(mergeNewest);
       const allScannedRows = Object.values(mergedByKey);
       // Keep card line items in sync: use this same merge so getDetailedLineItems sees BCS62-300 etc.
       setAllScannedRows(allScannedRows);
@@ -1963,6 +1973,11 @@ export default function ImportApprovals() {
       
       if (scanError) throw scanError;
 
+      // Manual edits from bottle details are history-only events and should not become approval cards.
+      const actionableScannedRows = (scannedRows || []).filter(
+        (row) => !isHistoryOnlyManualOrder(row.order_number)
+      );
+
       // Single source: bottle_scans (no scans table merge)
       const normBarcodeForMerge = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
       const orderForMerge = (o) => (o == null || o === '') ? '' : String(o).trim();
@@ -1983,7 +1998,7 @@ export default function ImportApprovals() {
         const newTime = new Date(r.created_at || 0).getTime();
         if (newTime >= existingTime) mergedByKey[k] = r;
       };
-      (scannedRows || []).forEach(mergeNewest);
+      actionableScannedRows.forEach(mergeNewest);
       const allScannedRows = Object.values(mergedByKey);
 
       // Get all order numbers that have been imported
@@ -5612,7 +5627,7 @@ export default function ImportApprovals() {
                       >
                         {isDNS && (
                           <Chip 
-                            label="DNS (Delivered Not Scanned)" 
+                            label="DNS (Invoice, no scanned bottle)" 
                             size="small" 
                             color="warning" 
                             sx={{ mb: 1.5, fontWeight: 600 }}
@@ -7665,6 +7680,56 @@ return (
 
   // Create DNS (Delivered Not Scanned) rental – invoice says delivered but no scan; customer is charged rental
   // customer_id must be CustomerListID so Customer Detail page finds it (that page queries by customer_id = CustomerListID)
+  async function closeOneOppositeDnsRow({ customerId, productCode, closeDns }) {
+    if (!organization?.id || !customerId || !productCode) return false;
+    const normalizedProduct = String(productCode).trim().toUpperCase();
+    try {
+      const { data, error } = await supabase
+        .from('rentals')
+        .select('id, dns_product_code, dns_description, rental_start_date, created_at')
+        .eq('organization_id', organization.id)
+        .eq('customer_id', customerId)
+        .eq('is_dns', true)
+        .is('rental_end_date', null)
+        .order('rental_start_date', { ascending: true })
+        .order('created_at', { ascending: true })
+        .limit(200);
+      if (error) {
+        logger.warn('closeOneOppositeDnsRow query error:', error);
+        return false;
+      }
+
+      const rows = (data || []).filter((r) => {
+        const desc = String(r?.dns_description || '');
+        const rowProduct = String(r?.dns_product_code || '').trim().toUpperCase();
+        if (!rowProduct || rowProduct !== normalizedProduct) return false;
+        const isRnb = desc.includes('Return not on balance');
+        const isRns = desc.includes('Return not scanned');
+        if (closeDns) return !isRnb && !isRns;
+        return isRnb;
+      });
+      const match = rows[0];
+      if (!match?.id) return false;
+
+      const { error: closeErr } = await supabase
+        .from('rentals')
+        .update({
+          rental_end_date: new Date().toISOString().split('T')[0],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', match.id)
+        .eq('organization_id', organization.id);
+      if (closeErr) {
+        logger.warn('closeOneOppositeDnsRow update error:', closeErr);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      logger.warn('closeOneOppositeDnsRow failed:', e);
+      return false;
+    }
+  }
+
   async function createDNSRentalRecord(record, row, customerName, customerId, orderNumber, assignmentSuccesses = [], assignmentWarnings = []) {
     if (!organization?.id || !customerName) {
       logger.warn('createDNSRentalRecord: missing organization or customer');
@@ -7687,7 +7752,17 @@ return (
         resolvedCustomerId = customerName; // fallback so record exists; Customer Detail will match by customer_name
       }
       const productCode = row.product_code || row.bottle_barcode || row.barcode || 'DNS';
-      const description = row.description || row.product_code || 'Delivered Not Scanned';
+      const description = row.description || row.product_code || 'DNS';
+      // 1:1 netting rule: if an opposite open RNB exists for this product/customer, close it and skip new DNS.
+      const cancelledRnb = await closeOneOppositeDnsRow({
+        customerId: resolvedCustomerId,
+        productCode,
+        closeDns: false,
+      });
+      if (cancelledRnb) {
+        logger.debug('DNS cancelled with existing RNB for', productCode, resolvedCustomerId);
+        return;
+      }
       const { error } = await supabase
         .from('rentals')
         .insert({
@@ -7759,6 +7834,16 @@ return (
         if (cust?.CustomerListID) resolvedCustomerId = cust.CustomerListID;
       }
       if (!resolvedCustomerId) resolvedCustomerId = customerName;
+      // 1:1 netting rule: if an open DNS exists for this product/customer, close it and skip new RNB.
+      const cancelledDns = await closeOneOppositeDnsRow({
+        customerId: resolvedCustomerId,
+        productCode,
+        closeDns: true,
+      });
+      if (cancelledDns) {
+        logger.debug('RNB cancelled with existing DNS for', productCode, resolvedCustomerId);
+        return;
+      }
       const { error } = await supabase
         .from('rentals')
         .insert({

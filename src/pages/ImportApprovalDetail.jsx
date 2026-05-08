@@ -1223,7 +1223,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         const dnsCount = Math.max(0, invShipped - scannedOut);
         for (let i = 0; i < dnsCount; i++) {
           const dnsProductCode = productCode || rowBarcode || 'DNS';
-          const dnsDescription = row.description || productCode || 'Delivered Not Scanned';
+          const dnsDescription = row.description || productCode || 'DNS';
           const { error: dnsError } = await supabase
             .from('rentals')
             .insert({
@@ -1653,6 +1653,48 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
 
             const pricingCtxVerify = await fetchOrgRentalPricingContext(supabase, organization?.id);
+            const closeOneOppositeDnsRow = async ({ customerId: customerIdForMatch, productCode, closeDns }) => {
+              if (!organization?.id || !customerIdForMatch || !productCode) return false;
+              const normalizedProduct = String(productCode).trim().toUpperCase();
+              const { data, error } = await supabase
+                .from('rentals')
+                .select('id, dns_product_code, dns_description, rental_start_date, created_at')
+                .eq('organization_id', organization.id)
+                .eq('customer_id', customerIdForMatch)
+                .eq('is_dns', true)
+                .is('rental_end_date', null)
+                .order('rental_start_date', { ascending: true })
+                .order('created_at', { ascending: true })
+                .limit(200);
+              if (error) {
+                logger.warn('closeOneOppositeDnsRow query error:', error);
+                return false;
+              }
+              const rows = (data || []).filter((r) => {
+                const desc = String(r?.dns_description || '');
+                const rowProduct = String(r?.dns_product_code || '').trim().toUpperCase();
+                if (!rowProduct || rowProduct !== normalizedProduct) return false;
+                const isRnb = desc.includes('Return not on balance');
+                const isRns = desc.includes('Return not scanned');
+                if (closeDns) return !isRnb && !isRns;
+                return isRnb;
+              });
+              const match = rows[0];
+              if (!match?.id) return false;
+              const { error: closeErr } = await supabase
+                .from('rentals')
+                .update({
+                  rental_end_date: new Date().toISOString().split('T')[0],
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', match.id)
+                .eq('organization_id', organization.id);
+              if (closeErr) {
+                logger.warn('closeOneOppositeDnsRow update error:', closeErr);
+                return false;
+              }
+              return true;
+            };
 
             // RNB (Return not on balance): return was scanned but bottle was not at this customer – create DNS-style record so it shows on customer page
             if (returnsNotOnBalance?.length > 0) {
@@ -1663,6 +1705,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
               if (!resolvedCustomerId) resolvedCustomerId = customerName;
               for (const rnb of returnsNotOnBalance) {
+                const cancelledDns = await closeOneOppositeDnsRow({
+                  customerId: resolvedCustomerId,
+                  productCode: rnb.product_code || 'Unknown',
+                  closeDns: true,
+                });
+                if (cancelledDns) continue;
                 const rental_amount = monthlyRateForProductPlaceholder(
                   resolvedCustomerId,
                   rnb.product_code || 'Unknown',
@@ -1783,8 +1831,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               if (productCode === 'DNS' && !(row.product_code || row.bottle_barcode || row.barcode || row.description)) continue;
               const scannedOut = countScannedOutForProduct(productCode);
               const dnsCount = Math.max(0, invShipped - scannedOut);
-              const description = row.description || row.product_code || 'Delivered Not Scanned';
+              const description = row.description || row.product_code || 'DNS';
               for (let i = 0; i < dnsCount; i++) {
+                const cancelledRnb = await closeOneOppositeDnsRow({
+                  customerId: resolvedCustomerId,
+                  productCode,
+                  closeDns: false,
+                });
+                if (cancelledRnb) continue;
                 const rental_amount = monthlyRateForProductPlaceholder(resolvedCustomerId, productCode, pricingCtxVerify);
                 const { error: dnsErr } = await supabase.from('rentals').insert({
                   organization_id: organization.id,
