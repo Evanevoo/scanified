@@ -33,15 +33,15 @@ const FeatureCard = ({ icon, title, description, index, reduceMotion }) => {
       transition={{ duration: reduceMotion ? 0 : 0.6, delay: reduceMotion ? 0 : index * 0.1 }}
       whileHover={reduceMotion ? undefined : { y: -8, transition: { duration: 0.3 } }}
     >
-      <Card className="border-2 border-black bg-white hover:shadow-xl transition-all duration-300 h-full">
+      <Card className="border border-white/70 bg-white/55 backdrop-blur-xl shadow-[0_14px_44px_rgba(99,102,241,0.12)] hover:shadow-[0_20px_52px_rgba(99,102,241,0.16)] transition-all duration-300 h-full rounded-2xl">
         <CardHeader>
-          <div className="w-12 h-12 rounded-lg bg-black flex items-center justify-center mb-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#40B5AD] to-[#8B7BA8] flex items-center justify-center mb-4 shadow-lg shadow-teal-500/20">
             <div className="text-white">{icon}</div>
           </div>
-          <CardTitle className="text-xl text-black">{title}</CardTitle>
+          <CardTitle className="text-xl text-gray-900">{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <CardDescription className="text-base text-gray-700">{description}</CardDescription>
+          <CardDescription className="text-base text-gray-600">{description}</CardDescription>
         </CardContent>
       </Card>
     </motion.div>
@@ -60,7 +60,7 @@ const BenefitItem = ({ text, index, reduceMotion }) => {
       transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : index * 0.1 }}
       className="flex items-start gap-3"
     >
-      <CheckCircle2 className="w-5 h-5 text-black flex-shrink-0 mt-0.5" />
+      <CheckCircle2 className="w-5 h-5 text-[#40B5AD] flex-shrink-0 mt-0.5" />
       <span className="text-gray-700">{text}</span>
     </motion.div>
   );
@@ -124,14 +124,14 @@ export default function ModernLandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-white" style={{ fontFamily: marketingTokens.fontStack }}>
+    <div className="min-h-screen bg-gradient-to-br from-slate-100/90 via-violet-50/80 to-rose-50/70" style={{ fontFamily: marketingTokens.fontStack }}>
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
       <SEOHead config={SEOConfigs.home} />
       
       {/* Hero Section */}
-      <section id="main-content" className="relative overflow-hidden bg-white py-24 md:py-32">
+      <section id="main-content" className="relative overflow-hidden py-24 md:py-32 bg-transparent">
         {/* Particle Text Effect Background */}
         <ParticleTextEffect 
           words={particleWords} 
@@ -152,14 +152,14 @@ export default function ModernLandingPage() {
               </Badge>
             </motion.div>
             <motion.h1 
-              className="text-5xl md:text-7xl font-bold text-black mb-20 md:mb-32 leading-tight"
+              className="text-5xl md:text-7xl font-bold text-gray-900 mb-20 md:mb-32 leading-tight"
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.2 }}
             >
               Track Every {assetConfig.assetTypeSingular || 'Asset'},
               <motion.span 
-                className="block text-black"
+                className="block text-gray-900"
                 initial={{ opacity: 0, x: -50 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.4 }}
@@ -237,11 +237,11 @@ export default function ModernLandingPage() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-24 bg-white">
+      <section id="features" className="py-24 bg-gradient-to-b from-transparent via-white/30 to-violet-50/20">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <Badge className="mb-4 border-2 border-primary bg-white text-foreground" variant="outline">Features</Badge>
-            <h2 className="text-4xl md:text-5xl font-bold text-black mb-4">
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
               Everything You Need to Succeed
             </h2>
             <p className="text-xl text-gray-700 max-w-2xl mx-auto">
@@ -264,7 +264,7 @@ export default function ModernLandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t-2 border-black bg-gray-100">
+      <footer className="border-t border-white/50 bg-white/40 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-12">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
             <div>

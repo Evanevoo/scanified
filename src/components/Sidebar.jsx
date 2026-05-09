@@ -511,9 +511,10 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      bgcolor: 'background.paper',
-      borderRight: 1,
-      borderColor: 'divider',
+      bgcolor: 'transparent',
+      backdropFilter: 'none',
+      borderRight: 'none',
+      boxShadow: 'none',
     }}>
         {/* Sidebar collapse toggle */}
         {onToggleCollapse && (
@@ -522,7 +523,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               <IconButton
                 size="small"
                 onClick={onToggleCollapse}
-                sx={{ color: 'text.secondary', borderRadius: 1.5, '&:hover': { bgcolor: 'action.hover' } }}
+                sx={{ color: 'text.secondary', borderRadius: 2, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }}
               >
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
               </IconButton>
@@ -542,21 +543,19 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               fullWidth
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: 2,
+                  borderRadius: 999,
                   minHeight: 40,
                   alignItems: 'center',
-                  bgcolor: (theme) =>
-                    theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.06)' : '#f6f5f3',
+                  bgcolor: 'rgba(255,255,255,0.72)',
                   fontSize: '0.875rem',
                   '& fieldset': {
-                    borderColor: 'transparent',
+                    borderColor: 'rgba(255,255,255,0.9)',
                   },
                   '&:hover': {
-                    bgcolor: (theme) =>
-                      theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.09)' : '#eeedeb',
+                    bgcolor: 'rgba(255,255,255,0.92)',
                   },
                   '&.Mui-focused': {
-                    bgcolor: 'background.paper',
+                    bgcolor: 'rgba(255,255,255,0.96)',
                     boxShadow: `0 0 0 2px ${primaryColor}20`,
                     '& fieldset': { borderColor: primaryColor },
                   },
@@ -603,10 +602,11 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                     sx={{
                       py: 1,
                       px: 1.5,
-                      borderRadius: 2,
-                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                      borderRadius: 999,
+                      backgroundColor: active ? `${primaryColor}1f` : 'rgba(255,255,255,0.55)',
                       color: active ? primaryColor : 'text.primary',
-                      borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                      border: active ? `1px solid ${primaryColor}55` : '1px solid rgba(255,255,255,0.82)',
+                      boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
                     }}
                   >
                     <ListItemIcon sx={{ minWidth: 36 }}>
@@ -674,8 +674,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         px: 1.5, 
                         py: 1,
                         minHeight: 32,
-                        borderRadius: 1.5,
-                        '&:hover': { bgcolor: 'action.hover' },
+                        borderRadius: 999,
+                        '&:hover': { bgcolor: 'rgba(255,255,255,0.76)' },
                       }}
                     >
                       <Typography 
@@ -717,19 +717,20 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         sx={{
                           py: 1.1,
                           px: 1.5,
-                          borderRadius: 2,
-                          backgroundColor: active ? `${primaryColor}14` : 'transparent',
+                          borderRadius: 999,
+                          backgroundColor: active ? `${primaryColor}1f` : 'rgba(255,255,255,0.55)',
                           color: active ? primaryColor : 'text.primary',
-                          borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
-                          transition: 'background-color 0.15s, color 0.15s',
+                          border: active ? `1px solid ${primaryColor}55` : '1px solid rgba(255,255,255,0.82)',
+                          boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
+                          transition: 'background-color 0.18s, color 0.18s, box-shadow 0.18s',
                           '&:hover': {
-                            backgroundColor: active ? `${primaryColor}1e` : 'action.hover',
+                            backgroundColor: active ? `${primaryColor}2a` : 'rgba(255,255,255,0.78)',
                           },
                           '&.Mui-selected': {
-                            backgroundColor: `${primaryColor}14`,
+                            backgroundColor: `${primaryColor}1f`,
                             color: primaryColor,
                             '&:hover': {
-                              backgroundColor: `${primaryColor}1e`,
+                              backgroundColor: `${primaryColor}2a`,
                             },
                           },
                         }}
@@ -794,10 +795,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         {!isCollapsed && profile && (
           <Box sx={{ 
             p: 2,
-            borderTop: 1,
-            borderColor: 'divider',
-            bgcolor: (theme) =>
-              theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : '#fafaf9',
+            borderTop: '1px solid rgba(255,255,255,0.78)',
+            bgcolor: 'rgba(255,255,255,0.72)',
             mt: 'auto'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>

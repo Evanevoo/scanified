@@ -13,8 +13,7 @@ import Animated, {
   useSharedValue, 
   useAnimatedStyle, 
   withSpring,
-  withTiming,
-  interpolate
+  withTiming
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -50,11 +49,12 @@ export default function MobileButton({
   style,
   textStyle,
   icon,
-  gradient = false,
+  gradient = true,
 }: MobileButtonProps) {
   const { colors } = useTheme();
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
+  const motion = colors.motion;
 
   const sizeMap = {
     small: { height: 40, padding: 12, fontSize: 14 },
@@ -73,30 +73,31 @@ export default function MobileButton({
 
   const handlePressIn = () => {
     if (disabled || loading) return;
-    scale.value = withSpring(0.96, {
-      damping: 15,
-      stiffness: 300,
+    scale.value = withSpring(motion.pressScale, {
+      damping: motion.springDamping,
+      stiffness: motion.springStiffness,
     });
-    opacity.value = withTiming(0.8, { duration: 100 });
+    opacity.value = withTiming(motion.pressOpacity, { duration: motion.timingMs });
   };
 
   const handlePressOut = () => {
     if (disabled || loading) return;
     scale.value = withSpring(1, {
-      damping: 15,
-      stiffness: 300,
+      damping: motion.springDamping,
+      stiffness: motion.springStiffness,
     });
-    opacity.value = withTiming(1, { duration: 100 });
+    opacity.value = withTiming(1, { duration: motion.timingMs });
   };
 
   const getButtonStyle = (): ViewStyle => {
     const baseStyle: ViewStyle = {
       minHeight: sizeConfig.height,
       paddingHorizontal: sizeConfig.padding,
-      borderRadius: 12,
+      borderRadius: 999,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
+      overflow: 'hidden',
       ...(fullWidth && { width: '100%' }),
     };
 
@@ -105,17 +106,27 @@ export default function MobileButton({
         return {
           ...baseStyle,
           backgroundColor: gradient ? 'transparent' : colors.primary,
+          shadowColor: colors.shadowStrong,
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: 0.28,
+          shadowRadius: 18,
+          elevation: 8,
         };
       case 'secondary':
         return {
           ...baseStyle,
           backgroundColor: colors.secondary,
+          shadowColor: colors.shadowStrong,
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: 0.22,
+          shadowRadius: 16,
+          elevation: 7,
         };
       case 'outline':
         return {
           ...baseStyle,
-          backgroundColor: 'transparent',
-          borderWidth: 2,
+          backgroundColor: colors.glassSurface,
+          borderWidth: 1.5,
           borderColor: colors.primary,
         };
       case 'ghost':
@@ -148,9 +159,13 @@ export default function MobileButton({
     }
   };
 
-  const buttonContent = gradient && variant === 'primary' ? (
+  const gradientColors = (variant === 'primary'
+    ? (colors.buttonGradient || [colors.primary, colors.primaryDark])
+    : [colors.secondary, colors.primary]) as [string, string, ...string[]];
+
+  const buttonContent = gradient && (variant === 'primary' || variant === 'secondary') ? (
     <LinearGradient
-      colors={colors.gradient || [colors.primary, colors.secondary]}
+      colors={gradientColors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 0 }}
       style={StyleSheet.absoluteFill}

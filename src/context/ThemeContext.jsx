@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
 import { themes, modernTheme } from '../theme/themes';
+import { brandColors } from '../styles/theme';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 
@@ -133,6 +134,15 @@ const getGlobalStylesForTheme = (theme) => {
   const primary = theme.palette.primary.main;
   return {
     ...globalStylesStatic,
+    body: {
+      ...globalStylesStatic.body,
+      ...(!isDark
+        ? {
+            background: brandColors.background.gradient,
+            backgroundAttachment: 'fixed',
+          }
+        : {}),
+    },
     '::-webkit-scrollbar': {
       width: '8px',
       height: '8px',

@@ -121,9 +121,10 @@ export default function NavigationBar() {
           color="default" 
           elevation={0}
           sx={{ 
-            bgcolor: 'white',
-            backdropFilter: 'blur(10px)',
+            bgcolor: 'rgba(255,255,255,0.78)',
+            backdropFilter: 'blur(16px)',
             borderBottom: `2px solid ${marketingTokens.brandTeal}`,
+            boxShadow: '0 10px 32px rgba(99,102,241,0.08)',
             fontFamily: marketingTokens.fontStack,
             minHeight: 64,
           }}

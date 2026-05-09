@@ -3,7 +3,6 @@ import {
   Alert,
   Autocomplete,
   Box,
-  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -20,10 +19,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  Refresh as RefreshIcon,
-  FileDownload as FileDownloadIcon,
-} from '@mui/icons-material';
+import { IoRefreshOutline, IoDownloadOutline } from 'react-icons/io5';
+import GradientMenu from '../components/ui/gradient-menu';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -69,6 +66,22 @@ export default function CustomerRentalHistory() {
   const [billingMonth, setBillingMonth] = useState(() => previousMonthYm());
 
   const monthOptions = useMemo(() => buildMonthOptions(24), []);
+  const customerFilterOptions = useCallback((options, { inputValue }) => {
+    const query = String(inputValue || '').trim().toLowerCase();
+    if (!query) return options;
+    return options.filter((customer) => {
+      const name = String(customer?._displayName || '').toLowerCase();
+      const rawName = String(customer?.name || customer?.Name || '').toLowerCase();
+      const listId = String(customer?.CustomerListID || '').toLowerCase();
+      const id = String(customer?.id || '').toLowerCase();
+      return (
+        name.includes(query) ||
+        rawName.includes(query) ||
+        listId.includes(query) ||
+        id.includes(query)
+      );
+    });
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!organization?.id) return;
@@ -168,6 +181,29 @@ export default function CustomerRentalHistory() {
     URL.revokeObjectURL(url);
   }, [history, totals, selectedCustomer, billingMonth]);
 
+  const toolbarItems = useMemo(
+    () => [
+      {
+        id: 'export-csv',
+        title: 'Export CSV',
+        action: 'export-csv',
+        icon: <IoDownloadOutline />,
+        gradientFrom: '#56CCF2',
+        gradientTo: '#2F80ED',
+        disabled: !history.length,
+      },
+      {
+        id: 'refresh',
+        title: 'Refresh',
+        action: 'refresh',
+        icon: <IoRefreshOutline />,
+        gradientFrom: '#a955ff',
+        gradientTo: '#ea51ff',
+      },
+    ],
+    [history.length]
+  );
+
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
       <Paper
@@ -190,25 +226,17 @@ export default function CustomerRentalHistory() {
               Strict customer matching (by ID), no fuzzy name aliasing.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<FileDownloadIcon />}
-              onClick={handleExportCsv}
-              disabled={!history.length}
-              sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 700 }}
-            >
-              Export CSV
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<RefreshIcon />}
-              onClick={loadData}
-              sx={{ borderRadius: 999, textTransform: 'none', fontWeight: 700 }}
-            >
-              Refresh
-            </Button>
-          </Stack>
+          <Box sx={{ minWidth: { xs: '100%', md: 220 }, maxWidth: '100%' }}>
+            <GradientMenu
+              variant="compact"
+              items={toolbarItems}
+              className="min-h-0 w-full justify-center md:justify-end py-2 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
+              onAction={(action) => {
+                if (action === 'export-csv') handleExportCsv();
+                if (action === 'refresh') loadData();
+              }}
+            />
+          </Box>
         </Box>
       </Paper>
 
@@ -220,11 +248,13 @@ export default function CustomerRentalHistory() {
             <Autocomplete
               size="small"
               options={customers}
+              filterOptions={customerFilterOptions}
               getOptionLabel={(opt) => opt._displayName || ''}
               value={selectedCustomer}
               onChange={(_, val) => setSelectedCustomerId(val?.id || '')}
+              noOptionsText="No customers match your search"
               renderInput={(params) => (
-                <TextField {...params} label="Customer" placeholder="Search by name..." />
+                <TextField {...params} label="Customer" placeholder="Search by name, customer ID, or list ID..." />
               )}
               isOptionEqualToValue={(a, b) => a.id === b.id}
             />

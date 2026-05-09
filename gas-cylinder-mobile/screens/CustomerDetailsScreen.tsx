@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
@@ -10,6 +10,26 @@ import { useAssetConfig } from '../context/AssetContext';
 import { Ionicons } from '@expo/vector-icons';
 import { ModernCard } from '../components/design-system';
 
+type LeaseStatus = 'active' | 'scheduled' | 'expired' | 'none';
+
+const parseLocalDateOnly = (value?: string | null): Date | null => {
+  if (!value) return null;
+  const dateOnly = String(value).split('T')[0];
+  const parts = dateOnly.split('-').map(Number);
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    const [year, month, day] = parts;
+    return new Date(year, month - 1, day);
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const formatLeaseDate = (value?: string | null): string | null => {
+  const d = parseLocalDateOnly(value);
+  if (!d) return null;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
 export default function CustomerDetailsScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute();
@@ -17,11 +37,13 @@ export default function CustomerDetailsScreen() {
   const scrollPaddingBottom = Platform.OS === 'ios' ? insets.bottom + 24 : Math.max(insets.bottom, 24) + 24;
   const params = (route?.params ?? {}) as { customerId?: string };
   const customerId = params.customerId ?? '';
-  const { profile } = useAuth();
+  const { profile, loading: authLoading, organizationLoading } = useAuth();
   const { colors } = useTheme();
   const { config: assetConfig } = useAssetConfig();
   const [customer, setCustomer] = useState<any>(null);
   const [cylinders, setCylinders] = useState<any[]>([]);
+  const [leaseContract, setLeaseContract] = useState<any>(null);
+  const [leaseItemCount, setLeaseItemCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -33,6 +55,9 @@ export default function CustomerDetailsScreen() {
           setError('No customer specified');
           setLoading(false);
         }
+        return;
+      }
+      if (authLoading || organizationLoading) {
         return;
       }
       if (!profile?.organization_id) {
@@ -49,12 +74,23 @@ export default function CustomerDetailsScreen() {
       setLoading(true);
       setError('');
 
-      const { data: cust, error: custErr } = await supabase
+      let { data: cust, error: custErr } = await supabase
         .from('customers')
         .select('*')
         .eq('CustomerListID', customerId)
         .eq('organization_id', profile.organization_id)
-        .single();
+        .maybeSingle();
+
+      if (!cust && !custErr) {
+        const fallback = await supabase
+          .from('customers')
+          .select('*')
+          .eq('id', customerId)
+          .eq('organization_id', profile.organization_id)
+          .maybeSingle();
+        cust = fallback.data;
+        custErr = fallback.error;
+      }
 
       logger.log('🔍 Customer query result:', { data: cust, error: custErr });
 
@@ -74,7 +110,7 @@ export default function CustomerDetailsScreen() {
         .from('bottles')
         .select('*')
         .eq('organization_id', profile.organization_id)
-        .eq('assigned_customer', customerId);
+        .eq('assigned_customer', cust.CustomerListID || customerId);
 
       logger.log('🔍 Cylinders query result:', { data, error });
 
@@ -90,14 +126,144 @@ export default function CustomerDetailsScreen() {
       logger.log('✅ Found cylinders:', data?.length || 0);
       if (isMounted) {
         setCylinders(data || []);
-        setLoading(false);
       }
+
+      // Lease lookup. Try lease_agreements (the active table in this project) first,
+      // then fall back to lease_contracts (newer schema) if it's deployed. Match by
+      // any of the customer keys (CustomerListID, UUID, route param), normalized to
+      // handle whitespace/case mismatches.
+      const normKey = (v: any) => String(v || '').trim().toLowerCase();
+      const customerKeys = [cust.CustomerListID, cust.id, customerId]
+        .filter(Boolean)
+        .map(String);
+      const normalizedKeys = new Set(customerKeys.map(normKey));
+
+      const fetchAgreementsFromTable = async (tableName: string) => {
+        const { data, error: tblErr } = await supabase
+          .from(tableName)
+          .select('*')
+          .eq('organization_id', profile.organization_id)
+          .order('start_date', { ascending: false });
+        if (tblErr) {
+          // 42P01 = relation does not exist; ignore so we can fall through.
+          if (tblErr.code !== '42P01') {
+            logger.log(`⚠️ Error fetching ${tableName}:`, tblErr);
+          }
+          return null;
+        }
+        return data || [];
+      };
+
+      let agreements = await fetchAgreementsFromTable('lease_agreements');
+      if (agreements === null) {
+        agreements = await fetchAgreementsFromTable('lease_contracts');
+      }
+
+      const matchingAgreements = (agreements || []).filter((row) =>
+        normalizedKeys.has(normKey(row.customer_id))
+      );
+
+      logger.log('🔍 Lease agreements found for customer:', matchingAgreements.length);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const pickActive = (rows: any[]) => {
+        if (rows.length === 0) return null;
+        const live = rows.filter((row) => {
+          const status = String(row.status || '').toLowerCase();
+          return status !== 'cancelled' && status !== 'expired' && status !== 'renewed';
+        });
+        const pool = live.length ? live : rows;
+        const inWindow = pool.find((row) => {
+          const start = parseLocalDateOnly(row.start_date);
+          const end = parseLocalDateOnly(row.end_date);
+          if (start) start.setHours(0, 0, 0, 0);
+          if (end) end.setHours(0, 0, 0, 0);
+          const startedOk = !start || start <= today;
+          const notExpired = !end || end >= today;
+          return startedOk && notExpired;
+        });
+        return inWindow || pool[0];
+      };
+      const activeContract = pickActive(matchingAgreements);
+
+      if (isMounted) {
+        setLeaseContract(activeContract);
+        setLeaseItemCount(matchingAgreements.length);
+      }
+
+      if (isMounted) setLoading(false);
     };
     fetchDetails();
     return () => { isMounted = false; };
-  }, [customerId, profile]);
+  }, [customerId, profile?.organization_id, authLoading, organizationLoading]);
 
-  if (loading) {
+  const leaseSummary = useMemo<{
+    status: LeaseStatus;
+    label: string;
+    helper: string;
+    color: string;
+    icon: keyof typeof Ionicons.glyphMap;
+  }>(() => {
+    if (!leaseContract) {
+      return {
+        status: 'none',
+        label: 'No active lease',
+        helper: 'No lease agreement is linked to this customer.',
+        color: colors.textSecondary,
+        icon: 'document-outline',
+      };
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = parseLocalDateOnly(leaseContract.start_date);
+    const end = parseLocalDateOnly(leaseContract.end_date);
+    if (start) start.setHours(0, 0, 0, 0);
+    if (end) end.setHours(0, 0, 0, 0);
+    const isScheduled = !!(start && start > today);
+    const isExpired = !!(end && end < today);
+    const isActive = !isScheduled && !isExpired;
+
+    const startStr = formatLeaseDate(leaseContract.start_date);
+    const endStr = formatLeaseDate(leaseContract.end_date) || 'no end date';
+    const dateBits: string[] = [];
+    if (startStr) dateBits.push(`Starts ${startStr}`);
+    dateBits.push(`Ends ${endStr}`);
+    const agreementNum = leaseContract.agreement_number ? `Agreement #${leaseContract.agreement_number}` : null;
+    const countBit = leaseItemCount > 1 ? `${leaseItemCount} agreements on file` : null;
+    const headerBits = [agreementNum, countBit].filter(Boolean) as string[];
+    const helper = headerBits.length
+      ? `${headerBits.join(' · ')}. ${dateBits.join(' • ')}.`
+      : `${dateBits.join(' • ')}.`;
+
+    if (isActive) {
+      return {
+        status: 'active',
+        label: 'Active lease',
+        helper,
+        color: colors.success || '#10B981',
+        icon: 'shield-checkmark-outline',
+      };
+    }
+    if (isScheduled) {
+      return {
+        status: 'scheduled',
+        label: 'Scheduled lease',
+        helper,
+        color: colors.info || colors.primary,
+        icon: 'time-outline',
+      };
+    }
+    return {
+      status: 'expired',
+      label: 'Expired lease',
+      helper,
+      color: colors.warning || '#F59E0B',
+      icon: 'alert-circle-outline',
+    };
+  }, [leaseContract, leaseItemCount, colors]);
+
+  if (loading || authLoading || organizationLoading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -140,6 +306,20 @@ export default function CustomerDetailsScreen() {
             Barcode: {customer.barcode}
           </Text>
         ) : null}
+        <View
+          style={[
+            styles.leaseBadge,
+            {
+              backgroundColor: leaseSummary.color + '1A',
+              borderColor: leaseSummary.color + '55',
+            },
+          ]}
+        >
+          <Ionicons name={leaseSummary.icon} size={14} color={leaseSummary.color} style={{ marginRight: 6 }} />
+          <Text style={[styles.leaseBadgeText, { color: leaseSummary.color }]} numberOfLines={1}>
+            Lease: {leaseSummary.status === 'none' ? 'None' : leaseSummary.label.replace(' lease', '')}
+          </Text>
+        </View>
       </ModernCard>
 
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONTACT</Text>
@@ -172,6 +352,24 @@ export default function CustomerDetailsScreen() {
           </ModernCard>
         </>
       ) : null}
+
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>LEASE AGREEMENT</Text>
+      <ModernCard elevated={false} style={styles.infoCard}>
+        <View style={styles.infoRow}>
+          <View
+            style={[
+              styles.leaseIconWrap,
+              { backgroundColor: leaseSummary.color + '1F' },
+            ]}
+          >
+            <Ionicons name={leaseSummary.icon} size={20} color={leaseSummary.color} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.leaseLabel, { color: leaseSummary.color }]}>{leaseSummary.label}</Text>
+            <Text style={[styles.leaseHelper, { color: colors.textSecondary }]}>{leaseSummary.helper}</Text>
+          </View>
+        </View>
+      </ModernCard>
 
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
         {assetConfig?.assetDisplayNamePlural?.toUpperCase() || 'CYLINDERS'} RENTED
@@ -235,6 +433,38 @@ const styles = StyleSheet.create({
   },
   barcodeLabel: {
     fontSize: 14,
+  },
+  leaseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignSelf: 'center',
+  },
+  leaseBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  leaseIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  leaseLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  leaseHelper: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   sectionTitle: {
     fontSize: 12,

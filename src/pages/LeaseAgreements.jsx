@@ -1,8 +1,13 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useDebounce } from '../utils/performance';
 import { toCsv, downloadFile, getNextAgreementNumbers } from '../utils/invoiceUtils';
+import { downloadQuickBooksInvoiceCsv } from '../utils/quickBooksInvoiceCsvDownload';
+import { buildYearlyLeaseExportRows } from '../services/yearlyLeaseExportRows';
+import { downloadLeaseAgreementPdfZip } from '../utils/leaseAgreementPdfZip';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import {
   Box,
   Typography,
@@ -36,31 +41,41 @@ import {
   Snackbar,
   Tooltip,
   InputAdornment,
-  Autocomplete
+  Autocomplete,
+  createFilterOptions,
+  Stack,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Visibility as ViewIcon,
-  Receipt as BillingIcon,
-  Download as DownloadIcon,
   Search as SearchIcon,
-  FilterList as FilterIcon,
   AttachMoney as MoneyIcon,
   DateRange as DateIcon,
   Business as BusinessIcon,
   Autorenew as RenewIcon,
-  Upload as UploadIcon,
-  Email as EmailIcon
 } from '@mui/icons-material';
+import {
+  IoDownloadOutline,
+  IoCloudDownloadOutline,
+  IoDocumentTextOutline,
+  IoArchiveOutline,
+  IoCloudUploadOutline,
+  IoMailOutline,
+  IoAddCircleOutline,
+} from 'react-icons/io5';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
 import { fetchBillingWorkspaceData, computeLeaseAgreementStats } from '../services/billingWorkspaceService';
 import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
+import GradientMenu from '../components/ui/gradient-menu';
 
 export default function LeaseAgreements() {
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
+  const { organizationColors } = useTheme();
+  const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
   const [agreements, setAgreements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +100,9 @@ export default function LeaseAgreements() {
     totalAnnualValue: 0,
     expiringThisMonth: 0
   });
+  const [invoiceTemplate, setInvoiceTemplate] = useState(null);
+  const [remitAddress, setRemitAddress] = useState(null);
+  const [billingExportBusy, setBillingExportBusy] = useState(false);
 
   // Form state for adding/editing agreements (bottle_id = per-bottle lease, null = customer-level)
   const [formData, setFormData] = useState({
@@ -135,6 +153,15 @@ export default function LeaseAgreements() {
     const label = customer.name ?? customer.Name ?? customer.customer_name ?? '';
     return String(label || '').trim();
   }, []);
+
+  const filterCustomers = useMemo(
+    () =>
+      createFilterOptions({
+        stringify: (option) =>
+          `${getCustomerLabelValue(option)} ${getCustomerIdValue(option)}`,
+      }),
+    [getCustomerLabelValue, getCustomerIdValue]
+  );
 
   const recalculateAnnualAmountForBottleCount = (nextCountRaw, prevData) => {
     const nextCount = parsePositiveInt(nextCountRaw);
@@ -188,6 +215,156 @@ export default function LeaseAgreements() {
     }
   }, [profile?.organization_id, loadWorkspace]);
 
+  const getLeaseExportCycleRange = useCallback(() => {
+    const now = new Date();
+    const toLocalYmd = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const periodStart = toLocalYmd(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    const periodEnd = toLocalYmd(new Date(now.getFullYear(), now.getMonth(), 0));
+    const dueDate = toLocalYmd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    return { periodStart, periodEnd, dueDate };
+  }, []);
+
+  useEffect(() => {
+    if (!organization?.id) {
+      setInvoiceTemplate(null);
+      setRemitAddress(null);
+      return;
+    }
+    try {
+      const savedTemplate = localStorage.getItem(`invoiceTemplate_${organization.id}`);
+      setInvoiceTemplate(savedTemplate ? JSON.parse(savedTemplate) : null);
+    } catch {
+      setInvoiceTemplate(null);
+    }
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('invoice_settings')
+          .select('remit_name, remit_address_line1, remit_address_line2, remit_address_line3, gst_number')
+          .eq('organization_id', organization.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setRemitAddress(data || null);
+      } catch {
+        setRemitAddress(null);
+      }
+    })();
+  }, [organization?.id]);
+
+  const mergedLeaseInvoiceTemplate = useMemo(() => {
+    const merged = { ...(invoiceTemplate || {}) };
+    if (remitAddress) {
+      merged.remit_name = remitAddress.remit_name || '';
+      merged.remit_address_line1 = remitAddress.remit_address_line1 || '';
+      merged.remit_address_line2 = remitAddress.remit_address_line2 || '';
+      merged.remit_address_line3 = remitAddress.remit_address_line3 || '';
+      merged.gst_number = remitAddress.gst_number || '';
+    }
+    return merged;
+  }, [invoiceTemplate, remitAddress]);
+
+  const fetchFreshBillingWorkspace = useCallback(async () => {
+    if (!profile?.organization_id) throw new Error('No organization.');
+    return fetchBillingWorkspaceData(profile.organization_id);
+  }, [profile?.organization_id]);
+
+  const handleExportLeaseQuickBooksCsv = useCallback(async () => {
+    setBillingExportBusy(true);
+    try {
+      const workspace = await fetchFreshBillingWorkspace();
+      const rows = buildYearlyLeaseExportRows(workspace);
+      if (rows.length === 0) {
+        setSnackbar({
+          open: true,
+          message: 'No billable yearly lease rows (check agreements, amounts, and bottle assignments).',
+          severity: 'warning',
+        });
+        return;
+      }
+      const now = new Date();
+      const seqMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const c = getLeaseExportCycleRange();
+      const n = downloadQuickBooksInvoiceCsv(rows, {
+        filePrefix: `quickbooks_invoices_yearly_lease_${seqMonth}`,
+        invoiceDate: c.periodEnd,
+        dueDate: c.dueDate,
+        sequenceMonth: seqMonth,
+        getCurrentCycleRange: getLeaseExportCycleRange,
+      });
+      setSnackbar({
+        open: true,
+        message: `Downloaded QuickBooks CSV (${n} row${n === 1 ? '' : 's'}).`,
+        severity: 'success',
+      });
+    } catch (e) {
+      setSnackbar({ open: true, message: e?.message || 'QuickBooks export failed.', severity: 'error' });
+    } finally {
+      setBillingExportBusy(false);
+    }
+  }, [fetchFreshBillingWorkspace, getLeaseExportCycleRange]);
+
+  const handleExportLeaseExcel = useCallback(async () => {
+    setBillingExportBusy(true);
+    try {
+      const workspace = await fetchFreshBillingWorkspace();
+      const rows = buildYearlyLeaseExportRows(workspace);
+      if (rows.length === 0) {
+        setSnackbar({ open: true, message: 'No yearly lease billing rows to export.', severity: 'warning' });
+        return;
+      }
+      const sheetRows = rows.map((r) => ({
+        'Customer ID': r.customer_id,
+        'Customer name': r.customer?.name || r.customer?.Name || r.customer_name || '',
+        'Billable units': r.itemCount,
+        'Amount (before tax)': r.totalPerCycle,
+        Status: r.status,
+      }));
+      const ws = XLSX.utils.json_to_sheet(sheetRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Yearly leases');
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const day = new Date().toISOString().slice(0, 10);
+      saveAs(
+        new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        `yearly_lease_billing_${day}.xlsx`,
+      );
+      setSnackbar({ open: true, message: 'Excel export downloaded.', severity: 'success' });
+    } catch (e) {
+      setSnackbar({ open: true, message: e?.message || 'Excel export failed.', severity: 'error' });
+    } finally {
+      setBillingExportBusy(false);
+    }
+  }, [fetchFreshBillingWorkspace]);
+
+  const handleExportLeasePdfZip = useCallback(async () => {
+    if (!organization?.id) {
+      setSnackbar({ open: true, message: 'Organization not loaded.', severity: 'error' });
+      return;
+    }
+    setBillingExportBusy(true);
+    try {
+      const workspace = await fetchFreshBillingWorkspace();
+      const rows = buildYearlyLeaseExportRows(workspace);
+      await downloadLeaseAgreementPdfZip({
+        rows,
+        organization,
+        invoiceTemplate: mergedLeaseInvoiceTemplate,
+        primaryColorFallback: primaryColor,
+      });
+      setSnackbar({ open: true, message: 'Lease invoice PDF ZIP downloaded.', severity: 'success' });
+    } catch (e) {
+      setSnackbar({ open: true, message: e?.message || 'PDF ZIP export failed.', severity: 'error' });
+    } finally {
+      setBillingExportBusy(false);
+    }
+  }, [organization, fetchFreshBillingWorkspace, mergedLeaseInvoiceTemplate, primaryColor]);
+
   // Calculate retroactive billing when form dates/amounts change
   useEffect(() => {
     if (formData.start_date && formData.annual_amount && formData.billing_frequency && dialogMode !== 'view') {
@@ -201,6 +378,8 @@ export default function LeaseAgreements() {
     } else {
       setRetroactiveBilling({ isRetroactive: false, proRatedAmount: 0, message: '' });
     }
+    // calculateProRatedAmount is stable in behavior for these fields; wrapping it in useCallback would reorder a large block.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only form/dialog fields drive this effect
   }, [formData.start_date, formData.end_date, formData.annual_amount, formData.billing_frequency, dialogMode]);
 
   // Fetch bottles assigned to the selected customer (for Assign to bottle)
@@ -466,9 +645,8 @@ export default function LeaseAgreements() {
     }
   };
 
-  const calculateProRatedAmount = (startDate, endDate, annualAmount, billingFrequency) => {
+  const calculateProRatedAmount = (startDate, _endDate, annualAmount, billingFrequency) => {
     const start = new Date(startDate);
-    const end = new Date(endDate);
     const now = new Date();
 
     // If start date is in the past (retroactive)
@@ -586,6 +764,18 @@ export default function LeaseAgreements() {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return '';
+    // Parse YYYY-MM-DD as a LOCAL date so date-only values don't shift back a day
+    // in negative-UTC timezones (e.g. America/Chicago renders 2026-01-01 as 12/31/2025
+    // when parsed via `new Date('2026-01-01')` because that's UTC midnight).
+    const dateOnly = String(dateString).split('T')[0];
+    const parts = dateOnly.split('-');
+    if (parts.length === 3) {
+      const [y, m, d] = parts.map(Number);
+      if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
+        return new Date(y, m - 1, d).toLocaleDateString();
+      }
+    }
     return new Date(dateString).toLocaleDateString();
   };
 
@@ -595,13 +785,26 @@ export default function LeaseAgreements() {
     return barcode ?? agreement.bottle_id;
   };
 
-  // Customer-level: # Bottles uses live inventory count (not max_asset_count).
-  const getLeaseBottleCount = (agreement) => {
+  /** Live assigned bottle count for this customer (inventory), for customer-level leases. */
+  const getLeaseAssignedBottleCount = (agreement) => {
     if (!agreement) return 0;
     if (agreement.bottle_id) return 1;
     const key = agreement.customer_id != null ? String(agreement.customer_id) : '';
     const n = key ? bottleCountByCustomerId[key] : 0;
     return typeof n === 'number' ? n : 0;
+  };
+
+  /**
+   * Bottles shown on the list / CSV / annual total: agreement coverage (max_asset_count) when set,
+   * otherwise assigned inventory count — matches the edit form "Number of bottles covered".
+   */
+  const getLeaseBottleCount = (agreement) => {
+    if (!agreement) return 0;
+    if (agreement.bottle_id) return 1;
+    const capRaw = agreement.max_asset_count;
+    const cap = capRaw != null && capRaw !== '' ? parseInt(capRaw, 10) : NaN;
+    if (Number.isFinite(cap) && cap > 0) return cap;
+    return getLeaseAssignedBottleCount(agreement);
   };
 
   // Customer-level leases use annual_amount as per-bottle rate.
@@ -654,6 +857,69 @@ export default function LeaseAgreements() {
     );
   }
 
+  const headerToolbarItems = [
+    {
+      id: 'export-csv',
+      title: 'Export CSV',
+      action: 'export-csv',
+      icon: <IoDownloadOutline />,
+      gradientFrom: '#56CCF2',
+      gradientTo: '#2F80ED',
+      disabled: filteredAgreements.length === 0,
+    },
+    {
+      id: 'qb-csv',
+      title: billingExportBusy ? 'Working' : 'QB CSV',
+      action: 'qb-csv',
+      icon: <IoCloudDownloadOutline />,
+      gradientFrom: '#80FF72',
+      gradientTo: '#7EE8FA',
+      disabled: billingExportBusy || !profile?.organization_id,
+    },
+    {
+      id: 'excel-billing',
+      title: 'Excel',
+      action: 'excel-billing',
+      icon: <IoDocumentTextOutline />,
+      gradientFrom: '#FF9966',
+      gradientTo: '#FF5E62',
+      disabled: billingExportBusy || !profile?.organization_id,
+    },
+    {
+      id: 'pdf-zip',
+      title: 'PDF ZIP',
+      action: 'pdf-zip',
+      icon: <IoArchiveOutline />,
+      gradientFrom: '#40B5AD',
+      gradientTo: '#2E9B94',
+      disabled: billingExportBusy || !organization?.id,
+    },
+    {
+      id: 'import-trackabout',
+      title: 'Import',
+      action: 'import-trackabout',
+      icon: <IoCloudUploadOutline />,
+      gradientFrom: '#a955ff',
+      gradientTo: '#ea51ff',
+    },
+    {
+      id: 'send-emails',
+      title: 'Lease Emails',
+      action: 'send-emails',
+      icon: <IoMailOutline />,
+      gradientFrom: '#ffa9c6',
+      gradientTo: '#f434e2',
+    },
+    {
+      id: 'new-agreement',
+      title: 'New',
+      action: 'new-agreement',
+      icon: <IoAddCircleOutline />,
+      gradientFrom: '#38bdf8',
+      gradientTo: '#06b6d4',
+    },
+  ];
+
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
       <Paper
@@ -679,19 +945,39 @@ export default function LeaseAgreements() {
             Manage annual lease agreements, monitor agreement health, and move directly into exports, renewal workflows, and billing history.
           </Typography>
         </Box>
-        <Box display="flex" gap={2} flexWrap="wrap">
-          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportToCSV} disabled={filteredAgreements.length === 0} sx={{ borderRadius: 999, textTransform: 'none' }}>
-            Export CSV
-          </Button>
-          <Button variant="outlined" component={Link} to="/import-rental-agreements" startIcon={<UploadIcon />} sx={{ borderRadius: 999, textTransform: 'none' }}>
-            Import from TrackAbout
-          </Button>
-          <Button variant="outlined" component={Link} to="/send-yearly-lease-emails" startIcon={<EmailIcon />} sx={{ borderRadius: 999, textTransform: 'none' }}>
-            Send yearly lease emails
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleAddAgreement} sx={{ borderRadius: 999, textTransform: 'none' }}>
-            New Agreement
-          </Button>
+        <Box sx={{ minWidth: { xs: '100%', md: 520 }, maxWidth: '100%' }}>
+          <GradientMenu
+            variant="compact"
+            items={headerToolbarItems}
+            className="min-h-0 w-full justify-center md:justify-end py-2 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
+            onAction={(action) => {
+              switch (action) {
+                case 'export-csv':
+                  exportToCSV();
+                  break;
+                case 'qb-csv':
+                  handleExportLeaseQuickBooksCsv();
+                  break;
+                case 'excel-billing':
+                  handleExportLeaseExcel();
+                  break;
+                case 'pdf-zip':
+                  handleExportLeasePdfZip();
+                  break;
+                case 'import-trackabout':
+                  navigate('/import-rental-agreements');
+                  break;
+                case 'send-emails':
+                  navigate('/send-yearly-lease-emails');
+                  break;
+                case 'new-agreement':
+                  handleAddAgreement();
+                  break;
+                default:
+                  break;
+              }
+            }}
+          />
         </Box>
       </Box>
       </Paper>
@@ -849,7 +1135,19 @@ export default function LeaseAgreements() {
                     title={
                       agreement.bottle_id
                         ? 'Per-bottle lease (this agreement is for one asset).'
-                        : 'Customer-level lease: count of bottles currently assigned to this customer in your inventory.'
+                        : (() => {
+                            const assigned = getLeaseAssignedBottleCount(agreement);
+                            const covered = getLeaseBottleCount(agreement);
+                            const capRaw = agreement.max_asset_count;
+                            const cap =
+                              capRaw != null && capRaw !== '' ? parseInt(capRaw, 10) : NaN;
+                            if (Number.isFinite(cap) && cap > 0 && assigned !== covered) {
+                              return `Agreement covers ${covered} bottle${covered !== 1 ? 's' : ''}; ${assigned} currently assigned to this customer in inventory.`;
+                            }
+                            return Number.isFinite(cap) && cap > 0
+                              ? `Customer-level lease: ${covered} bottle${covered !== 1 ? 's' : ''} covered by this agreement.`
+                              : 'Customer-level lease: bottles assigned to this customer (no coverage cap on the agreement).';
+                          })()
                     }
                   >
                     <Typography component="span" fontWeight={600}>
@@ -1058,6 +1356,7 @@ export default function LeaseAgreements() {
                     fullWidth
                     openOnFocus
                     options={customers}
+                    loading={loading && customers.length === 0}
                     value={
                       customers.find(
                         (c) => getCustomerIdValue(c) === String(formData.customer_id || '').trim()
@@ -1067,16 +1366,13 @@ export default function LeaseAgreements() {
                       getCustomerIdValue(option) === getCustomerIdValue(value)
                     }
                     getOptionLabel={(option) => getCustomerLabelValue(option)}
-                    filterOptions={(opts, { inputValue }) => {
-                      const term = inputValue.trim().toLowerCase();
-                      if (!term) return opts;
-                      return opts.filter((o) => {
-                        const label = getCustomerLabelValue(o).toLowerCase();
-                        const customerId = getCustomerIdValue(o).toLowerCase();
-                        return label.includes(term) || customerId.includes(term);
-                      });
-                    }}
+                    filterOptions={filterCustomers}
                     PopperProps={{ sx: { zIndex: (theme) => theme.zIndex.modal + 1 } }}
+                    onOpen={() => {
+                      if (customers.length === 0 && profile?.organization_id) {
+                        loadWorkspace({ fullPage: false });
+                      }
+                    }}
                     onChange={(_, customer) => {
                       const newCustomerId = getCustomerIdValue(customer);
                       const assignedCount = newCustomerId ? (bottleCountByCustomerId[String(newCustomerId)] || 0) : 0;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 import Animated, { 
   useSharedValue, 
@@ -84,7 +84,7 @@ export default function MobileFab({
 
   const buttonContent = gradient ? (
     <LinearGradient
-      colors={colors.gradient || [colors.primary, colors.secondary]}
+      colors={(colors.gradient || [colors.primary, colors.secondary]) as [string, string, ...string[]]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[

@@ -852,10 +852,7 @@ export default function CustomerDetail() {
   ]);
 
   useEffect(() => {
-    const billingIsLease =
-      (customer?.billing_mode || 'rental') === 'lease' ||
-      (editing && (editForm.billing_mode || 'rental') === 'lease');
-    if (!customer?.organization_id || !customer?.CustomerListID || !billingIsLease) {
+    if (!customer?.organization_id || !customer?.CustomerListID) {
       setLeaseContractRow(null);
       setLeaseItemsRows([]);
       return;
@@ -897,9 +894,6 @@ export default function CustomerDetail() {
   }, [
     customer?.organization_id,
     customer?.CustomerListID,
-    customer?.billing_mode,
-    editing,
-    editForm.billing_mode,
   ]);
 
   // Load parent customer options when entering edit (for "Under parent" selector)
@@ -2419,6 +2413,33 @@ export default function CustomerDetail() {
     rnbCount: rnbRentals.length,
     rnsCount: rnsRentals.length,
   });
+  const leaseAgreementStatus = (() => {
+    if (!leaseContractRow) {
+      return {
+        value: 'No',
+        helper: 'No lease agreement is linked to this customer.',
+        color: 'default',
+      };
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = leaseContractRow.start_date ? new Date(leaseContractRow.start_date) : null;
+    const end = leaseContractRow.end_date ? new Date(leaseContractRow.end_date) : null;
+    if (start) start.setHours(0, 0, 0, 0);
+    if (end) end.setHours(0, 0, 0, 0);
+    const isScheduled = start && start > today;
+    const isExpired = end && end < today;
+    const isActive = !isScheduled && !isExpired;
+    const dateParts = [
+      leaseContractRow.start_date ? `starts ${formatDate(leaseContractRow.start_date)}` : null,
+      leaseContractRow.end_date ? `ends ${formatDate(leaseContractRow.end_date)}` : 'no end date',
+    ].filter(Boolean);
+    return {
+      value: isActive ? 'Active' : isScheduled ? 'Scheduled' : 'Expired',
+      helper: `${leaseItemsRows.length} contract line${leaseItemsRows.length === 1 ? '' : 's'}; ${dateParts.join(', ')}.`,
+      color: isActive ? 'success' : isScheduled ? 'info' : 'warning',
+    };
+  })();
   const detailMetrics = [
     {
       label: 'Open rentals (billing)',
@@ -2429,6 +2450,12 @@ export default function CustomerDetail() {
       label: 'Physical inventory',
       value: customerAssets.length,
       helper: 'Containers assigned to this account in inventory (can be lower than open rentals)',
+    },
+    {
+      label: 'Lease agreement',
+      value: leaseAgreementStatus.value,
+      helper: leaseAgreementStatus.helper,
+      color: leaseAgreementStatus.color,
     },
   ];
 
@@ -2450,6 +2477,13 @@ export default function CustomerDetail() {
               <Chip label="Customer detail" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
               <Chip label={customer.customer_type || 'CUSTOMER'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
               <Chip label={formatLocationDisplay(customer.location || 'SASKATOON')} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              <Chip
+                label={`Lease: ${leaseAgreementStatus.value}`}
+                color={leaseAgreementStatus.color}
+                size="small"
+                variant={leaseAgreementStatus.color === 'default' ? 'outlined' : 'filled'}
+                sx={{ borderRadius: 999, fontWeight: 700 }}
+              />
             </Stack>
             <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
               {customer.name}
@@ -2485,9 +2519,19 @@ export default function CustomerDetail() {
               <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 {metric.label}
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.25, letterSpacing: '-0.02em' }}>
-                {metric.value}
-              </Typography>
+              {metric.color ? (
+                <Chip
+                  label={metric.value}
+                  size="small"
+                  color={metric.color}
+                  variant={metric.color === 'default' ? 'outlined' : 'filled'}
+                  sx={{ mt: 0.75, borderRadius: 999, fontWeight: 800 }}
+                />
+              ) : (
+                <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.25, letterSpacing: '-0.02em' }}>
+                  {metric.value}
+                </Typography>
+              )}
               <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
                 {metric.helper}
               </Typography>

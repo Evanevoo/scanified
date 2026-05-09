@@ -19,10 +19,14 @@ import {
   FormControl, InputLabel, Select, MenuItem, Alert, LinearProgress,
   Card, CardContent, Tooltip, Divider,
 } from '@mui/material';
+import { ArrowBack, Delete as RemoveIcon } from '@mui/icons-material';
 import {
-  ArrowBack, Add as AddIcon, Delete as RemoveIcon, Receipt as InvoiceIcon,
-  Cancel as CancelIcon, Autorenew as RenewIcon, Edit as EditIcon,
-} from '@mui/icons-material';
+  IoAddCircleOutline,
+  IoReceiptOutline,
+  IoCloseCircleOutline,
+  IoRefreshOutline,
+} from 'react-icons/io5';
+import GradientMenu from '../components/ui/gradient-menu';
 
 export default function SubscriptionDetail() {
   const { id } = useParams();
@@ -125,6 +129,50 @@ export default function SubscriptionDetail() {
     }
   };
 
+  const subscriptionDetailToolbarItems = useMemo(() => {
+    const items = [
+      {
+        id: 'add-item',
+        title: 'Add Item',
+        action: 'add-item',
+        icon: <IoAddCircleOutline />,
+        gradientFrom: '#56CCF2',
+        gradientTo: '#2F80ED',
+        disabled: sub?.status !== 'active',
+      },
+      {
+        id: 'invoice',
+        title: 'Invoice',
+        action: 'invoice',
+        icon: <IoReceiptOutline />,
+        gradientFrom: '#80FF72',
+        gradientTo: '#7EE8FA',
+        disabled: saving,
+      },
+    ];
+    if (sub?.status === 'active') {
+      items.push({
+        id: 'cancel',
+        title: 'Cancel',
+        action: 'cancel',
+        icon: <IoCloseCircleOutline />,
+        gradientFrom: '#FF9966',
+        gradientTo: '#EF4444',
+      });
+    } else {
+      items.push({
+        id: 'renew',
+        title: 'Renew',
+        action: 'renew',
+        icon: <IoRefreshOutline />,
+        gradientFrom: '#40B5AD',
+        gradientTo: '#2E9B94',
+        disabled: saving,
+      });
+    }
+    return items;
+  }, [sub?.status, saving]);
+
   if (ctx.loading) {
     return <Box sx={{ p: 4 }}><LinearProgress /></Box>;
   }
@@ -161,23 +209,31 @@ export default function SubscriptionDetail() {
               {sub.auto_renew && <Chip label="Auto-renew" variant="outlined" size="small" color="success" sx={{ fontWeight: 600 }} />}
             </Stack>
           </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setAddItemOpen(true)} disabled={sub.status !== 'active'} sx={{ textTransform: 'none', borderRadius: 2 }}>
-              Add Item
-            </Button>
-            <Button variant="outlined" startIcon={<InvoiceIcon />} onClick={handleGenerateInvoice} disabled={saving} sx={{ textTransform: 'none', borderRadius: 2 }}>
-              Generate Invoice
-            </Button>
-            {sub.status === 'active' ? (
-              <Button variant="outlined" color="error" startIcon={<CancelIcon />} onClick={() => setCancelOpen(true)} sx={{ textTransform: 'none', borderRadius: 2 }}>
-                Cancel
-              </Button>
-            ) : (
-              <Button variant="outlined" color="success" startIcon={<RenewIcon />} onClick={handleRenew} disabled={saving} sx={{ textTransform: 'none', borderRadius: 2 }}>
-                Renew
-              </Button>
-            )}
-          </Stack>
+          <Box sx={{ minWidth: { xs: '100%', md: 280 }, maxWidth: '100%' }}>
+            <GradientMenu
+              variant="compact"
+              items={subscriptionDetailToolbarItems}
+              className="min-h-0 w-full justify-center md:justify-end py-2 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
+              onAction={(action) => {
+                switch (action) {
+                  case 'add-item':
+                    setAddItemOpen(true);
+                    break;
+                  case 'invoice':
+                    handleGenerateInvoice();
+                    break;
+                  case 'cancel':
+                    setCancelOpen(true);
+                    break;
+                  case 'renew':
+                    handleRenew();
+                    break;
+                  default:
+                    break;
+                }
+              }}
+            />
+          </Box>
         </Stack>
 
         <Divider sx={{ my: 2 }} />

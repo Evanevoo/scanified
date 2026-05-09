@@ -55,6 +55,10 @@ export function SubscriptionProvider({ children }) {
 
   const mountedRef = useRef(true);
   const channelRef = useRef(null);
+  /** Tracks the last successful (or attempted) fetch so we can throttle background refetches. */
+  const lastFetchAtRef = useRef(0);
+  /** Set to true while a fetch is in flight to avoid stacking concurrent refetches. */
+  const fetchInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!orgId) {
@@ -77,6 +81,11 @@ export function SubscriptionProvider({ children }) {
       if (mountedRef.current && !silent) setLoading(false);
       return;
     }
+    // Avoid stacking concurrent fetches (esp. for silent background refreshes).
+    if (fetchInFlightRef.current) {
+      return;
+    }
+    fetchInFlightRef.current = true;
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -186,6 +195,8 @@ export function SubscriptionProvider({ children }) {
       console.error('SubscriptionContext fetch error:', err);
       if (mountedRef.current && !silent) setError(err.message);
     } finally {
+      lastFetchAtRef.current = Date.now();
+      fetchInFlightRef.current = false;
       if (mountedRef.current && !silent) setLoading(false);
     }
   }, [orgId]);
@@ -246,12 +257,20 @@ export function SubscriptionProvider({ children }) {
     };
   }, [orgId, fetchAll]);
 
-  /** Refetch when the user returns to the tab (Realtime can be off or delayed in some environments). */
+  /**
+   * Refetch when the user returns to the tab (Realtime can be off or delayed in some environments).
+   * Throttled: skip if a fetch already happened recently — Realtime + the explicit refresh event
+   * cover almost all updates, so blasting Supabase with 12 queries on every tab focus was the
+   * single biggest cause of the "page freezes when I switch back to this tab" perception.
+   */
   useEffect(() => {
     if (!orgId) return;
     let debounceTimer = null;
+    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 60_000;
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
+      const sinceLast = Date.now() - lastFetchAtRef.current;
+      if (sinceLast < VISIBILITY_REFRESH_MIN_INTERVAL_MS) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;

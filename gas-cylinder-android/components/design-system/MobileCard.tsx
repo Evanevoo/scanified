@@ -5,8 +5,7 @@ import Animated, {
   useSharedValue, 
   useAnimatedStyle, 
   withSpring,
-  withTiming,
-  interpolate
+  withTiming
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -38,6 +37,7 @@ export default function MobileCard({
   const { colors } = useTheme();
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
+  const motion = colors.motion;
 
   const intensityMap = {
     light: { scale: 0.98, opacity: 0.9 },
@@ -57,32 +57,32 @@ export default function MobileCard({
   const handlePressIn = () => {
     if (disabled) return;
     scale.value = withSpring(config.scale, {
-      damping: 15,
-      stiffness: 300,
+      damping: motion.springDamping,
+      stiffness: motion.springStiffness,
     });
-    opacity.value = withTiming(config.opacity, { duration: 100 });
+    opacity.value = withTiming(config.opacity, { duration: motion.timingMs });
   };
 
   const handlePressOut = () => {
     if (disabled) return;
     scale.value = withSpring(1, {
-      damping: 15,
-      stiffness: 300,
+      damping: motion.springDamping,
+      stiffness: motion.springStiffness,
     });
-    opacity.value = withTiming(1, { duration: 100 });
+    opacity.value = withTiming(1, { duration: motion.timingMs });
   };
 
   const cardStyle = [
     styles.card,
     {
-      backgroundColor: gradient ? 'transparent' : colors.surface,
-      borderColor: colors.border,
+      backgroundColor: gradient ? 'transparent' : colors.glassSurface,
+      borderColor: colors.borderSoft || colors.border,
       ...(elevated && {
         shadowColor: colors.shadow,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.22,
+        shadowRadius: 24,
+        elevation: 10,
       }),
       ...(disabled && {
         opacity: 0.5,
@@ -93,7 +93,7 @@ export default function MobileCard({
 
   const content = gradient ? (
     <LinearGradient
-      colors={colors.gradient || [colors.primary, colors.secondary]}
+      colors={(colors.gradient || [colors.primary, colors.secondary]) as [string, string, ...string[]]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.gradient}
@@ -127,15 +127,15 @@ export default function MobileCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
+    borderRadius: 22,
     borderWidth: 1,
-    padding: 16,
-    marginBottom: 12,
+    padding: 18,
+    marginBottom: 14,
     minHeight: 80, // Ensure adequate touch target
   },
   gradient: {
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 22,
+    padding: 18,
   },
 });
 
