@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, memo } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import { useTheme } from '../context/ThemeContext';
@@ -8,6 +8,12 @@ import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
 import { getNextInvoiceNumbers, resolveInvoiceNumberForRentalPdf } from '../utils/invoiceUtils';
+import {
+  downloadQuickBooksInvoiceCsv,
+  qbCsvInvoiceStorageKeys,
+  QB_CSV_LAST_INV_MAP_KEY,
+  resolveTaxCode,
+} from '../utils/quickBooksInvoiceCsvDownload';
 import {
   applyInvoiceEmailTemplateVars,
   buildRentalInvoiceEmailVarMap,
@@ -41,6 +47,7 @@ import {
   mergeOpenRentalsForBillingBasis,
   summarizeMergedOpenRentalsByProduct,
 } from '../services/openRentalsBillingBasis';
+import { fetchBillingWorkspaceData } from '../services/billingWorkspaceService';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import JSZip from 'jszip';
@@ -48,18 +55,27 @@ import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
 import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
-  Box, Typography, Card, CardContent, Grid, Tabs, Tab, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, Paper, Chip, IconButton,
+  Box, Typography, Card, CardContent, Grid, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, Paper, Chip,
   Button, TextField, InputAdornment, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Alert, TablePagination,
 } from '@mui/material';
 import {
-  Search as SearchIcon, Add as AddIcon, Refresh as RefreshIcon,
-  Visibility as ViewIcon, Edit as EditIcon, Cancel as CancelIcon, Email as EmailIcon,
-  Receipt as InvoiceIcon, TrendingUp, People, Schedule, AccountBalance, Download as DownloadIcon,
-  FolderZip as FolderZipIcon, HelpOutline as HelpOutlineIcon,
+  Search as SearchIcon,
+  People, Schedule, AccountBalance,
 } from '@mui/icons-material';
+import {
+  IoCloudDownloadOutline,
+  IoReceiptOutline,
+  IoMailOutline,
+  IoArchiveOutline,
+  IoAddCircleOutline,
+  IoEyeOutline,
+  IoCreateOutline,
+  IoPersonCircleOutline,
+} from 'react-icons/io5';
+import GradientMenu from '../components/ui/gradient-menu';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -123,9 +139,8 @@ async function runPool(items, concurrency, worker) {
     return i;
   };
   const launch = async () => {
-    while (true) {
-      const i = nextIndex();
-      if (i === null) return;
+    let i;
+    while ((i = nextIndex()) !== null) {
       await worker(items[i], i);
     }
   };
@@ -153,15 +168,6 @@ function qbCsvDatesForBilledMonth(ym) {
   const dueD = new Date(y, m + 1, 0);
   const dueDate = `${dueD.getFullYear()}-${String(dueD.getMonth() + 1).padStart(2, '0')}-${String(dueD.getDate()).padStart(2, '0')}`;
   return { invoiceDate: periodEnd, dueDate };
-}
-
-function resolveTaxCode(gstAmount, pstAmount) {
-  const gst = Number(gstAmount) || 0;
-  const pst = Number(pstAmount) || 0;
-  if (gst > 0 && pst > 0) return 'SSK';
-  if (gst > 0) return 'GST';
-  if (pst > 0) return 'PST';
-  return 'E';
 }
 
 /** Invoice # chips: keyed by customer id and by subscription id (fixes mismatched UUID vs CustomerListID on older rows). */
@@ -232,29 +238,9 @@ function qbExportRowMatchesSub(exportRow, sub) {
   return pr === ps;
 }
 
-const QB_CSV_LAST_INV_MAP_KEY = 'qb_csv_last_invoice_map';
-
-function qbCsvInvoiceStorageKey(row) {
-  if (row?.id != null && String(row.id).trim() !== '') return `id:${String(row.id)}`;
-  return `cust:${String(row?.customer_id || '').trim()}|${String(row?.billing_period || 'monthly').toLowerCase()}`;
-}
-
-function qbCsvInvoiceStorageKeys(row) {
-  const keys = [];
-  const id = String(row?.id || '').trim();
-  const customerId = String(row?.customer_id || '').trim();
-  const customerName = String(row?.customer?.name || row?.customer?.Name || row?.customer_name || '').trim().toLowerCase();
-  const billingPeriod = String(row?.billing_period || 'monthly').toLowerCase();
-  if (id) keys.push(`id:${id}`);
-  if (customerId) keys.push(`cust:${customerId}|${billingPeriod}`);
-  if (customerName) keys.push(`name:${customerName}|${billingPeriod}`);
-  if (keys.length === 0) keys.push(qbCsvInvoiceStorageKey(row));
-  return [...new Set(keys)];
-}
-
 /**
  * Read-only W###### matching the last QuickBooks CSV download for this `sequenceMonth`, then the same
- * formula as `downloadInvoiceCsv` for the current export row order (does not advance invoice_state).
+ * formula as `downloadQuickBooksInvoiceCsv` for the current export row order (does not advance invoice_state).
  */
 function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
   if (!targetSub) return null;
@@ -275,9 +261,6 @@ function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
   }
   if (!exportRows?.length) return null;
   const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-  const now = new Date();
-  const calendarYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const seqMonth = csvOptions?.sequenceMonth || calendarYm;
   const lastNumber = Number(state?.lastNumber);
   const hasLastNumber = Number.isFinite(lastNumber);
   const startNumber = hasLastNumber ? (lastNumber + 1) : 10000;
@@ -301,25 +284,6 @@ function getInvoiceNumberFromLastCsvMap(targetSub) {
     return null;
   } catch {
     return null;
-  }
-}
-
-/** Short label for lease agreement end date (matches common Jan 1 renewal wording). */
-function formatLeaseAgreementExpiry(endDateStr) {
-  if (!endDateStr) return '';
-  const s = String(endDateStr).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
-  const [, m, d] = s.split('-').map((x) => parseInt(x, 10));
-  if (m === 1 && d === 1) return 'Yearly lease · renews Jan 1';
-  try {
-    const shown = new Date(`${s}T12:00:00`).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-    return shown ? `Lease ends ${shown}` : '';
-  } catch {
-    return '';
   }
 }
 
@@ -389,7 +353,73 @@ function expandLeaseMatchKeys(subCustomerId, customer, allCustomers) {
   return keys;
 }
 
-const SUBSCRIPTION_TAB_FILTERS = ['all', 'monthly', 'lease'];
+
+/**
+ * Isolated search field. Owns its own input state so typing only re-renders
+ * this component (not the entire 4000+ line Subscriptions page with 50 table
+ * rows × 6 gradient-menu items each). The debounced value is bubbled up via
+ * `onDebouncedChange` so the parent only re-renders once typing settles.
+ */
+const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchField(
+  { onDebouncedChange },
+  ref,
+) {
+  const [value, setValue] = useState('');
+  const debounced = useDebounce(value, 280);
+  const onDebouncedChangeRef = useRef(onDebouncedChange);
+  useEffect(() => {
+    onDebouncedChangeRef.current = onDebouncedChange;
+  }, [onDebouncedChange]);
+  const lastSentRef = useRef('');
+  useEffect(() => {
+    if (lastSentRef.current === debounced) return;
+    lastSentRef.current = debounced;
+    onDebouncedChangeRef.current?.(debounced);
+  }, [debounced]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      clear: () => {
+        setValue('');
+        lastSentRef.current = '';
+        onDebouncedChangeRef.current?.('');
+      },
+      getValue: () => value,
+    }),
+    [value],
+  );
+
+  const isPending = value !== debounced;
+
+  return (
+    <TextField
+      size="small"
+      placeholder="Search customers..."
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      sx={{
+        ml: 'auto',
+        minWidth: 240,
+        '& .MuiOutlinedInput-root': { borderRadius: 2 },
+        opacity: isPending ? 0.85 : 1,
+        transition: 'opacity 0.15s ease',
+      }}
+      InputProps={{
+        startAdornment: (
+          <InputAdornment position="start">
+            <SearchIcon fontSize="small" />
+          </InputAdornment>
+        ),
+        endAdornment: isPending ? (
+          <InputAdornment position="end">
+            <CircularProgress size={14} thickness={5} />
+          </InputAdornment>
+        ) : undefined,
+      }}
+    />
+  );
+}));
 
 export default function Subscriptions() {
   const { organization, user, profile } = useAuth();
@@ -398,12 +428,13 @@ export default function Subscriptions() {
   const primaryColor = organizationColors?.primary || '#40B5AD';
   const navigate = useNavigate();
 
-  const [tab, setTab] = useState(0);
-  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchFieldRef = useRef(null);
+  const handleClearSearch = useCallback(() => {
+    searchFieldRef.current?.clear();
+  }, []);
   const [tablePage, setTablePage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
-  /** Avoid re-filtering / full table work on every keystroke */
-  const debouncedSearch = useDebounce(search, 280);
   const [createOpen, setCreateOpen] = useState(false);
   const [newSub, setNewSub] = useState({ customer_id: '', billing_period: 'monthly' });
   const [saving, setSaving] = useState(false);
@@ -411,7 +442,6 @@ export default function Subscriptions() {
   const [actionSuccess, setActionSuccess] = useState(null);
   /** Raw DB rows; folded into `legacyRows` in useMemo so bottle realtime updates do not re-hit Supabase. */
   const [legacyRentalsRaw, setLegacyRentalsRaw] = useState([]);
-  const [legacyLeaseRaw, setLegacyLeaseRaw] = useState([]);
   const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [remitAddress, setRemitAddress] = useState(null);
@@ -449,9 +479,8 @@ export default function Subscriptions() {
   const [bulkEmailing, setBulkEmailing] = useState(false);
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
   const [zipExporting, setZipExporting] = useState(false);
-  /** 'monthly' | 'yearly' while a ZIP export is running (for progress copy). */
-  const [zipExportBillingPeriod, setZipExportBillingPeriod] = useState(null);
   const [zipExportProgress, setZipExportProgress] = useState({ done: 0, total: 0 });
+  const [activeLeaseAgreements, setActiveLeaseAgreements] = useState([]);
   const [cycleInvoiceLookup, setCycleInvoiceLookup] = useState(emptyCycleInvoiceLookup);
   /** Bumps after saving a custom invoice # so the grid refetches cycle invoice status. */
   const [invoiceLookupRefreshKey, setInvoiceLookupRefreshKey] = useState(0);
@@ -460,10 +489,6 @@ export default function Subscriptions() {
   const [invoiceNoDraft, setInvoiceNoDraft] = useState('');
   const [savingInvoiceNo, setSavingInvoiceNo] = useState(false);
   const [invoiceNoSaveError, setInvoiceNoSaveError] = useState('');
-  useEffect(() => {
-    if (tab >= SUBSCRIPTION_TAB_FILTERS.length) setTab(0);
-  }, [tab]);
-  const defaultTemplateBody = 'Your invoice {invoice_number} for {amount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.';
   const defaultTemplateSignature = 'Sincerely,\n{organization_name}';
   const loadEmailTemplateSettings = useCallback((organizationIdOverride) => {
     try {
@@ -724,6 +749,34 @@ export default function Subscriptions() {
   }, [organization?.id]);
 
   useEffect(() => {
+    let active = true;
+    const loadActiveLeaseAgreements = async () => {
+      if (!profile?.organization_id) {
+        if (active) setActiveLeaseAgreements([]);
+        return;
+      }
+      try {
+        const workspace = await fetchBillingWorkspaceData(profile.organization_id);
+        if (!active) return;
+        setActiveLeaseAgreements(
+          (workspace?.leaseAgreements || []).map((a) => ({
+            id: a.id,
+            customer_id: a.customer_id,
+            customer_name: a.customer_name,
+            status: a.status,
+            max_asset_count: a.max_asset_count,
+            bottle_id: a.bottle_id,
+          })),
+        );
+      } catch {
+        if (active) setActiveLeaseAgreements([]);
+      }
+    };
+    loadActiveLeaseAgreements();
+    return () => { active = false; };
+  }, [profile?.organization_id]);
+
+  useEffect(() => {
     const bump = () => setLocalRatesVersion((v) => v + 1);
     const onStorage = (e) => {
       if (!e?.key) return;
@@ -758,20 +811,6 @@ export default function Subscriptions() {
     [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, ctx.customers, localRatesVersion]
   );
 
-  /** Normalized customer keys from legacy lease_agreements import (align Period with Lease chip when contracts use different id shape). */
-  const legacyLeaseAgreementCustomerKeys = useMemo(() => {
-    const s = new Set();
-    for (const a of legacyLeaseRaw || []) {
-      for (const v of [a.customer_id, a.customer_name]) {
-        const t = String(v || '').trim();
-        if (!t) continue;
-        s.add(normalize(t));
-        s.add(normalizeName(t));
-      }
-    }
-    return s;
-  }, [legacyLeaseRaw]);
-
   const resolveDisplayUnitPrice = useCallback((pricingRow, item) =>
     resolveDisplayUnitFromMaps({
       row: pricingRow,
@@ -781,6 +820,71 @@ export default function Subscriptions() {
       defaultMonthly: defaultUnitRateByPeriod.monthly,
       defaultYearly: defaultUnitRateByPeriod.yearly,
     }), [customerOverrideMap, assetPricingMap, defaultUnitRateByPeriod]);
+
+  const leaseCoveredCountByCustomerKey = useMemo(() => {
+    const map = new Map();
+    const add = (key, count) => {
+      const k = normalize(key);
+      const n = Number(count) || 0;
+      if (!k || n <= 0) return;
+      map.set(k, (map.get(k) || 0) + n);
+    };
+    const addName = (key, count) => {
+      const k = normalizeName(key);
+      const n = Number(count) || 0;
+      if (!k || n <= 0) return;
+      map.set(k, (map.get(k) || 0) + n);
+    };
+    const customerById = new Map();
+    const customerByName = new Map();
+    for (const c of (ctx.customers || [])) {
+      const ids = [c?.id, c?.CustomerListID].map((v) => normalize(v)).filter(Boolean);
+      for (const id of ids) customerById.set(id, c);
+      const nk = normalizeName(c?.name || c?.Name || '');
+      if (nk) customerByName.set(nk, c);
+    }
+    const bottleCountByCustomer = new Map();
+    for (const b of (ctx.bottles || [])) {
+      const k = normalize(b.assigned_customer || b.customer_id);
+      if (!k) continue;
+      bottleCountByCustomer.set(k, (bottleCountByCustomer.get(k) || 0) + 1);
+    }
+    for (const a of (activeLeaseAgreements || [])) {
+      const st = String(a?.status || '').trim().toLowerCase();
+      if (st === 'cancelled' || st === 'expired' || st === 'renewed') continue;
+      const cid = normalize(a.customer_id);
+      const cname = normalizeName(a.customer_name);
+      const cap = parseInt(String(a.max_asset_count ?? ''), 10);
+      const covered =
+        a.bottle_id
+          ? 1
+          : (Number.isFinite(cap) && cap > 0
+              ? cap
+              : (bottleCountByCustomer.get(cid) || 0));
+      const matchedCustomer =
+        (cid && customerById.get(cid)) ||
+        (cname && customerByName.get(cname)) ||
+        null;
+      const agreementIdKeys = new Set();
+      const agreementNameKeys = new Set();
+      if (cid) agreementIdKeys.add(cid);
+      const rawName = normalizeName(a.customer_name);
+      if (rawName) agreementNameKeys.add(rawName);
+      if (matchedCustomer) {
+        const mid = normalize(matchedCustomer.id);
+        const mlist = normalize(matchedCustomer.CustomerListID);
+        const mname = normalizeName(matchedCustomer.name);
+        const mName = normalizeName(matchedCustomer.Name);
+        if (mid) agreementIdKeys.add(mid);
+        if (mlist) agreementIdKeys.add(mlist);
+        if (mname) agreementNameKeys.add(mname);
+        if (mName) agreementNameKeys.add(mName);
+      }
+      agreementIdKeys.forEach((k) => add(k, covered));
+      agreementNameKeys.forEach((k) => addName(k, covered));
+    }
+    return map;
+  }, [activeLeaseAgreements, ctx.bottles, ctx.customers]);
 
   const enriched = useMemo(() => {
     const billingData = {
@@ -821,11 +925,9 @@ export default function Subscriptions() {
         const ck = normalize(String(c.customer_id || '').trim());
         return ck && leaseKeys.has(ck);
       });
-      const matchesLegacyLeaseAgreement = [...leaseKeys].some((k) => legacyLeaseAgreementCustomerKeys.has(k));
       const forceYearlyPeriod =
         customer?.billing_mode === 'lease' ||
-        matchesLeaseContract ||
-        matchesLegacyLeaseAgreement;
+        matchesLeaseContract;
       const effectiveBillingPeriod = forceYearlyPeriod
         ? 'yearly'
         : canonicalBillingPeriod(sub.billing_period);
@@ -868,13 +970,14 @@ export default function Subscriptions() {
               customer?.Name ||
               ''
           ).trim() || sub.customer_id;
-        const groups = groupBillableUnitCountsByProductCode(
+        const groupsRaw = groupBillableUnitCountsByProductCode(
           billingData.bottles,
           billingData.rentals,
           subscriptionMatchKey,
           customer,
           { allCustomers: billingData.customers },
         );
+        const groups = groupsRaw;
         totalPerCycle = computeSubscriptionBillingCycleTotal(
           { ...sub, billing_period: effectiveBillingPeriod },
           customer,
@@ -922,7 +1025,7 @@ export default function Subscriptions() {
     assetPricingMap,
     defaultUnitRateByPeriod,
     organization?.id,
-    legacyLeaseAgreementCustomerKeys,
+    leaseCoveredCountByCustomerKey,
   ]);
 
   const customersWithBottlesNoSubscription = useMemo(() => {
@@ -1042,11 +1145,9 @@ export default function Subscriptions() {
               const ck = normalize(String(c.customer_id || '').trim());
               return ck && leaseKeys.has(ck);
             });
-            const matchesLegacyLeaseAgreement = [...leaseKeys].some((k) => legacyLeaseAgreementCustomerKeys.has(k));
             const forceYearly =
               customer?.billing_mode === 'lease' ||
-              matchesLeaseContract ||
-              matchesLegacyLeaseAgreement;
+              matchesLeaseContract;
             return forceYearly ? 'yearly' : 'monthly';
           })(),
           itemCount: rentalItemCount > 0 ? rentalItemCount : group.bottleCount,
@@ -1059,12 +1160,11 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, legacyLeaseAgreementCustomerKeys, matchCustomerRecordBySubscriptionId]);
+  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId]);
 
   useEffect(() => {
     if (!organization?.id) {
       setLegacyRentalsRaw([]);
-      setLegacyLeaseRaw([]);
       return;
     }
     let active = true;
@@ -1081,22 +1181,6 @@ export default function Subscriptions() {
       } catch {
         if (active) setLegacyRentalsRaw([]);
       }
-      if (!active) return;
-      try {
-        const { data: leaseData, error: leaseErr } = await supabase
-          .from('lease_agreements')
-          .select(
-            'id, customer_id, customer_name, agreement_number, bottle_id, max_asset_count, annual_amount, billing_frequency, next_billing_date, start_date, end_date, status'
-          )
-          .eq('organization_id', organization.id)
-          .not('status', 'in', '("cancelled","expired","renewed")');
-        if (!active) return;
-        if (leaseErr) throw leaseErr;
-        setLegacyLeaseRaw(leaseData || []);
-      } catch (err) {
-        console.warn('Error loading lease agreements for rentals page:', err);
-        if (active) setLegacyLeaseRaw([]);
-      }
     })();
     return () => { active = false; };
   }, [organization?.id]);
@@ -1107,6 +1191,7 @@ export default function Subscriptions() {
       const legacyBottleMaps = buildBottleLookupMaps(ctx.bottles || []);
       const grouped = (legacyRentalsRaw || [])
         .filter((r) => {
+          if (String(r?.rental_type || '').toLowerCase() === 'yearly') return false;
           // DNS billables ("Delivered Not Scanned") should count.
           // Exclude DNS records that represent return exceptions.
           const desc = String(r?.dns_description || '').toLowerCase();
@@ -1137,7 +1222,7 @@ export default function Subscriptions() {
             customer_name: resolvedCustomer?.name || resolvedCustomer?.Name || fallbackName,
             customer: displayCustomer,
             itemCount: 0,
-            billing_period: row.rental_type === 'yearly' ? 'yearly' : 'monthly',
+            billing_period: 'monthly',
             totalPerCycle: 0,
             bottleIdentifiers: [],
             bottleIds: [],
@@ -1182,55 +1267,8 @@ export default function Subscriptions() {
       rows = [];
     }
 
-    let leaseRows = [];
-    try {
-      leaseRows = (legacyLeaseRaw || []).map((a) => {
-        const resolvedCustomer = resolveCustomer(a.customer_id || a.customer_name, a.customer_name);
-        const displayName =
-          resolvedCustomer?.name ||
-          resolvedCustomer?.Name ||
-          a.customer_name ||
-          a.customer_id ||
-          'Assigned customer';
-        const itemCount = Number.parseInt(String(a.max_asset_count ?? ''), 10);
-        const leaseMaxAssetCount =
-          Number.isFinite(itemCount) && itemCount > 0 ? itemCount : null;
-        const agreementCode = String(a.agreement_number || '').trim();
-        const productCounts = {};
-
-        const baseAnnual = parseFloat(a.annual_amount) || 0;
-        const baseCust = resolvedCustomer || { name: displayName, Name: displayName };
-        const cidForPo = resolvedCustomer?.CustomerListID || resolvedCustomer?.id || a.customer_id || a.customer_name;
-        const customerMerged = mergeCustomerDirectoryFields(baseCust, cidForPo, matchCustomerRecordBySubscriptionId);
-
-        return {
-          id: `lease-agreement-${a.id}`,
-          customer: customerMerged,
-          customer_id: customerMerged?.CustomerListID || customerMerged?.id || a.customer_id || a.customer_name,
-          billing_period: 'yearly',
-          itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : 1,
-          totalPerCycle: baseAnnual,
-          lease_agreement_annual: baseAnnual,
-          lease_max_asset_count: leaseMaxAssetCount,
-          lease_bottle_id: a.bottle_id || null,
-          lease_end_date: a.end_date || null,
-          bottleIdentifiers: [],
-          bottleIds: [],
-          productCounts,
-          next_billing_date: a.next_billing_date || a.end_date || null,
-          status: String(a.status || 'active').toLowerCase(),
-          isVirtual: true,
-          legacySource: 'lease_agreements',
-          notes: agreementCode ? `Agreement ${agreementCode}` : undefined,
-        };
-      });
-    } catch (err) {
-      console.warn('Error mapping lease agreements for rentals page:', err);
-      leaseRows = [];
-    }
-
-    return [...rows, ...leaseRows];
-  }, [legacyRentalsRaw, legacyLeaseRaw, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
+    return rows;
+  }, [legacyRentalsRaw, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -1255,27 +1293,18 @@ export default function Subscriptions() {
     );
     // Legacy rentals table: only add when this customer is not already in subscriptions/bottle rows.
     const extraLegacy = (legacyRows || []).filter((r) => {
-      if (r.legacySource === 'lease_agreements') return false;
       const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
       return k && !existingKeys.has(k);
     });
-    // Legacy lease_agreements: only add when this customer is not already on a subscription/virtual row.
-    // Otherwise the same customer appears twice and Lease tab counts (and totals) double.
-    const leaseAgreementRows = (legacyRows || []).filter((r) => {
-      if (r.legacySource !== 'lease_agreements') return false;
-      const k = String(r.customer_id || r.customer?.name || '').trim().toLowerCase();
-      return k && !existingKeys.has(k);
-    });
-    const combined = [...merged, ...extraLegacy, ...leaseAgreementRows].filter((row) => {
+    const combined = [...merged, ...extraLegacy].filter((row) => {
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
       const fromLegacyRentals = row.legacySource === 'rentals_table';
-      const fromLeaseAgreements = row.legacySource === 'lease_agreements';
       const isPersistedSubscriptionRow = row.id != null && subscriptionIds.has(row.id);
 
       // Drop rows with no quantity and no cycle total, unless they're from the
-      // legacy rentals / lease_agreements tables or are real subscription records.
-      if (!fromLegacyRentals && !fromLeaseAgreements && !isPersistedSubscriptionRow && itemCount <= 0 && rawTotal <= 0) {
+      // legacy rentals table or are real subscription records.
+      if (!fromLegacyRentals && !isPersistedSubscriptionRow && itemCount <= 0 && rawTotal <= 0) {
         return false;
       }
 
@@ -1289,7 +1318,7 @@ export default function Subscriptions() {
         !row.isVirtual &&
         Boolean(String(row.customer_id || '').trim());
 
-      if (!inCustomerDirectory && !fromLegacyRentals && !fromLeaseAgreements && !pricedLiveSubscription && !isPersistedSubscriptionRow) {
+      if (!inCustomerDirectory && !fromLegacyRentals && !pricedLiveSubscription && !isPersistedSubscriptionRow) {
         return false;
       }
 
@@ -1330,46 +1359,6 @@ export default function Subscriptions() {
     }
 
     return combined.map((row) => {
-      if (row.legacySource === 'lease_agreements') {
-        const baseAnnual = parseFloat(row.lease_agreement_annual);
-        const safeBase = Number.isFinite(baseAnnual) ? baseAnnual : (parseFloat(row.totalPerCycle) || 0);
-        let displayedAnnual = safeBase;
-        let displayItems = parseFloat(row.itemCount) || 1;
-        if (!row.lease_bottle_id) {
-          const cid = normalize(row.customer_id);
-          let assigned = 0;
-          for (const b of ctx.bottles || []) {
-            const bk = normalize(b.assigned_customer || b.customer_id);
-            if (bk && bk === cid) assigned += 1;
-          }
-          const cap =
-            row.lease_max_asset_count != null && row.lease_max_asset_count !== ''
-              ? parseFloat(row.lease_max_asset_count)
-              : NaN;
-          const hasCap = Number.isFinite(cap) && cap > 0;
-
-          if (hasCap) {
-            const covered = assigned <= 0 ? 0 : Math.min(assigned, cap);
-            displayItems = covered;
-            displayedAnnual = safeBase * (covered / cap);
-          } else {
-            const effective = assigned > 0 ? assigned : 1;
-            displayedAnnual = safeBase * effective;
-            displayItems = effective;
-          }
-        } else {
-          displayItems = 1;
-        }
-        const rounded = Math.round(displayedAnnual * 100) / 100;
-        const expiryLabel = formatLeaseAgreementExpiry(row.lease_end_date);
-        return {
-          ...row,
-          totalPerCycle: rounded,
-          itemCount: displayItems,
-          lease_expiry_label: expiryLabel || undefined,
-        };
-      }
-
       const customerKey = normalize(row.customer_id);
       const hasActiveLeaseContract = !!findActiveLeaseContract(
         ctx.leaseContracts || [],
@@ -1387,6 +1376,24 @@ export default function Subscriptions() {
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
+      const leaseCoverKeys = [
+        row.customer_id,
+        row.customer?.id,
+        row.customer?.CustomerListID,
+        row.customer?.name,
+        row.customer?.Name,
+        ...collectNormalizedCustomerKeysForPricingRow(row),
+      ].map((v) => normalize(v)).filter(Boolean);
+      const leaseCoverNameKeys = [
+        row.customer?.name,
+        row.customer?.Name,
+        row.customer_name,
+      ].map((v) => normalizeName(v)).filter(Boolean);
+      const leaseCoveredUnits = Math.max(
+        ...leaseCoverKeys.map((k) => leaseCoveredCountByCustomerKey.get(k) || 0),
+        ...leaseCoverNameKeys.map((k) => leaseCoveredCountByCustomerKey.get(k) || 0),
+        0,
+      );
       if (row.isVirtual) {
         const legacyCount = legacyCountsByCustomer.get(customerKey) || 0;
         if (legacyCount > computedItemCount) computedItemCount = legacyCount;
@@ -1439,6 +1446,33 @@ export default function Subscriptions() {
       // and the blanket __all__ branch below replaces the total with one rate × total qty,
       // wiping per-SKU customer overrides.
       let usedSpecificProductOverride = false;
+      const shouldApplyLeaseCoverageToMonthly =
+        canonicalBillingPeriod(row.billing_period) === 'monthly'
+        && String(row.customer?.billing_mode || '').toLowerCase() !== 'lease';
+      if (!preserveLeaseContractTotal && shouldApplyLeaseCoverageToMonthly && leaseCoveredUnits > 0) {
+        let coveredLeft = leaseCoveredUnits;
+        if (effectiveProductCounts && typeof effectiveProductCounts === 'object') {
+          const adjusted = {};
+          for (const [code, qtyRaw] of Object.entries(effectiveProductCounts)) {
+            const qty = parseFloat(qtyRaw) || 0;
+            if (qty <= 0) continue;
+            if (coveredLeft <= 0) {
+              adjusted[code] = qty;
+              continue;
+            }
+            const deduct = Math.min(qty, coveredLeft);
+            coveredLeft -= deduct;
+            const nextQty = qty - deduct;
+            if (nextQty > 0) adjusted[code] = nextQty;
+          }
+          effectiveProductCounts = Object.keys(adjusted).length > 0 ? adjusted : null;
+          computedItemCount = effectiveProductCounts
+            ? Object.values(effectiveProductCounts).reduce((s, n) => s + (parseFloat(n) || 0), 0)
+            : 0;
+        } else {
+          computedItemCount = Math.max(0, computedItemCount - leaseCoveredUnits);
+        }
+      }
       if (!preserveLeaseContractTotal && effectiveProductCounts && typeof effectiveProductCounts === 'object') {
         const rowForPricing = { ...row, billing_period: period };
         const recalculated = Object.entries(effectiveProductCounts).reduce((sum, [productCode, qtyRaw]) => {
@@ -1516,7 +1550,7 @@ export default function Subscriptions() {
       }
 
       return { ...row, itemCount: computedItemCount, ...(effectiveProductCounts ? { productCounts: effectiveProductCounts } : {}), totalPerCycle: total };
-    });
+    }).filter((row) => canonicalBillingPeriod(row.billing_period) !== 'yearly');
   }, [
     enriched,
     customersWithBottlesNoSubscription,
@@ -1530,6 +1564,7 @@ export default function Subscriptions() {
     defaultUnitRateByPeriod,
     organization?.id,
     customerResolvers,
+    leaseCoveredCountByCustomerKey,
   ]);
 
   /** Stable key so invoice-status fetch does not re-run when `allRows` gets a new array reference but same customers/subs. */
@@ -1546,28 +1581,6 @@ export default function Subscriptions() {
         .filter(Boolean)
     )].sort().join('\u0001');
     return `${customerIds}\u0002${subscriptionIds}`;
-  }, [allRows]);
-
-  const derivedMrr = useMemo(() => {
-    return allRows
-      .filter((r) => r.status === 'active')
-      .reduce((sum, row) => {
-        const total = parseFloat(row.totalPerCycle) || 0;
-        const period = String(row.billing_period || 'monthly').toLowerCase();
-        if (period === 'yearly') return sum + (total / 12);
-        return sum + total;
-      }, 0);
-  }, [allRows]);
-
-  const derivedArr = useMemo(() => {
-    return allRows
-      .filter((r) => r.status === 'active')
-      .reduce((sum, row) => {
-        const total = parseFloat(row.totalPerCycle) || 0;
-        const period = String(row.billing_period || 'monthly').toLowerCase();
-        if (period === 'yearly') return sum + total;
-        return sum + (total * 12);
-      }, 0);
   }, [allRows]);
 
   const derivedNextBilling = useMemo(() => {
@@ -1595,51 +1608,6 @@ export default function Subscriptions() {
       .reduce((sum, r) => sum + (parseFloat(r.itemCount) || 0), 0);
   }, [allRows]);
 
-  const leaseCustomerIds = useMemo(() => {
-    const ids = new Set();
-    for (const r of (legacyRows || [])) {
-      if (r.legacySource === 'lease_agreements') {
-        const k = normalize(r.customer_id);
-        if (k) ids.add(k);
-      }
-    }
-    for (const c of (ctx.leaseContracts || [])) {
-      const k = normalize(c.customer_id);
-      if (k) ids.add(k);
-    }
-    for (const row of enriched) {
-      if (row.customer?.billing_mode === 'lease') {
-        const k = normalize(row.customer_id);
-        if (k) ids.add(k);
-      }
-    }
-    return ids;
-  }, [legacyRows, ctx.leaseContracts, enriched]);
-
-  const isLeaseRow = useCallback((row) => {
-    if (row.legacySource === 'lease_agreements') return true;
-    if (row.customer?.billing_mode === 'lease') return true;
-    const k = normalize(row.customer_id);
-    if (k && leaseCustomerIds.has(k)) return true;
-    return false;
-  }, [leaseCustomerIds]);
-
-  const tabRowCounts = useMemo(() => {
-    const isNotTerminalRow = (s) => {
-      const st = String(s.status || '').toLowerCase();
-      return st !== 'cancelled' && st !== 'expired';
-    };
-    const monthly = allRows.filter(
-      (s) => !isLeaseRow(s) && isNotTerminalRow(s)
-    ).length;
-    /** All lease-tagged rows (contracts + billing_mode + legacy import), not only lease_agreements table. */
-    const lease = allRows.filter(
-      (s) => isLeaseRow(s) && isNotTerminalRow(s)
-    ).length;
-    const active = monthly + lease;
-    return { monthly, lease, active };
-  }, [allRows, isLeaseRow]);
-
   const termsCounts = useMemo(() => {
     const counts = { net30: 0, credit_card: 0, other: 0 };
     for (const row of allRows) {
@@ -1653,20 +1621,6 @@ export default function Subscriptions() {
 
   const filtered = useMemo(() => {
     let list = allRows;
-    const filter = SUBSCRIPTION_TAB_FILTERS[tab];
-    const isNotTerminal = (s) => {
-      const st = String(s.status || '').toLowerCase();
-      return st !== 'cancelled' && st !== 'expired';
-    };
-    if (filter === 'monthly') {
-      list = list.filter(
-        (s) => !isLeaseRow(s) && isNotTerminal(s)
-      );
-    } else if (filter === 'lease') {
-      list = list.filter(
-        (s) => isLeaseRow(s) && isNotTerminal(s)
-      );
-    }
 
     if (termsFilter !== 'all') {
       list = list.filter((s) => {
@@ -1692,7 +1646,7 @@ export default function Subscriptions() {
       });
     }
     return list;
-  }, [allRows, tab, debouncedSearch, termsFilter, isLeaseRow]);
+  }, [allRows, debouncedSearch, termsFilter]);
 
   const pagedFiltered = useMemo(() => {
     const start = tablePage * rowsPerPage;
@@ -1701,7 +1655,7 @@ export default function Subscriptions() {
 
   useEffect(() => {
     setTablePage(0);
-  }, [tab, termsFilter, debouncedSearch]);
+  }, [termsFilter, debouncedSearch]);
 
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(filtered.length / rowsPerPage) - 1);
@@ -1942,7 +1896,10 @@ export default function Subscriptions() {
         }
       }
 
-      const exported = downloadInvoiceCsv((allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0));
+      const exported = downloadQuickBooksInvoiceCsv(
+        (allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0),
+        { getCurrentCycleRange },
+      );
 
       if (subscriptionCreated === 0 && legacyCreated === 0) {
         setActionSuccess('No active rentals to invoice right now.');
@@ -1967,133 +1924,6 @@ export default function Subscriptions() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const downloadInvoiceCsv = (activeRows, options = {}) => {
-    const filePrefix = options.filePrefix || 'quickbooks_invoices';
-    if (!activeRows || activeRows.length === 0) return 0;
-    const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-    const now = new Date();
-    const calendarYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seqMonth = options.sequenceMonth || calendarYm;
-    const lastNumber = Number(state?.lastNumber);
-    const hasLastNumber = Number.isFinite(lastNumber);
-    const startNumber = hasLastNumber ? (lastNumber + 1) : 10000;
-
-    let invoiceDate = options.invoiceDate;
-    let dueDate = options.dueDate;
-    if (!invoiceDate || !dueDate) {
-      const c = getCurrentCycleRange();
-      invoiceDate = invoiceDate || c.periodEnd;
-      dueDate = dueDate || c.dueDate;
-    }
-
-    let existingMap = {};
-    try {
-      const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed?.seqMonth === seqMonth && parsed?.byRowKey && typeof parsed.byRowKey === 'object') {
-          existingMap = parsed.byRowKey;
-        }
-      }
-    } catch {
-      existingMap = {};
-    }
-
-    const parseInvoiceNo = (v) => {
-      const m = String(v || '').trim().match(/^W(\d{1,})$/i);
-      return m ? parseInt(m[1], 10) : null;
-    };
-
-    const usedNumbers = new Set(
-      Object.values(existingMap)
-        .map(parseInvoiceNo)
-        .filter((n) => Number.isFinite(n))
-    );
-    const assignedInvoiceByIdx = new Map();
-    let nextNumber = startNumber;
-    activeRows.forEach((row, idx) => {
-      let existingInvoice = null;
-      for (const k of qbCsvInvoiceStorageKeys(row)) {
-        const candidate = existingMap[k];
-        if (candidate) {
-          existingInvoice = String(candidate).trim();
-          break;
-        }
-      }
-      if (existingInvoice) {
-        assignedInvoiceByIdx.set(idx, existingInvoice);
-        const parsedNum = parseInvoiceNo(existingInvoice);
-        if (Number.isFinite(parsedNum)) usedNumbers.add(parsedNum);
-        return;
-      }
-      while (usedNumbers.has(nextNumber)) nextNumber += 1;
-      const generated = `W${String(nextNumber).padStart(5, '0')}`;
-      assignedInvoiceByIdx.set(idx, generated);
-      usedNumbers.add(nextNumber);
-      nextNumber += 1;
-    });
-
-    const rows = activeRows.map((row, idx) => {
-      const subtotal = parseFloat(row.totalPerCycle) || 0;
-      const gst = +(subtotal * 0.05).toFixed(2);
-      const pst = +(subtotal * 0.06).toFixed(2);
-      const tax = +(gst + pst).toFixed(2);
-      const total = +(subtotal + tax).toFixed(2);
-      const txCode = resolveTaxCode(gst, pst);
-      return {
-        'Invoice#': assignedInvoiceByIdx.get(idx) || `W${String(startNumber + idx).padStart(5, '0')}`,
-        'Customer Number': row.customer_id || '',
-        'Total': total,
-        'Date': invoiceDate,
-        'GST': gst,
-        'PST': pst,
-        'TX': tax,
-        'TX code': txCode,
-        'Due date': dueDate,
-        'Rate': subtotal,
-        'Name': row.customer?.name || row.customer?.Name || row.customer_id || '',
-        '# of Bottles': parseFloat(row.itemCount) || 0,
-      };
-    });
-
-    try {
-      const byRowKey = { ...existingMap };
-      activeRows.forEach((row, idx) => {
-        const invoiceNo = assignedInvoiceByIdx.get(idx) || `W${String(startNumber + idx).padStart(5, '0')}`;
-        qbCsvInvoiceStorageKeys(row).forEach((key) => {
-          byRowKey[key] = invoiceNo;
-        });
-      });
-      sessionStorage.setItem(
-        QB_CSV_LAST_INV_MAP_KEY,
-        JSON.stringify({ seqMonth, byRowKey, savedAt: Date.now() })
-      );
-    } catch {
-      /* ignore */
-    }
-
-    const assignedNumbers = rows
-      .map((r) => parseInvoiceNo(r['Invoice#']))
-      .filter((n) => Number.isFinite(n));
-    const maxAssigned = assignedNumbers.length > 0 ? Math.max(...assignedNumbers) : (hasLastNumber ? lastNumber : 10000);
-
-    localStorage.setItem('invoice_state', JSON.stringify({
-      lastNumber: maxAssigned,
-      lastMonth: seqMonth,
-    }));
-
-    const header = Object.keys(rows[0]).join(',');
-    const csv = [header, ...rows.map((r) => Object.values(r).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filePrefix}_${invoiceDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    return rows.length;
   };
 
   /** Same enriched rows as the grid: totals use computeSubscriptionBillingCycleTotal / totalPerCycle. */
@@ -2171,7 +2001,6 @@ export default function Subscriptions() {
       const snapshotGroupsCache = new Map();
       const mapped = [];
       for (const row of rows) {
-        if (row.legacySource === 'lease_agreements') { mapped.push(row); continue; }
         const leaseKeys = expandLeaseMatchKeys(row.customer_id, row.customer, ctx.customers);
         const matchesLeaseContract = (ctx.leaseContracts || []).some((c) => {
           if (organization?.id && c.organization_id && c.organization_id !== organization?.id) return false;
@@ -2284,6 +2113,10 @@ export default function Subscriptions() {
     setActionSuccess(null);
     setSaving(true);
     try {
+      if (period === 'yearly') {
+        setActionError('Yearly lease QuickBooks CSV is available on the Lease agreements page.');
+        return;
+      }
       const result = await buildQbCsvExportRows(period, cohort);
       if (result.invalidBillingMonth) {
         setActionError('Select a valid billing month for the QuickBooks export.');
@@ -2312,9 +2145,10 @@ export default function Subscriptions() {
             ? '_creditcard'
             : '';
       const monthTag = qbCsvBillingMonth === 'live' ? 'live' : qbCsvBillingMonth;
-      const exported = downloadInvoiceCsv(rows, {
+      const exported = downloadQuickBooksInvoiceCsv(rows, {
         ...csvOptions,
         filePrefix: `quickbooks_invoices_${period}${cohortSuffix}_${monthTag}`,
+        getCurrentCycleRange,
       });
       const cohortLabel =
         period === 'monthly' && cohort === 'net30'
@@ -3277,7 +3111,7 @@ export default function Subscriptions() {
       const summaryWs = XLSX.utils.json_to_sheet(singleRowOrdered, { header: orderedColumns });
       XLSX.utils.book_append_sheet(wb, summaryWs, 'Invoice');
       const safeCustomer = String(sub.customer?.name || sub.customer?.Name || sub.customer_id || 'customer')
-        .replace(/[^\w\-]+/g, '_');
+        .replace(/[^\w-]+/g, '_');
       XLSX.writeFile(wb, `quickbooks_invoice_${safeCustomer}_${invoiceDate}.xlsx`);
       setActionSuccess(`Excel exported for ${sub.customer?.name || sub.customer?.Name || sub.customer_id}.`);
     } catch (err) {
@@ -3449,7 +3283,7 @@ export default function Subscriptions() {
         || emailRow?.customer_id
         || 'Customer';
       const pdfBase64 = doc.output('datauristring').split(',')[1];
-      const pdfFileName = `Invoice_${String(customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const pdfFileName = `Invoice_${String(customerName).replace(/[^\w-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
       const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const savedEmailTemplate = getSavedEmailTemplate();
       const remitName = String(remitAddress?.remit_name || organization?.name || 'your organization').trim();
@@ -3655,7 +3489,7 @@ export default function Subscriptions() {
           ? applyInvoiceEmailTemplateVars(bulkSubjectRaw, emailVars)
           : `Invoice ${pdfInvNo} – ${customerName} – ${orgName}`;
         const pdfBase64 = doc.output('datauristring').split(',')[1];
-        const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w\-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+        const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
         const bodyHtml = msgBody.replace(/\n/g, '<br/>');
 
         const response = await fetch('/.netlify/functions/send-invoice-email', {
@@ -3717,23 +3551,14 @@ export default function Subscriptions() {
     }
   }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
 
-  const handleExportInvoicePdfsZip = useCallback(async (zipBillingPeriod) => {
-    const periodKey = zipBillingPeriod === 'yearly' ? 'yearly' : 'monthly';
+  const handleExportInvoicePdfsZip = useCallback(async () => {
     const baseRows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
-    const rows = baseRows.filter((r) => {
-      const isYearly = canonicalBillingPeriod(r.billing_period) === 'yearly';
-      return periodKey === 'yearly' ? isYearly : !isYearly;
-    });
+    const rows = baseRows.filter((r) => canonicalBillingPeriod(r.billing_period) !== 'yearly');
     if (rows.length === 0) {
-      setActionError(
-        periodKey === 'yearly'
-          ? 'No yearly invoiceable rentals in the current view.'
-          : 'No monthly invoiceable rentals in the current view.'
-      );
+      setActionError('No monthly invoiceable rentals in the current view.');
       return;
     }
     setZipExporting(true);
-    setZipExportBillingPeriod(periodKey);
     setZipExportProgress({ done: 0, total: rows.length });
     setActionError(null);
     setActionSuccess(null);
@@ -3751,7 +3576,6 @@ export default function Subscriptions() {
       if (rentalsZipErr) {
         setActionError(rentalsZipErr.message || 'Could not load rentals for ZIP export.');
         setZipExporting(false);
-        setZipExportBillingPeriod(null);
         setZipExportProgress({ done: 0, total: 0 });
         return;
       }
@@ -3850,29 +3674,27 @@ export default function Subscriptions() {
         type: 'blob',
         compression: 'STORE',
       });
-      const orgSlug = String(organization?.name || 'invoices').replace(/[^\w\-]+/g, '_').slice(0, 48);
+      const orgSlug = String(organization?.name || 'invoices').replace(/[^\w-]+/g, '_').slice(0, 48);
       const day = new Date().toISOString().slice(0, 10);
-      const zipSuffix = periodKey === 'yearly' ? 'Yearly' : 'Monthly';
-      saveAs(blob, `Rental_Invoices_${zipSuffix}_${orgSlug}_${day}.zip`);
+      saveAs(blob, `Rental_Invoices_Monthly_${orgSlug}_${day}.zip`);
 
       if (failLabels.length === 0) {
         setActionSuccess(
-          `Downloaded ${periodKey === 'yearly' ? 'yearly' : 'monthly'} ZIP with ${ok} invoice PDF(s) (current tab, search, and terms filter).`
+          `Downloaded monthly ZIP with ${ok} invoice PDF(s) (search and terms filter).`
         );
       } else if (ok === 0) {
         setActionError(
-          `${periodKey === 'yearly' ? 'Yearly' : 'Monthly'} ZIP export failed for all rows. ${failLabels.slice(0, 2).join(' · ')}${failLabels.length > 2 ? '…' : ''}`
+          `Monthly ZIP export failed for all rows. ${failLabels.slice(0, 2).join(' · ')}${failLabels.length > 2 ? '…' : ''}`
         );
       } else {
         setActionSuccess(
-          `${periodKey === 'yearly' ? 'Yearly' : 'Monthly'} ZIP has ${ok} PDF(s). ${failLabels.length} row(s) failed — e.g. ${failLabels[0]}`
+          `Monthly ZIP has ${ok} PDF(s). ${failLabels.length} row(s) failed — e.g. ${failLabels[0]}`
         );
       }
     } catch (e) {
-      setActionError(e?.message || `Failed to create ${periodKey === 'yearly' ? 'yearly' : 'monthly'} invoice ZIP.`);
+      setActionError(e?.message || 'Failed to create monthly invoice ZIP.');
     } finally {
       setZipExporting(false);
-      setZipExportBillingPeriod(null);
       setZipExportProgress({ done: 0, total: 0 });
     }
   }, [
@@ -3899,6 +3721,70 @@ export default function Subscriptions() {
     { label: 'Next Billing', value: derivedNextBilling ? formatDate(derivedNextBilling) : '—', icon: <Schedule />, color: '#F59E0B' },
   ], [activeRentalCount, activeRentalAssetCount, ctx.outstandingBalance, derivedNextBilling]);
 
+  const rentalToolbarMenuItems = useMemo(() => {
+    const emailTitle = bulkEmailing
+      ? `${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
+      : 'Email';
+    const zipTitle = zipExporting
+      ? `${zipExportProgress.done}/${zipExportProgress.total}`
+      : 'ZIP';
+    return [
+      {
+        id: 'csv',
+        title: 'CSV',
+        action: 'csv',
+        icon: <IoCloudDownloadOutline />,
+        gradientFrom: '#56CCF2',
+        gradientTo: '#2F80ED',
+        disabled: saving || zipExporting,
+      },
+      {
+        id: 'invoices',
+        title: 'Invoices',
+        action: 'invoices',
+        icon: <IoReceiptOutline />,
+        gradientFrom: '#80FF72',
+        gradientTo: '#7EE8FA',
+        disabled: saving || zipExporting,
+      },
+      {
+        id: 'email',
+        title: emailTitle,
+        action: 'email',
+        icon: <IoMailOutline />,
+        gradientFrom: '#FF9966',
+        gradientTo: '#FF5E62',
+        disabled: saving || bulkEmailing || zipExporting,
+      },
+      {
+        id: 'zip',
+        title: zipTitle,
+        action: 'zip',
+        icon: <IoArchiveOutline />,
+        gradientFrom: '#40B5AD',
+        gradientTo: '#2E9B94',
+        disabled: saving || bulkEmailing || zipExporting,
+      },
+      {
+        id: 'new',
+        title: 'New',
+        action: 'new',
+        icon: <IoAddCircleOutline />,
+        gradientFrom: '#ffa9c6',
+        gradientTo: '#f434e2',
+      },
+    ];
+  }, [
+    saving,
+    zipExporting,
+    bulkEmailing,
+    bulkEmailProgress.sent,
+    bulkEmailProgress.failed,
+    bulkEmailProgress.total,
+    zipExportProgress.done,
+    zipExportProgress.total,
+  ]);
+
   if (ctx.loading) {
     return (
       <Box sx={{ p: 4 }}>
@@ -3924,200 +3810,86 @@ export default function Subscriptions() {
           </Typography>
         </Box>
         <Stack
-          spacing={1.25}
+          direction="row"
+          flexWrap="wrap"
+          useFlexGap
+          spacing={1}
+          alignItems="center"
           sx={{
             width: { xs: '100%', lg: 'auto' },
             flex: { lg: '1 1 auto' },
             minWidth: 0,
-            alignItems: { xs: 'stretch', sm: 'flex-end' },
+            justifyContent: { xs: 'flex-start', lg: 'flex-end' },
+            rowGap: 1,
+            columnGap: 1,
           }}
         >
-          <Stack
-            direction="row"
-            flexWrap="wrap"
-            useFlexGap
-            spacing={1}
-            justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
-            sx={{ rowGap: 1, columnGap: 1 }}
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel id="qb-csv-billing-month-label">Month</InputLabel>
+            <Select
+              labelId="qb-csv-billing-month-label"
+              label="Month"
+              value={qbCsvBillingMonth}
+              onChange={(e) => setQbCsvBillingMonth(e.target.value)}
+              sx={{ fontSize: '0.8125rem', '& .MuiSelect-select': { py: 0.6 } }}
+              MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
+            >
+              {qbCsvMonthMenuOptions.map((o) => (
+                <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 112 }}>
+            <InputLabel id="monthly-qb-cohort-label">Terms</InputLabel>
+            <Select
+              labelId="monthly-qb-cohort-label"
+              label="Terms"
+              value={monthlyQbCohort}
+              onChange={(e) => setMonthlyQbCohort(e.target.value)}
+              sx={{ fontSize: '0.8125rem', '& .MuiSelect-select': { py: 0.6 } }}
+              MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
+            >
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="net30">NET 30</MenuItem>
+              <MenuItem value="credit_card">Card</MenuItem>
+            </Select>
+          </FormControl>
+          <Box
+            sx={{
+              flex: '0 0 auto',
+              width: 'auto',
+              maxWidth: '100%',
+              ml: { xs: 0, lg: 'auto' },
+            }}
           >
-            <Tooltip title="Refresh list">
-              <IconButton size="small" onClick={ctx.refresh} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 0.5 }}>
-                <RefreshIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => navigate('/settings?tab=invoice-template')}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-            >
-              Invoice template
-            </Button>
-            <Tooltip title="Default email subject, body, and signature (Settings)" enterDelay={400}>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<EditIcon sx={{ fontSize: 14 }} />}
-                onClick={() => navigate('/settings?tab=invoice-template')}
-                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-              >
-                Email template
-              </Button>
-            </Tooltip>
-            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel id="qb-csv-billing-month-label">QB export month</InputLabel>
-                <Select
-                  labelId="qb-csv-billing-month-label"
-                  label="QB export month"
-                  value={qbCsvBillingMonth}
-                  onChange={(e) => setQbCsvBillingMonth(e.target.value)}
-                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.65 } }}
-                  MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
-                >
-                  {qbCsvMonthMenuOptions.map((o) => (
-                    <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Tooltip
-                title="Past month: bottle/rental counts and line totals are recomputed as of that month’s last day (same pricing rules as the app). “Current table” matches the grid and uses the active billing-cycle dates."
-                enterDelay={400}
-                placement="top"
-              >
-                <IconButton size="small" aria-label="About QuickBooks export month" sx={{ color: 'text.secondary' }}>
-                  <HelpOutlineIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <FormControl size="small" sx={{ minWidth: 160 }}>
-                <InputLabel id="monthly-qb-cohort-label">Monthly QB</InputLabel>
-                <Select
-                  labelId="monthly-qb-cohort-label"
-                  label="Monthly QB"
-                  value={monthlyQbCohort}
-                  onChange={(e) => setMonthlyQbCohort(e.target.value)}
-                  sx={{ borderRadius: 1.5, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.65 } }}
-                  MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
-                >
-                  <MenuItem value="all">All customers</MenuItem>
-                  <MenuItem value="net30">NET 30 only</MenuItem>
-                  <MenuItem value="credit_card">Credit card only</MenuItem>
-                </Select>
-              </FormControl>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => handleExportQbInvoiceCsv('monthly', monthlyQbCohort)}
-                disabled={saving || zipExporting}
-                startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
-                sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-              >
-                {saving && !zipExporting ? 'Exporting…' : 'QB CSV'}
-              </Button>
-            </Stack>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => handleExportQbInvoiceCsv('yearly')}
-              disabled={saving || zipExporting}
-              startIcon={<DownloadIcon sx={{ fontSize: 16 }} />}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-            >
-              {saving && !zipExporting ? 'Exporting…' : 'QB yearly CSV'}
-            </Button>
-          </Stack>
-          <Stack
-            direction="row"
-            flexWrap="wrap"
-            useFlexGap
-            spacing={1}
-            justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}
-            sx={{ rowGap: 1, columnGap: 1 }}
-          >
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={handleGenerateAllInvoices}
-              disabled={saving || zipExporting}
-              startIcon={<InvoiceIcon sx={{ fontSize: 16 }} />}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-            >
-              Generate invoices
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={handleBulkEmailInvoices}
-              disabled={saving || bulkEmailing || zipExporting}
-              startIcon={<EmailIcon sx={{ fontSize: 16 }} />}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-            >
-              {bulkEmailing
-                ? `Sending ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}…`
-                : 'Bulk email'}
-            </Button>
-            <Tooltip
-              title="Monthly period only. Uses current table filters. Same totals as the grid (totalPerCycle)."
-              enterDelay={500}
-              placement="top"
-            >
-              <span>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => handleExportInvoicePdfsZip('monthly')}
-                  disabled={saving || bulkEmailing || zipExporting}
-                  startIcon={<FolderZipIcon sx={{ fontSize: 16 }} />}
-                  sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-                >
-                  {zipExporting && zipExportBillingPeriod === 'monthly'
-                    ? `ZIP ${zipExportProgress.done}/${zipExportProgress.total}…`
-                    : 'PDF ZIP · Monthly'}
-                </Button>
-              </span>
-            </Tooltip>
-            <Tooltip
-              title="Yearly / annual period only. Uses current table filters. Same totals as the grid."
-              enterDelay={500}
-              placement="top"
-            >
-              <span>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => handleExportInvoicePdfsZip('yearly')}
-                  disabled={saving || bulkEmailing || zipExporting}
-                  startIcon={<FolderZipIcon sx={{ fontSize: 16 }} />}
-                  sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.25, py: 0.5, minWidth: 0 }}
-                >
-                  {zipExporting && zipExportBillingPeriod === 'yearly'
-                    ? `ZIP ${zipExportProgress.done}/${zipExportProgress.total}…`
-                    : 'PDF ZIP · Yearly'}
-                </Button>
-              </span>
-            </Tooltip>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<AddIcon sx={{ fontSize: 16 }} />}
-              onClick={() => {
-                blurActiveElement();
-                setCreateOpen(true);
+            <GradientMenu
+              variant="compact"
+              items={rentalToolbarMenuItems}
+              className="min-h-0 w-auto justify-center lg:justify-end py-2 sm:py-2.5 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
+              onAction={(action) => {
+                switch (action) {
+                  case 'csv':
+                    handleExportQbInvoiceCsv('monthly', monthlyQbCohort);
+                    break;
+                  case 'invoices':
+                    handleGenerateAllInvoices();
+                    break;
+                  case 'email':
+                    handleBulkEmailInvoices();
+                    break;
+                  case 'zip':
+                    handleExportInvoicePdfsZip();
+                    break;
+                  case 'new':
+                    blurActiveElement();
+                    setCreateOpen(true);
+                    break;
+                  default:
+                    break;
+                }
               }}
-              sx={{
-                borderRadius: 1.5,
-                textTransform: 'none',
-                fontSize: '0.75rem',
-                px: 1.5,
-                py: 0.5,
-                minWidth: 0,
-                bgcolor: primaryColor,
-                '&:hover': { bgcolor: primaryColor, opacity: 0.9 },
-              }}
-            >
-              New rental
-            </Button>
-          </Stack>
+            />
+          </Box>
         </Stack>
       </Stack>
 
@@ -4142,7 +3914,7 @@ export default function Subscriptions() {
         <Box sx={{ mb: 2 }}>
           <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Building {zipExportBillingPeriod === 'yearly' ? 'yearly' : 'monthly'} invoice PDFs for ZIP…
+              Building monthly invoice PDFs for ZIP…
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {zipExportProgress.done} / {zipExportProgress.total}
@@ -4193,11 +3965,14 @@ export default function Subscriptions() {
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
         <Box sx={{ px: 2, pt: 2, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' } }}>
-            <Tab label={`All (${allRows.length})`} />
-            <Tab label={`Monthly (${tabRowCounts.monthly})`} />
-            <Tab label={`Lease (${tabRowCounts.lease})`} />
-          </Tabs>
+          <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap" sx={{ mr: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+              Monthly rentals ({allRows.length})
+            </Typography>
+            <Button size="small" variant="outlined" component={Link} to="/lease-agreements" sx={{ borderRadius: 999, textTransform: 'none', fontSize: '0.75rem' }}>
+              Yearly leases & billing
+            </Button>
+          </Stack>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>Terms:</Typography>
             {[
@@ -4217,33 +3992,14 @@ export default function Subscriptions() {
               />
             ))}
           </Stack>
-          <TextField
-            size="small"
-            placeholder="Search customers..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ ml: 'auto', minWidth: 240, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          <SubscriptionsSearchField
+            ref={searchFieldRef}
+            onDebouncedChange={setDebouncedSearch}
           />
-          {SUBSCRIPTION_TAB_FILTERS[tab] === 'lease' && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => navigate('/lease-agreements')}
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.5, whiteSpace: 'nowrap' }}
-            >
-              Manage Lease Agreements
-            </Button>
-          )}
           </Box>
         </Box>
 
-        <TableContainer
-          sx={{
-            transition: 'opacity 0.15s ease',
-            opacity: search !== debouncedSearch ? 0.88 : 1,
-          }}
-        >
+        <TableContainer>
           <Table size="small">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' } }}>
@@ -4279,36 +4035,24 @@ export default function Subscriptions() {
                           No rows match this tab or search ({allRows.length} total in list).
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-                          Lease customers appear under the Lease tab. Try the All tab, or clear the search box.
+                          Clear search or adjust Terms chips. Yearly lease billing lives under Lease agreements.
                         </Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center">
-                          {search.trim() !== '' && (
-                            <Button size="small" variant="outlined" onClick={() => setSearch('')}>
+                          {debouncedSearch.trim() !== '' && (
+                            <Button size="small" variant="outlined" onClick={handleClearSearch}>
                               Clear search
                             </Button>
                           )}
-                          {tab !== 0 && (
-                            <Button size="small" variant="outlined" onClick={() => setTab(0)}>
-                              All ({allRows.length})
-                            </Button>
-                          )}
-                          {tabRowCounts.lease > 0 && tab !== 2 && (
-                            <Button size="small" variant="outlined" onClick={() => setTab(2)}>
-                              Lease ({tabRowCounts.lease})
-                            </Button>
-                          )}
-                          {tabRowCounts.monthly > 0 && tab !== 1 && (
-                            <Button size="small" variant="outlined" onClick={() => setTab(1)}>
-                              Monthly ({tabRowCounts.monthly})
-                            </Button>
-                          )}
+                          <Button size="small" variant="outlined" component={Link} to="/lease-agreements">
+                            Open lease agreements
+                          </Button>
                         </Stack>
                       </Stack>
                     )}
                   </TableCell>
                 </TableRow>
               ) : (
-                pagedFiltered.map((sub, pageIdx) => (
+                pagedFiltered.map((sub) => (
                   <TableRow
                     key={sub.id}
                     hover
@@ -4316,29 +4060,10 @@ export default function Subscriptions() {
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
                     <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
-                        {isLeaseRow(sub) && (
-                          <Chip label="Lease" size="small" color="info" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
-                        )}
-                      </Stack>
-                      {sub.legacySource === 'lease_agreements' && sub.notes && (
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>{sub.notes}</Typography>
-                      )}
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
                     </TableCell>
                     <TableCell>
-                      {sub.legacySource === 'lease_agreements' ? (
-                        <Stack spacing={0.35} alignItems="flex-start">
-                          <Chip label="Yearly" size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
-                          {sub.lease_expiry_label && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, lineHeight: 1.35 }}>
-                              {sub.lease_expiry_label}
-                            </Typography>
-                          )}
-                        </Stack>
-                      ) : (
-                        <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
-                      )}
+                      <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
                     </TableCell>
                     <TableCell>
                       {(() => {
@@ -4372,7 +4097,7 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
+                    <TableCell>
                       {(() => {
                         const cid = String(sub.customer_id || '').trim();
                         const sid = String(sub.id || '').trim();
@@ -4393,37 +4118,10 @@ export default function Subscriptions() {
                         const st = String(cycleInv?.status || '').toLowerCase();
                         return (
                           <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
-                            {cid ? (
-                              <Tooltip title="Edit invoice # (PDF, email, Excel use this for the cycle)">
-                                <Typography
-                                  component="button"
-                                  type="button"
-                                  variant="body2"
-                                  onClick={() => openInvoiceNumberDialog(sub)}
-                                  sx={{
-                                    fontFamily: 'monospace',
-                                    fontWeight: 600,
-                                    margin: 0,
-                                    border: 'none',
-                                    background: 'none',
-                                    padding: 0,
-                                    cursor: 'pointer',
-                                    textAlign: 'left',
-                                    color: invNo ? 'text.primary' : 'text.secondary',
-                                    borderBottom: '1px dotted',
-                                    borderColor: 'action.disabled',
-                                    lineHeight: 1.4,
-                                    '&:hover': {
-                                      color: 'primary.main',
-                                      borderColor: 'primary.main',
-                                    },
-                                  }}
-                                >
-                                  {invNo || 'Not set'}
-                                </Typography>
-                              </Tooltip>
-                            ) : invNo ? (
+                            {invNo ? (
                               <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{invNo}</Typography>
+                            ) : cid ? (
+                              <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not set</Typography>
                             ) : (
                               <Typography variant="caption" sx={{ color: 'text.disabled' }}>No invoice row</Typography>
                             )}
@@ -4450,129 +4148,133 @@ export default function Subscriptions() {
                         sx={{ fontWeight: 600, textTransform: 'capitalize' }}
                       />
                     </TableCell>
-                    <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                      <Stack direction="row" spacing={1} justifyContent="flex-end">
-                        <Button
-                          size="small"
-                          variant="text"
-                          onClick={() => handleDownloadInvoicePdfForRow(sub)}
-                          disabled={(parseFloat(sub.totalPerCycle) || 0) <= 0}
-                          sx={{
-                            textTransform: 'none',
-                            minWidth: 'auto',
-                            px: 1,
-                            py: 0.25,
-                            fontSize: '0.72rem',
-                            lineHeight: 1.2,
-                          }}
-                        >
-                          PDF
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<EmailIcon fontSize="small" />}
-                          onClick={() => {
-                            blurActiveElement();
-                            openEmailDialogForRow(sub);
-                          }}
-                          disabled={saving || (parseFloat(sub.totalPerCycle) || 0) <= 0}
-                          sx={{
-                            textTransform: 'none',
-                            minWidth: 'auto',
-                            px: 1,
-                            py: 0.25,
-                            fontSize: '0.72rem',
-                            lineHeight: 1.2,
-                          }}
-                        >
-                          Email
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="text"
-                          onClick={() => handleExportCustomerExcel(sub)}
-                          disabled={saving || (parseFloat(sub.totalPerCycle) || 0) <= 0}
-                          sx={{
-                            textTransform: 'none',
-                            minWidth: 'auto',
-                            px: 1,
-                            py: 0.25,
-                            fontSize: '0.72rem',
-                            lineHeight: 1.2,
-                          }}
-                        >
-                          Excel
-                        </Button>
-                        {sub.customer_id && (
-                          <Button
-                            size="small"
-                            variant="text"
-                            onClick={() => {
-                              const id = String(sub.customer_id || '').trim();
-                              if (!id) {
-                                setActionError('No customer identifier available for this row.');
-                                return;
-                              }
-                              navigate(`/customer/${encodeURIComponent(id)}`);
-                            }}
-                            sx={{ textTransform: 'none' }}
-                          >
-                            Customer
-                          </Button>
-                        )}
-                        {isLeaseRow(sub) && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="info"
-                            onClick={() => navigate('/lease-agreements')}
-                            sx={{ textTransform: 'none', fontSize: '0.72rem' }}
-                          >
-                            View Lease
-                          </Button>
-                        )}
-                        {sub.isVirtual ? (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() => {
-                              navigate('/pricing/customers', {
-                                state: {
-                                  prefillCustomerId: sub.customer_id,
-                                  prefillCustomerName: sub.customer?.name || sub.customer?.Name || sub.customer_id,
-                                },
-                              });
-                            }}
-                            sx={{ textTransform: 'none' }}
-                          >
-                            Edit Rates
-                          </Button>
-                        ) : (
-                          <>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => {
-                                navigate('/pricing/customers', {
-                                  state: {
-                                    prefillCustomerId: sub.customer_id,
-                                    prefillCustomerName: sub.customer?.name || sub.customer?.Name || sub.customer_id,
-                                  },
-                                });
+                    <TableCell
+                      align="right"
+                      onClick={(e) => e.stopPropagation()}
+                      sx={{ py: 0.75 }}
+                    >
+                      {(() => {
+                        const billableAmount = parseFloat(sub.totalPerCycle) || 0;
+                        const canBill = billableAmount > 0;
+                        const canEditRates = Boolean(sub.customer_id);
+                        const rowActionItems = [
+                          {
+                            id: 'pdf',
+                            title: 'PDF',
+                            action: 'pdf',
+                            icon: <IoReceiptOutline />,
+                            gradientFrom: '#56CCF2',
+                            gradientTo: '#2F80ED',
+                            disabled: !canBill,
+                          },
+                          {
+                            id: 'email',
+                            title: 'Email',
+                            action: 'email',
+                            icon: <IoMailOutline />,
+                            gradientFrom: '#FF9966',
+                            gradientTo: '#FF5E62',
+                            disabled: saving || !canBill,
+                          },
+                          {
+                            id: 'excel',
+                            title: 'Excel',
+                            action: 'excel',
+                            icon: <IoCloudDownloadOutline />,
+                            gradientFrom: '#80FF72',
+                            gradientTo: '#7EE8FA',
+                            disabled: saving || !canBill,
+                          },
+                          {
+                            id: 'edit-invoice',
+                            title: 'Edit Inv #',
+                            action: 'edit-invoice',
+                            icon: <IoCreateOutline />,
+                            gradientFrom: '#38bdf8',
+                            gradientTo: '#0ea5e9',
+                            disabled: !sub.customer_id,
+                          },
+                          {
+                            id: 'edit-rates',
+                            title: 'Edit Rates',
+                            action: 'edit-rates',
+                            icon: <IoAddCircleOutline />,
+                            gradientFrom: '#a955ff',
+                            gradientTo: '#ea51ff',
+                            disabled: !canEditRates,
+                          },
+                          {
+                            id: 'view',
+                            title: 'View',
+                            action: 'view',
+                            icon: <IoEyeOutline />,
+                            gradientFrom: '#40B5AD',
+                            gradientTo: '#2E9B94',
+                            disabled: sub.isVirtual,
+                          },
+                        ];
+
+                        if (sub.customer_id) {
+                          rowActionItems.splice(3, 0, {
+                            id: 'customer',
+                            title: 'Customer',
+                            action: 'customer',
+                            icon: <IoPersonCircleOutline />,
+                            gradientFrom: '#ffa9c6',
+                            gradientTo: '#f434e2',
+                          });
+                        }
+
+                        return (
+                          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <GradientMenu
+                              variant="compact"
+                              items={rowActionItems}
+                              className="min-h-0 w-auto justify-end py-1 px-1.5 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
+                              onAction={(action) => {
+                                switch (action) {
+                                  case 'pdf':
+                                    handleDownloadInvoicePdfForRow(sub);
+                                    break;
+                                  case 'email':
+                                    blurActiveElement();
+                                    openEmailDialogForRow(sub);
+                                    break;
+                                  case 'excel':
+                                    handleExportCustomerExcel(sub);
+                                    break;
+                                  case 'customer': {
+                                    const id = String(sub.customer_id || '').trim();
+                                    if (!id) {
+                                      setActionError('No customer identifier available for this row.');
+                                      return;
+                                    }
+                                    navigate(`/customer/${encodeURIComponent(id)}`);
+                                    break;
+                                  }
+                                  case 'edit-invoice':
+                                    openInvoiceNumberDialog(sub);
+                                    break;
+                                  case 'edit-rates':
+                                    navigate('/pricing/customers', {
+                                      state: {
+                                        prefillCustomerId: sub.customer_id,
+                                        prefillCustomerName:
+                                          sub.customer?.name || sub.customer?.Name || sub.customer_id,
+                                      },
+                                    });
+                                    break;
+                                  case 'view':
+                                    if (!sub.isVirtual) navigate(`/rentals/${sub.id}`);
+                                    break;
+                                  default:
+                                    break;
+                                }
                               }}
-                              sx={{ textTransform: 'none' }}
-                            >
-                              Edit Rates
-                            </Button>
-                            <Tooltip title="View details">
-                              <IconButton size="small" onClick={() => navigate(`/rentals/${sub.id}`)}>
-                                <ViewIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </>
-                        )}
-                      </Stack>
+                            />
+                          </Box>
+                        );
+                      })()}
                     </TableCell>
                   </TableRow>
                 ))
@@ -4614,17 +4316,10 @@ export default function Subscriptions() {
                 ))}
               </Select>
             </FormControl>
-            <FormControl fullWidth size="small">
-              <InputLabel>Billing Period</InputLabel>
-              <Select
-                value={newSub.billing_period}
-                label="Billing Period"
-                onChange={(e) => setNewSub((p) => ({ ...p, billing_period: e.target.value }))}
-              >
-                <MenuItem value="monthly">Monthly</MenuItem>
-                <MenuItem value="yearly">Yearly</MenuItem>
-              </Select>
-            </FormControl>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Billing period is monthly. Yearly lease billing is managed under{' '}
+              <Link to="/lease-agreements" style={{ fontWeight: 600 }}>Lease agreements</Link>.
+            </Typography>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

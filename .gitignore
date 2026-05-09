@@ -159,3 +159,6 @@ backups/
 
 # Security - Backup configuration with secrets
 YOUR_BACKUP_CONFIG.md
+
+# Local duplicate checkout (nested repo); do not commit
+scanified/

@@ -127,6 +127,7 @@ export default function HistoryScreen() {
       
       if (!grouped[orderKey]) {
         grouped[orderKey] = {
+          group_key: orderKey,
           order_number: orderNumber,
           scans: [],
           customer_name: customerName,
@@ -584,7 +585,7 @@ export default function HistoryScreen() {
         <FlatList
           data={scans}
           contentContainerStyle={{ paddingBottom: listPaddingBottom }}
-          keyExtractor={item => item.order_number || `no-order-${item.scans[0]?.id}`}
+          keyExtractor={(item) => item.group_key || item.order_number || `no-order-${item.scans[0]?.id}`}
           ListFooterComponent={
             fillBatches.length > 0 ? (
               <View style={styles.fillSection}>
@@ -629,7 +630,7 @@ export default function HistoryScreen() {
             const now = new Date();
             const hoursDiff = (now.getTime() - scanTime.getTime()) / (1000 * 60 * 60);
             const isEditable = hoursDiff <= 24;
-            const orderKey = item.order_number || `no-order-${item.scans[0]?.id}`;
+            const orderKey = item.group_key || item.order_number || `no-order-${item.scans[0]?.id}`;
             const isExpanded = expandedOrders.has(orderKey);
             
             // Get all unique bottle barcodes from the grouped scans

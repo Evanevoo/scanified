@@ -71,9 +71,19 @@ export const StyledTableContainer = styled(MuiTableContainer)(({ theme }) => ({
   ...commonStyles.tableContainer
 }));
 
-// Page Header Component — clear hierarchy (title / subtitle / actions)
+// Page Header Component — glass panel for app shell consistency
 export const PageHeader = ({ title, subtitle, actions }) => (
-  <Box sx={{ mb: 3 }}>
+  <Box
+    sx={{
+      mb: 3,
+      p: { xs: 2.25, sm: 2.75 },
+      borderRadius: '24px',
+      border: '1px solid rgba(255,255,255,0.8)',
+      background: 'rgba(255,255,255,0.72)',
+      backdropFilter: 'blur(14px)',
+      boxShadow: '0 14px 40px rgba(99,102,241,0.08), 0 2px 12px rgba(15,23,42,0.04)',
+    }}
+  >
     <Box
       sx={{
         display: 'flex',
@@ -92,6 +102,10 @@ export const PageHeader = ({ title, subtitle, actions }) => (
           lineHeight: 1.2,
           flex: 1,
           minWidth: 0,
+          background: 'linear-gradient(135deg, #40B5AD 0%, #8B7BA8 100%)',
+          backgroundClip: 'text',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
         }}
       >
         {title}

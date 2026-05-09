@@ -1,4 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@700&display=swap');
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
 @tailwind base;
 @tailwind components;
@@ -25,13 +28,13 @@
   --border: #E5E7EB;
   --input: #E5E7EB;
   --ring: var(--primary-color, #40B5AD);
-  
+
   /* Legacy variables for backward compatibility */
   --font-serif: 'Playfair Display', serif;
   --font-sans: 'Inter', Arial, sans-serif;
   --text-main: #111;
   --text-secondary: #444;
-  --bg-main: #fff;
+  --bg-main: linear-gradient(135deg, #eef2ff 0%, #f8f9ff 45%, #fff1fb 100%);
   --bg-card: #fff;
   --bg-sidebar: #fff;
   --bg-topbar: #fff;
@@ -117,10 +120,12 @@ button, a, .theme-button, .MuiButton-root, .MuiChip-root, .MuiIconButton-root {
 }
 
 .card, .dashboard-card, .MuiPaper-root {
-  background: var(--bg-card) !important;
+  background: rgba(255, 255, 255, 0.74) !important;
+  backdrop-filter: blur(14px);
   color: var(--text-main) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 2px 12px rgba(30, 41, 59, 0.06) !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 14px 30px rgba(99, 102, 241, 0.1) !important;
 }
 
 h1, h2, h3, h4 {
@@ -298,7 +303,7 @@ hr, .divider {
   .no-print {
     display: none !important;
   }
-  
+
   .print-only {
     display: block !important;
   }
@@ -400,6 +405,7 @@ input:focus-visible {
 @layer base {
   * {
     border-color: var(--border);
+    @apply border-border outline-ring/50;
   }
   *:focus-visible {
     outline: 2px solid var(--ring);
@@ -408,6 +414,81 @@ input:focus-visible {
   body {
     background-color: var(--background);
     color: var(--foreground);
+    @apply bg-background text-foreground;
+  }
+  .theme {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+  }
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+  }
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+  }
+  html {
+    @apply font-sans;
   }
 }
 
@@ -592,4 +673,4 @@ input:focus-visible {
 .web-scanning-search .gooey-search-wrapper,
 .import-approvals-search .gooey-search-wrapper {
   width: 100%;
-} 
+}

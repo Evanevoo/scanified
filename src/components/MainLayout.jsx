@@ -17,6 +17,7 @@ import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useTheme as useMuiTheme } from '@mui/material/styles';
 import { useTheme } from '../context/ThemeContext';
+import { usePermissions } from '../context/PermissionsContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
@@ -25,6 +26,8 @@ import { useAuth } from '../hooks/useAuth';
 import Sidebar from './Sidebar';
 import CommandPalette from './CommandPalette';
 import Paper from '@mui/material/Paper';
+import Chip from '@mui/material/Chip';
+import Avatar from '@mui/material/Avatar';
 import { SearchInputWithIcon } from './ui/search-input-with-icon';
 
 
@@ -34,8 +37,23 @@ const collapsedWidth = 72;
 export default function MainLayout({ children }) {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
+  const { isAdmin, isManager } = usePermissions();
   const muiTheme = useMuiTheme();
   const primaryColor = organizationColors?.primary || '#40B5AD';
+  const rolePillLabel =
+    profile?.role === 'owner'
+      ? 'Owner'
+      : isAdmin()
+        ? 'Administrator'
+        : isManager()
+          ? 'Manager'
+          : 'Team member';
+  const displayName = (profile?.full_name || profile?.email || 'User').trim();
+  const nameParts = displayName.split(/\s+/).filter(Boolean);
+  const navUserLine =
+    nameParts.length > 1
+      ? `${nameParts[0]} ${(nameParts[nameParts.length - 1][0] || '').toUpperCase()}.`
+      : displayName;
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -271,7 +289,9 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      bgcolor: 'background.default',
+      background: muiTheme.palette?.background?.default
+        ? `linear-gradient(145deg, ${muiTheme.palette.background.default} 0%, #f4f2ff 45%, #faf8ff 100%)`
+        : 'linear-gradient(145deg, #f0f2f7 0%, #f4f2ff 38%, #faf8ff 72%, #fff5f8 100%)',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -314,15 +334,15 @@ export default function MainLayout({ children }) {
         elevation={0}
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          bgcolor: 'background.paper',
+          bgcolor: 'rgba(255,255,255,0.68)',
+          backdropFilter: 'blur(14px)',
           color: 'text.primary',
-          boxShadow: 'none',
-          borderBottom: 1,
-          borderColor: 'divider',
+          boxShadow: '0 8px 24px rgba(99,102,241,0.08)',
+          borderBottom: '1px solid rgba(255,255,255,0.8)',
           minHeight: 64,
         }}
       >
-        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'background.paper', gap: 2 }}>
+        <Toolbar sx={{ minHeight: 64, px: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'transparent', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             <Box
               sx={{
@@ -360,9 +380,28 @@ export default function MainLayout({ children }) {
                 organization?.name?.charAt(0)?.toUpperCase() || 'W'
               )}
             </Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '18px', display: { xs: 'none', sm: 'block' } }}>
-              {organization?.name || 'WeldCor'}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '18px', display: { xs: 'none', sm: 'block' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {organization?.name || 'WeldCor'}
+              </Typography>
+              {!isOwnerPortal && (
+                <Chip
+                  label={rolePillLabel}
+                  size="small"
+                  sx={{
+                    display: { xs: 'none', md: 'inline-flex' },
+                    fontWeight: 800,
+                    letterSpacing: '0.06em',
+                    fontSize: '0.62rem',
+                    height: 26,
+                    borderRadius: 999,
+                    bgcolor: 'rgba(139, 123, 168, 0.14)',
+                    color: '#57496f',
+                    border: '1px solid rgba(139, 123, 168, 0.32)',
+                  }}
+                />
+              )}
+            </Box>
           </Box>
 
           <Box
@@ -399,12 +438,14 @@ export default function MainLayout({ children }) {
                       px: 2,
                       py: 0,
                       minHeight: 40,
-                      borderRadius: 0,
-                      borderBottom: active ? `2px solid ${primaryColor}` : '2px solid transparent',
+                      borderRadius: 999,
+                      borderBottom: 'none',
+                      backgroundColor: active ? 'rgba(255,255,255,0.95)' : 'transparent',
+                      boxShadow: active ? '0 8px 18px rgba(99,102,241,0.12)' : 'none',
                       transition: 'all 0.2s',
                       '&:hover': {
                         color: primaryColor,
-                        bgcolor: 'action.hover',
+                        bgcolor: 'rgba(255,255,255,0.9)',
                       },
                     }}
                   >
@@ -419,7 +460,7 @@ export default function MainLayout({ children }) {
               sx={{
                 flex: '1 1 0%',
                 minWidth: 0,
-                maxWidth: { xs: 'none', sm: 400 },
+                maxWidth: { xs: 'none', sm: 460, md: 560, lg: 720 },
                 position: 'relative',
               }}
               ref={searchRef}
@@ -436,7 +477,7 @@ export default function MainLayout({ children }) {
                     setShowSuggestions(true);
                   }
                 }}
-                className="h-10 min-h-[40px] w-full"
+                className="h-11 min-h-[44px] w-full rounded-full border-slate-200/80 bg-white/90 pl-4 pr-4 shadow-[0_10px_36px_rgba(99,102,241,0.09)] transition-shadow placeholder:text-slate-400 focus-visible:shadow-[0_12px_42px_rgba(64,181,173,0.12)]"
               />
               {showSuggestions && suggestions.length > 0 && (
                 <Paper
@@ -449,10 +490,11 @@ export default function MainLayout({ children }) {
                     maxHeight: 400,
                     overflow: 'auto',
                     zIndex: 1300,
-                    borderRadius: 2,
-                    border: 1,
-                    borderColor: 'divider',
-                    bgcolor: 'background.paper',
+                    borderRadius: 3,
+                    border: '1px solid rgba(255,255,255,0.78)',
+                    bgcolor: 'rgba(255,255,255,0.76)',
+                    backdropFilter: 'blur(14px)',
+                    boxShadow: '0 16px 34px rgba(99,102,241,0.15)',
                   }}
                   elevation={muiTheme.palette.mode === 'dark' ? 8 : 3}
                 >
@@ -495,10 +537,31 @@ export default function MainLayout({ children }) {
                 flexShrink: 0,
               }}
             >
-            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }} aria-label="Notifications">
+            <Box sx={{ display: { xs: 'none', lg: 'flex' }, flexDirection: 'column', alignItems: 'flex-end', mr: 0.25, pr: 0.25 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.1em', color: 'text.secondary', lineHeight: 1.15 }}>
+                {navUserLine.toUpperCase()}
+              </Typography>
+            </Box>
+            <Avatar
+              sx={{
+                width: 38,
+                height: 38,
+                display: { xs: 'none', sm: 'flex' },
+                fontWeight: 800,
+                bgcolor: primaryColor,
+                fontSize: '0.85rem',
+                boxShadow: '0 6px 16px rgba(64,181,173,0.28)',
+              }}
+              alt={displayName}
+            >
+              {nameParts.length
+                ? nameParts.map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+                : '?'}
+            </Avatar>
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }} aria-label="Notifications">
               <NotificationsIcon />
             </IconButton>
-            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
             <Button
@@ -512,7 +575,10 @@ export default function MainLayout({ children }) {
                 color: 'text.primary',
                 minHeight: 40,
                 py: 0.5,
-                '&:hover': { bgcolor: 'action.hover' },
+                borderRadius: 999,
+                bgcolor: 'rgba(255,255,255,0.72)',
+                border: '1px solid rgba(255,255,255,0.8)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' },
               }}
             >
               {logoutLoading ? 'Signing out...' : 'Sign out'}
@@ -546,10 +612,13 @@ export default function MainLayout({ children }) {
         <Box sx={{
           flex: 1,
           width: '100%',
-          bgcolor: 'background.paper',
-          p: 0,
-          borderRadius: 0,
-          boxShadow: 'none',
+          bgcolor: 'rgba(255,255,255,0.38)',
+          p: { xs: 2, sm: 2.5, md: 3 },
+          borderRadius: '24px',
+          border: '1px solid rgba(255,255,255,0.85)',
+          boxShadow: '0 20px 50px rgba(99,102,241,0.11), inset 0 1px 0 rgba(255,255,255,0.9)',
+          backdropFilter: 'blur(16px)',
+          backgroundImage: 'linear-gradient(165deg, rgba(255,255,255,0.72) 0%, rgba(252,251,255,0.45) 45%, rgba(255,250,252,0.35) 100%)',
           minHeight: 'calc(100vh - 64px)',
           overflow: 'auto',
         }}>
