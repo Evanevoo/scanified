@@ -8,6 +8,7 @@ import { Box, Paper, Typography, Button, TextField, Alert, MenuItem, Snackbar } 
 import { findCustomer, normalizeCustomerName, extractCustomerId, batchFindCustomers } from '../utils/customerMatching';
 import { TableSkeleton } from '../components/SmoothLoading';
 import { useAuth } from '../hooks/useAuth';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 
 const colorMap = {
   'blue-600': '#2563eb',
@@ -655,7 +656,7 @@ const ImportCustomerInfo = () => {
         const barcodeValue = getMappedValue(customer, 'barcode');
         const normalizedBarcode = barcodeValue ? barcodeValue.toString().trim() : null;
         
-        const customerData = {
+        const customerData = finalizeCustomerBranchParentFields({
           CustomerListID: normalizedId,
           name: customerName.trim(),
           contact_details: (getMappedValue(customer, 'contact_details') || '').trim() || null,
@@ -670,9 +671,9 @@ const ImportCustomerInfo = () => {
           barcode: normalizedBarcode,
           payment_terms: (getMappedValue(customer, 'payment_terms') || '').trim() || null,
           location: location,
-          organization_id: profile.organization_id
-        };
-        
+          organization_id: profile.organization_id,
+        });
+
         customersToProcess.push(customerData);
       }
       

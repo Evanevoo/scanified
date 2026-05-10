@@ -9,6 +9,8 @@
 --   sets customer_type = 'BRANCH' whenever parent_customer_id is set (including when
 --   the UI had VENDOR — Postgres usually forbids “vendor + parent” because parent ⇒ BRANCH);
 --   sets customer_type = 'CUSTOMER' when parent is cleared and type was BRANCH.
+-- Inserts must send an explicit customer_type when the table DEFAULT would violate this CHECK
+-- (e.g. DEFAULT customer_type = 'BRANCH' with parent_customer_id NULL → every bare INSERT fails).
 --
 -- To relax the rule instead (not recommended unless you know your data model):
 --   ALTER TABLE customers DROP CONSTRAINT IF EXISTS check_branch_has_parent;

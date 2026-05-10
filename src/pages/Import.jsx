@@ -15,6 +15,7 @@ import { findCustomer, normalizeCustomerName, batchFindCustomers } from '../util
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { resolveCustomerListId, isTemporaryCustomerIdentity } from '../utils/resolveCustomerListId';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 
 // Import type definitions
 const IMPORT_TYPES = {
@@ -1718,14 +1719,16 @@ export default function Import() {
         else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
         else if (city.includes('SASKATOON')) location = 'SASKATOON';
         
-        customersToCreate.push({
-          CustomerListID: customerRow.customer_id, // Use original case
-          name: customerRow.customer_name || `Customer ${customerRow.customer_id}`,
-          barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
-          customer_barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
-          location: location,
-          organization_id: userProfile.organization_id // Explicitly set organization_id
-        });
+        customersToCreate.push(
+          finalizeCustomerBranchParentFields({
+            CustomerListID: customerRow.customer_id, // Use original case
+            name: customerRow.customer_name || `Customer ${customerRow.customer_id}`,
+            barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
+            customer_barcode: `*%${(customerRow.customer_id || '').toLowerCase().replace(/\s+/g, '')}*`,
+            location: location,
+            organization_id: userProfile.organization_id, // Explicitly set organization_id
+          })
+        );
         seenInBatch.add(customerId);
       }
     }
@@ -1905,14 +1908,16 @@ export default function Import() {
           else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
           else if (city.includes('SASKATOON')) location = 'SASKATOON';
           
-          newCustomers.push({
-            CustomerListID: customerId,
-            name: row.customer_name.trim(),
-            barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
-            customer_barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
-            location: location,
-            organization_id: userProfile.organization_id // Explicitly set organization_id
-          });
+          newCustomers.push(
+            finalizeCustomerBranchParentFields({
+              CustomerListID: customerId,
+              name: row.customer_name.trim(),
+              barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
+              customer_barcode: `*%${customerIdLower.replace(/\s+/g, '')}*`,
+              location: location,
+              organization_id: userProfile.organization_id, // Explicitly set organization_id
+            })
+          );
           seenInChunk.add(customerIdLower);
         }
         

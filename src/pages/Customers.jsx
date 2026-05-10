@@ -12,7 +12,19 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { PrimaryButton, SecondaryButton } from '../components/ui/StyledComponents';
 import { resolveCustomerTypeForParentConstraint } from '../utils/customerParentConstraint';
+import { isActiveCustomerRecord as isCustomerRowActive } from '../utils/leaseCustomerMatchKeys';
+
+const toolbarBtnSx = { minHeight: 40, px: 3 };
+const tableActionBtnSx = {
+  minWidth: 'auto',
+  px: 1.75,
+  py: 0.5,
+  fontSize: '0.8125rem',
+  mr: 1,
+  mb: 0.5,
+};
 
 // Remove CustomersErrorBoundary and replace with a FallbackComponent
 function CustomersErrorFallback({ error, resetErrorBoundary }) {
@@ -136,7 +148,6 @@ function Customers({ profile }) {
   
   const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER', department: '', parent_customer_id: null });
-  const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState([]);
@@ -440,52 +451,45 @@ function Customers({ profile }) {
     }
   };
 
-  const handleEdit = (customer) => {
-    setEditingId(customer.CustomerListID);
-    setForm(customer);
+  const refreshCustomerPage = async () => {
+    const from = (page - 1) * rowsPerPage;
+    const to = from + rowsPerPage - 1;
+    const { data } = await supabase
+      .from('customers')
+      .select('*')
+      .order('name')
+      .range(from, to)
+      .eq('organization_id', organization.id);
+    setCustomers(data || []);
   };
 
-  const handleUpdate = async (e) => {
-    e.preventDefault();
-    if (!organization?.id) return;
+  const handleToggleCustomerActive = async (customer, nextActive) => {
+    if (!organization?.id || !canEdit) return;
     setError(null);
-    if (!form.CustomerListID || !form.CustomerListID.trim()) {
-      setError('CustomerListID is required.');
-      return;
+    const label = customer?.name || customer?.CustomerListID || 'this customer';
+    if (!nextActive) {
+      if (
+        !window.confirm(
+          `Deactivate "${label}"? They will be hidden from billing lists and treated as inactive until you activate them again.`
+        )
+      ) {
+        return;
+      }
     }
     try {
-      // Only include columns that exist in the customers table
-      const payload = {
-        CustomerListID: form.CustomerListID,
-        name: form.name,
-        contact_details: form.contact_details,
-        phone: form.phone,
-        customer_type: resolveCustomerTypeForParentConstraint(form.customer_type, form.parent_customer_id),
-      };
-      if (form.email !== undefined) payload.email = form.email ?? null;
-      if (form.department !== undefined) payload.department = form.department?.trim() || null;
-      if (form.parent_customer_id !== undefined) payload.parent_customer_id = form.parent_customer_id || null;
       const { error } = await supabase
         .from('customers')
-        .update(payload)
-        .eq('CustomerListID', editingId)
+        .update({ is_active: nextActive })
+        .eq('CustomerListID', customer.CustomerListID)
         .eq('organization_id', organization.id);
       if (error) throw error;
-      
-      setEditingId(null);
-      setForm({ CustomerListID: '', name: '', email: '', contact_details: '', phone: '', customer_type: 'CUSTOMER', department: '', parent_customer_id: null });
-      setSuccessMsg('Customer updated successfully!');
-      
-      // Refresh current page
-      const from = (page - 1) * rowsPerPage;
-      const to = from + rowsPerPage - 1;
-      const { data } = await supabase
-        .from('customers')
-        .select('*')
-        .order('name')
-        .range(from, to)
-        .eq('organization_id', organization.id);
-      setCustomers(data || []);
+      setSuccessMsg(nextActive ? 'Customer activated.' : 'Customer deactivated.');
+      try {
+        window.dispatchEvent(new Event('gas-cylinder-subscription-refresh'));
+      } catch {
+        /* ignore */
+      }
+      await refreshCustomerPage();
     } catch (err) {
       setError(err.message);
     }
@@ -540,6 +544,11 @@ function Customers({ profile }) {
         .eq('organization_id', organization.id);
       setCustomers(data || []);
       setTotalCount(prev => prev - 1);
+      try {
+        window.dispatchEvent(new Event('gas-cylinder-subscription-refresh'));
+      } catch {
+        /* ignore */
+      }
     } catch (err) {
       logger.error('Error deleting customer:', err);
       setError(`Failed to delete customer: ${err.message}`);
@@ -609,6 +618,11 @@ function Customers({ profile }) {
         .eq('organization_id', organization.id);
       setCustomers(data || []);
       setTotalCount(prev => prev - count);
+      try {
+        window.dispatchEvent(new Event('gas-cylinder-subscription-refresh'));
+      } catch {
+        /* ignore */
+      }
     } catch (err) {
       logger.error('Error bulk deleting customers:', err);
       setError(`Failed to delete customers: ${err.message}`);
@@ -698,18 +712,13 @@ function Customers({ profile }) {
           useFlexGap
         >
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
+            <SecondaryButton variant="outlined" color="primary" sx={toolbarBtnSx} onClick={() => exportToCSV(customers)}>
+              Export to CSV
+            </SecondaryButton>
             <Button
               variant="outlined"
-              color="primary"
-              sx={{ minHeight: 40, px: 3 }}
-              onClick={() => exportToCSV(customers)}
-            >
-              Export to CSV
-            </Button>
-            <Button
-              variant="contained"
               color="error"
-              sx={{ minHeight: 40, px: 3 }}
+              sx={{ ...toolbarBtnSx, borderRadius: 999, textTransform: 'none', fontWeight: 700, borderWidth: 2 }}
               disabled={selected.length === 0}
               onClick={handleBulkDelete}
             >
@@ -718,23 +727,13 @@ function Customers({ profile }) {
           </Stack>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
             {canEdit && (
-              <Button
-                variant="contained"
-                color="primary"
-                sx={{ minHeight: 40, px: 3 }}
-                onClick={() => setAddDialogOpen(true)}
-              >
+              <PrimaryButton sx={toolbarBtnSx} onClick={() => setAddDialogOpen(true)}>
                 + Add Customer
-              </Button>
+              </PrimaryButton>
             )}
-            <Button
-              variant="contained"
-              color="secondary"
-              sx={{ minHeight: 40, px: 3 }}
-              onClick={() => navigate('/')}
-            >
+            <SecondaryButton variant="outlined" color="secondary" sx={toolbarBtnSx} onClick={() => navigate('/')}>
               Back to Dashboard
-            </Button>
+            </SecondaryButton>
           </Stack>
         </Stack>
         </Paper>
@@ -994,7 +993,14 @@ function Customers({ profile }) {
             </TableHead>
             <TableBody>
               {filteredCustomers.map((c) => (
-                <TableRow key={c.CustomerListID} sx={{ borderBottom: '1px solid rgba(15, 23, 42, 0.06)', '&:hover': { backgroundColor: '#fcfcfd' } }}>
+                <TableRow
+                  key={c.CustomerListID}
+                  sx={{
+                    borderBottom: '1px solid rgba(15, 23, 42, 0.06)',
+                    opacity: isCustomerRowActive(c) ? 1 : 0.78,
+                    '&:hover': { backgroundColor: '#fcfcfd' },
+                  }}
+                >
                   <TableCell padding="checkbox">
                     <Checkbox
                       checked={selected.includes(c.CustomerListID)}
@@ -1002,7 +1008,12 @@ function Customers({ profile }) {
                     />
                   </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
-                    {c.name}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <span>{c.name}</span>
+                      {!isCustomerRowActive(c) && (
+                        <Chip label="Inactive" size="small" color="default" variant="outlined" sx={{ fontWeight: 700, fontSize: '0.68rem' }} />
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Chip 
@@ -1024,20 +1035,46 @@ function Customers({ profile }) {
                       {assetCounts[c.CustomerListID] || 0}
                     </Typography>
                   </TableCell>
-                  <TableCell>
-                    <Button variant="text" color="primary" size="small" onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
-                      View
-                    </Button>
-                    {canEdit && (
-                      <>
-                        <Button variant="text" color="primary" size="small" onClick={() => handleEdit(c)}>
-                          Edit
-                        </Button>
-                        <Button variant="text" color="error" size="small" onClick={() => handleDelete(c.CustomerListID)}>
-                          Delete
-                        </Button>
-                      </>
-                    )}
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
+                      <SecondaryButton
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        sx={tableActionBtnSx}
+                        onClick={() => navigate(`/customer/${c.CustomerListID}`)}
+                      >
+                        View
+                      </SecondaryButton>
+                      {canEdit && (
+                        <>
+                          {isCustomerRowActive(c) ? (
+                            <SecondaryButton
+                              variant="outlined"
+                              color="warning"
+                              size="small"
+                              sx={tableActionBtnSx}
+                              onClick={() => handleToggleCustomerActive(c, false)}
+                            >
+                              Deactivate
+                            </SecondaryButton>
+                          ) : (
+                            <PrimaryButton size="small" sx={tableActionBtnSx} onClick={() => handleToggleCustomerActive(c, true)}>
+                              Activate
+                            </PrimaryButton>
+                          )}
+                          <Button
+                            variant="outlined"
+                            color="error"
+                            size="small"
+                            sx={{ ...tableActionBtnSx, borderRadius: 999, fontWeight: 700, borderWidth: 2 }}
+                            onClick={() => handleDelete(c.CustomerListID)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1179,12 +1216,12 @@ function Customers({ profile }) {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button variant="outlined" color="inherit" onClick={() => setAddDialogOpen(false)}>
+            <SecondaryButton variant="outlined" color="inherit" onClick={() => setAddDialogOpen(false)}>
               Cancel
-            </Button>
-            <Button type="submit" form="add-customer-form" variant="contained" color="primary">
+            </SecondaryButton>
+            <PrimaryButton type="submit" form="add-customer-form">
               Save
-            </Button>
+            </PrimaryButton>
           </DialogActions>
         </Dialog>
       </Paper>

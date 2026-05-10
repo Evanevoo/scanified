@@ -266,7 +266,8 @@ export function SubscriptionProvider({ children }) {
   useEffect(() => {
     if (!orgId) return;
     let debounceTimer = null;
-    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 60_000;
+    /** Tab returns after edits elsewhere; 30s balances freshness vs repeating 11-query fetch too often. */
+    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 30_000;
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       const sinceLast = Date.now() - lastFetchAtRef.current;
