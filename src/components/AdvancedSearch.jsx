@@ -21,7 +21,6 @@ import {
   TableHead,
   TableRow,
   IconButton,
-  InputAdornment,
   Collapse,
   Divider,
   Avatar,
@@ -47,7 +46,9 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useDebounce, useOptimizedFetch, usePagination } from '../utils/performance';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 import { FadeIn, SlideIn, TableSkeleton, SmoothButton } from '../components/SmoothLoading';
+import { PageSearchInput } from './ui/search-input-with-icon';
 import { useNavigate } from 'react-router-dom';
 
 const searchCategories = [
@@ -134,6 +135,9 @@ export default function AdvancedSearch({ onResultSelect }) {
   const { data: searchResults, loading: searchLoading } = useOptimizedFetch(
     useCallback(async () => {
       if (!debouncedSearch || !profile?.organization_id) return { bottles: [], customers: [], locations: [], deliveries: [] };
+
+      const ilikeOperand = postgrestQuotedIlikeContains(debouncedSearch);
+      if (!ilikeOperand) return { bottles: [], customers: [], locations: [], deliveries: [] };
       
       const results = { bottles: [], customers: [], locations: [], deliveries: [] };
 
@@ -157,7 +161,7 @@ export default function AdvancedSearch({ onResultSelect }) {
           .eq('organization_id', profile.organization_id);
 
         // Apply search term
-        query = query.or(`barcode_number.ilike.%${debouncedSearch}%,serial_number.ilike.%${debouncedSearch}%,assigned_customer.ilike.%${debouncedSearch}%,product_code.ilike.%${debouncedSearch}%`);
+        query = query.or(`barcode_number.ilike.${ilikeOperand},serial_number.ilike.${ilikeOperand},assigned_customer.ilike.${ilikeOperand},product_code.ilike.${ilikeOperand}`);
 
         // Apply filters
         if (filters.status !== 'all') {
@@ -192,7 +196,7 @@ export default function AdvancedSearch({ onResultSelect }) {
           .from('customers')
           .select('CustomerListID, name, address, phone, email')
           .eq('organization_id', profile.organization_id)
-          .or(`name.ilike.%${debouncedSearch}%,address.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`)
+          .or(`name.ilike.${ilikeOperand},address.ilike.${ilikeOperand},phone.ilike.${ilikeOperand}`)
           .limit(20);
 
         if (!error) results.customers = data || [];
@@ -204,7 +208,7 @@ export default function AdvancedSearch({ onResultSelect }) {
           .from('locations')
           .select('id, name, address, type')
           .eq('organization_id', profile.organization_id)
-          .or(`name.ilike.%${debouncedSearch}%,address.ilike.%${debouncedSearch}%`)
+          .or(`name.ilike.${ilikeOperand},address.ilike.${ilikeOperand}`)
           .limit(20);
 
         if (!error) results.locations = data || [];
@@ -225,7 +229,7 @@ export default function AdvancedSearch({ onResultSelect }) {
             customers(name)
           `)
           .eq('organization_id', profile.organization_id)
-          .or(`delivery_number.ilike.%${debouncedSearch}%,customer_name.ilike.%${debouncedSearch}%,address.ilike.%${debouncedSearch}%`)
+          .or(`delivery_number.ilike.${ilikeOperand},customer_name.ilike.${ilikeOperand},address.ilike.${ilikeOperand}`)
           .limit(20);
 
         if (!error) results.deliveries = data || [];
@@ -341,25 +345,12 @@ export default function AdvancedSearch({ onResultSelect }) {
         <Paper sx={{ p: 2, mb: 2 }}>
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
+              <PageSearchInput
                 placeholder="Search assets, customers, locations..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                  endAdornment: searchTerm && (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setSearchTerm('')}>
-                        <ClearIcon />
-                      </IconButton>
-                    </InputAdornment>
-                  )
-                }}
+                onClear={() => setSearchTerm('')}
+                className="w-full"
               />
             </Grid>
             <Grid item xs={12} md={3}>

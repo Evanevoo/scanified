@@ -3,6 +3,10 @@ import { ArrowRight, X } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/** Same pill style as the main nav omnibar (`MainLayout`). Use for all page-level filter searches. */
+export const APP_SHELL_SEARCH_INPUT_CLASSNAME =
+  "h-11 min-h-[44px] w-full rounded-full border-slate-200/80 bg-white/90 pl-4 pr-4 shadow-[0_10px_36px_rgba(99,102,241,0.09)] transition-shadow placeholder:text-slate-400 focus-visible:shadow-[0_12px_42px_rgba(64,181,173,0.12)]";
+
 interface SearchInputWithIconProps extends Omit<React.ComponentProps<"input">, "onChange"> {
   onClear?: () => void;
   showSubmitButton?: boolean;
@@ -62,4 +66,17 @@ const SearchInputWithIcon = React.forwardRef<HTMLInputElement, SearchInputWithIc
 );
 SearchInputWithIcon.displayName = "SearchInputWithIcon";
 
-export { SearchInputWithIcon };
+/** Nav-matching search field (clear button + omnibar styling). Pass `placeholder`, `value`, `onChange`, optional `onClear`. */
+const PageSearchInput = React.forwardRef<
+  HTMLInputElement,
+  SearchInputWithIconProps & { className?: string }
+>(({ className, ...props }, ref) => (
+  <SearchInputWithIcon
+    ref={ref}
+    className={cn(APP_SHELL_SEARCH_INPUT_CLASSNAME, className)}
+    {...props}
+  />
+));
+PageSearchInput.displayName = "PageSearchInput";
+
+export { SearchInputWithIcon, PageSearchInput };

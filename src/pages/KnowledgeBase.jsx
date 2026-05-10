@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import { motion, useInView, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Search, 
   Book, 
   Video, 
   FileText, 
@@ -16,6 +15,7 @@ import {
   ChevronRight,
   Play
 } from 'lucide-react';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 const categories = [
   {
@@ -247,14 +247,13 @@ export default function KnowledgeBase() {
             </p>
 
             {/* Search Bar */}
-            <div className="max-w-2xl mx-auto relative">
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-6 h-6 text-gray-400" />
-              <input
-                type="text"
+            <div className="max-w-2xl mx-auto">
+              <PageSearchInput
                 placeholder="Search for articles, guides, or videos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-14 pr-4 py-4 rounded-lg text-black text-lg focus:outline-none focus:ring-4 focus:ring-white/20"
+                onClear={() => setSearchQuery('')}
+                className="w-full text-lg text-black"
               />
             </div>
           </motion.div>

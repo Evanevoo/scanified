@@ -23,7 +23,7 @@ module.exports = {
         backgroundColor: "#FFFFFF"
       },
       package: "com.evanevoo.scanifiedandroid",
-      versionCode: 112,
+      versionCode: 113,
       permissions: [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"

@@ -10,7 +10,6 @@ import {
   Person as PersonIcon,
   Business as BusinessIcon,
   Edit as EditIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Delete as DeleteIcon,
   MoreVert as MoreVertIcon,
@@ -22,6 +21,7 @@ import {
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function UserManagementAllOrgs() {
   const { profile } = useAuth();
@@ -328,15 +328,18 @@ export default function UserManagementAllOrgs() {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              label="Search users, emails, or organizations"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-              }}
-            />
+            <Box>
+              <Typography component="label" variant="body2" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                Search users, emails, or organizations
+              </Typography>
+              <PageSearchInput
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onClear={() => setSearchTerm('')}
+                placeholder="Search users, emails, or organizations"
+                className="w-full"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} md={4}>
             <FormControl fullWidth>

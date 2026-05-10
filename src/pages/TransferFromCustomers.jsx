@@ -34,8 +34,8 @@ import {
   TransferWithinAStation as TransferWithinAStationIcon,
   SelectAll as SelectAllIcon,
   Deselect as DeselectIcon,
-  Search as SearchIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { AssetTransferService } from '../services/assetTransferService';
 import { useAuth } from '../hooks/useAuth';
 import { formatLocationDisplay } from '../utils/locationDisplay';
@@ -264,10 +264,6 @@ export default function TransferFromCustomers() {
                 {...params}
                 label="Search and Select Source Customer"
                 placeholder="Type customer name or ID..."
-                InputProps={{
-                  ...params.InputProps,
-                  startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
-                }}
               />
             )}
             sx={{ mb: 2 }}
@@ -323,16 +319,13 @@ export default function TransferFromCustomers() {
 
             {/* Filters */}
             <Box p={3} pb={0} display="flex" gap={2} alignItems="center">
-              <TextField
+              <PageSearchInput
                 placeholder="Search assets"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                size="small"
-                inputProps={{ 'aria-label': 'Search assets' }}
-                InputProps={{
-                  startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
-                }}
-                sx={{ minWidth: 200 }}
+                onClear={() => setSearchTerm('')}
+                aria-label="Search assets"
+                className="min-w-[200px]"
               />
               <TextField
                 select

@@ -10,14 +10,15 @@ import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, LinearProgress,
-  InputAdornment, Chip, Tabs, Tab, Grid, Card, CardContent, Collapse,
+  Chip, Tabs, Tab, Grid, Card, CardContent, Collapse,
   FormControl, InputLabel, Select, MenuItem, Divider, Checkbox,
 } from '@mui/material';
 import {
-  Search as SearchIcon, Refresh as RefreshIcon, Payment as PaymentIcon,
+  Refresh as RefreshIcon, Payment as PaymentIcon,
   Visibility as ViewIcon, Email as EmailIcon, Download as DownloadIcon,
   AccountBalance, CheckCircle, Warning, ExpandMore, ExpandLess, Edit as EditIcon,
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function Invoices() {
   const { organization, user, profile } = useAuth();
@@ -594,10 +595,15 @@ export default function Invoices() {
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.875rem' } }}>
             {tabFilters.map((f) => <Tab key={f} label={f === 'all' ? `All (${enriched.length})` : f.charAt(0).toUpperCase() + f.slice(1)} />)}
           </Tabs>
-          <TextField size="small" placeholder="Search invoices..." value={search} onChange={(e) => setSearch(e.target.value)}
-            sx={{ ml: 'auto', minWidth: 240, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-          />
+          <Box sx={{ ml: 'auto', minWidth: { xs: '100%', sm: 240 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+            <PageSearchInput
+              placeholder="Search invoices..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onClear={() => setSearch('')}
+              className="w-full"
+            />
+          </Box>
         </Box>
         <TableContainer>
           <Table size="small">

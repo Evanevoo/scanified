@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import PortalSnackbar from '../components/PortalSnackbar';
 import {
   History as HistoryIcon,
@@ -70,6 +70,7 @@ import { reconcileShippedBottleAssignments } from '../services/reconcileShippedB
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
+import { coerceImportedRowPkForRpc, isValidImportedRowPk } from '../utils/coerceImportedRowPk';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -4400,7 +4401,7 @@ export default function ImportApprovals() {
       {/* Enhanced Filters and Controls */}
       <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-          <SearchInputWithIcon
+          <PageSearchInput
             placeholder="Search Records"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -5964,7 +5965,7 @@ return (
                           startIcon={<ViewIcon />}
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/import-approval/${invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`);
+                            navigate(`/import-approval/${invoice.originalId || invoice.id}/detail?customer=${encodeURIComponent(invoice.data.customer_name || '')}&order=${encodeURIComponent(invoice.data.order_number || invoice.data.reference_number || '')}`);
                           }}
                         >
                           Details
@@ -6215,7 +6216,7 @@ return (
                   cursor: 'pointer',
                   '&:hover': { elevation: 4 }
                 }}
-                onClick={() => navigate(`/import-approval/${receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
+                onClick={() => navigate(`/import-approval/${receipt.originalId || receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
               >
                 <CardHeader
                   title={
@@ -6386,7 +6387,7 @@ return (
                 <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
                   <Button
                     size="small"
-                    onClick={() => navigate(`/import-approval/${receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
+                    onClick={() => navigate(`/import-approval/${receipt.originalId || receipt.id}/detail?customer=${encodeURIComponent(receipt.data.customer_name || '')}&order=${encodeURIComponent(receipt.data.order_number || receipt.data.reference_number || '')}`)}
                   >
                     View Details
                   </Button>
@@ -7999,8 +8000,8 @@ return (
       if (typeof record.id === 'string' && record.id.startsWith('scanned_')) {
         logger.debug('Processing scanned-only record:', record.id);
         
-        // Extract order number from scanned_ prefix
-        const orderNumber = record.id.replace('scanned_', '');
+        const afterPrefix = record.id.replace(/^scanned_/, '');
+        const orderNumber = (afterPrefix.includes('_') ? afterPrefix.split('_')[0] : afterPrefix).trim();
         
         // Revert bottles that were marked empty when return was scanned (before we reject)
         if (organization?.id) {
@@ -8022,19 +8023,11 @@ return (
         continue;
       }
       
-      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
-      let recordId;
-      if (typeof record.id === 'string') {
-        const numericPart = record.id.match(/\d+/);
-        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
-      } else {
-        recordId = record.id;
-      }
-      
-      logger.debug('Converted ID:', recordId, 'Type:', typeof recordId);
-      
-      if (isNaN(recordId)) {
-        logger.error('Cannot convert ID to number:', record.id);
+      const rawPk = record.originalId ?? record.id;
+      const recordId = coerceImportedRowPkForRpc(rawPk);
+      logger.debug('Resolved import PK:', recordId, 'from:', rawPk);
+      if (!isValidImportedRowPk(recordId)) {
+        logger.error('Invalid import record PK:', record.id, rawPk);
         throw new Error(`Invalid ID format: ${record.id}`);
       }
       
@@ -8143,19 +8136,11 @@ return (
       return;
     }
     
-    // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
-    let recordId;
-    if (typeof record.id === 'string') {
-      const numericPart = record.id.match(/\d+/);
-      recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
-    } else {
-      recordId = record.id;
-    }
-    
-    logger.debug('Converted ID:', recordId, 'Type:', typeof recordId);
-    
-    if (isNaN(recordId)) {
-      logger.error('Cannot convert ID to number:', record.id);
+    const rawPkInd = record.originalId ?? record.id;
+    const recordId = coerceImportedRowPkForRpc(rawPkInd);
+    logger.debug('Resolved import PK (individual reject):', recordId, 'from:', rawPkInd);
+    if (!isValidImportedRowPk(recordId)) {
+      logger.error('Invalid import record PK:', record.id, rawPkInd);
       throw new Error(`Invalid ID format: ${record.id}`);
     }
     
@@ -8223,17 +8208,10 @@ return (
         continue;
       }
       
-      // Extract numeric part from ID (e.g., "scanned_55555" -> 55555)
-      let recordId;
-      if (typeof record.id === 'string') {
-        const numericPart = record.id.match(/\d+/);
-        recordId = numericPart ? parseInt(numericPart[0], 10) : record.id;
-      } else {
-        recordId = record.id;
-      }
-      
-      if (isNaN(recordId)) {
-        logger.error('Cannot convert ID to number:', record.id);
+      const rawPkInv = record.originalId ?? record.id;
+      const recordId = coerceImportedRowPkForRpc(rawPkInv);
+      if (!isValidImportedRowPk(recordId)) {
+        logger.error('Invalid import record PK (bulk investigate):', record.id, rawPkInv);
         throw new Error(`Invalid ID format: ${record.id}`);
       }
       

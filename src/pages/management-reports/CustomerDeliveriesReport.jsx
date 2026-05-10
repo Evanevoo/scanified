@@ -12,7 +12,6 @@ import {
   TableRow,
   Button,
   TextField,
-  InputAdornment,
   CircularProgress,
   Alert,
   Chip,
@@ -27,7 +26,6 @@ import {
   Select
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   Download as DownloadIcon,
   LocalShipping as DeliveryIcon,
   People as PeopleIcon,
@@ -39,6 +37,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function CustomerDeliveriesReport() {
   const navigate = useNavigate();
@@ -367,20 +366,16 @@ export default function CustomerDeliveriesReport() {
         </Grid>
 
         {/* Search and Filters */}
-        <Box display="flex" gap={2} mb={3}>
-          <TextField
-            fullWidth
-            placeholder="Search by customer name or delivery address..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-          />
+        <Box display="flex" gap={2} mb={3} flexWrap="wrap" alignItems="center">
+          <Box sx={{ flex: 1, minWidth: 200 }}>
+            <PageSearchInput
+              placeholder="Search by customer name or delivery address..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onClear={() => setSearchTerm('')}
+              className="w-full"
+            />
+          </Box>
           <FormControl sx={{ minWidth: 120 }}>
             <InputLabel>Status</InputLabel>
             <Select

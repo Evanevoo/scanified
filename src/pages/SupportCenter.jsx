@@ -12,7 +12,6 @@ import {
 import {
   Support as SupportIcon,
   Add as AddIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Visibility as ViewIcon,
   CheckCircle as CheckCircleIcon,
@@ -32,6 +31,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { sendSupportTicketNotification, sendSupportTicketReplyNotification } from '../services/notificationService';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function SupportCenter() {
   const { profile, organization } = useAuth();
@@ -318,14 +318,12 @@ export default function SupportCenter() {
       <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
+            <PageSearchInput
               placeholder="Search tickets..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-              }}
+              onClear={() => setSearchTerm('')}
+              className="w-full"
             />
           </Grid>
           <Grid item xs={12} sm={3}>

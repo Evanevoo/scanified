@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
   Box,
@@ -40,6 +40,7 @@ import {
   Grid,
   Stack
 } from '@mui/material';
+import { createFilterOptions } from '@mui/material/Autocomplete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HomeIcon from '@mui/icons-material/Home';
 import TransferWithinAStationIcon from '@mui/icons-material/TransferWithinAStation';
@@ -61,6 +62,7 @@ import { useAuth } from '../hooks/useAuth';
 import DNSConversionDialog from '../components/DNSConversionDialog';
 import BarcodeDisplay from '../components/BarcodeDisplay';
 import { formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
+import { formatDate } from '../utils/subscriptionUtils';
 import { summarizeBottlesByType, getBottleSummaryGroupKey } from '../utils/bottleInventoryGrouping';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import {
@@ -73,18 +75,70 @@ import {
 import {
   fetchOrgRentalPricingContext,
   monthlyRateForNewRental,
+  monthlyRateForProductPlaceholder,
   invalidateOrgRentalPricingCache,
 } from '../utils/rentalPricing';
 import { findActiveLeaseContract } from '../services/leaseBilling';
-import { isCustomerOwnedForBilling } from '../services/billingFromAssets';
+import {
+  bottleProductCode,
+  bottleStrictProductCode,
+  isCustomerOwnedForBilling,
+  isDnsRentalExcludedFromBillableCount,
+} from '../services/billingFromAssets';
+import { resolveCustomerTypeForParentConstraint } from '../utils/customerParentConstraint';
+import { expandLeaseMatchKeys } from '../utils/leaseCustomerMatchKeys';
+import { normalizePricingKey } from '../services/pricingResolution';
 
-/** rentals.location is often empty; use the live bottle and then customer branch. */
+/**
+ * When auto-inserting an open rental for an assigned bottle, avoid defaulting start date to "today"
+ * (that misreads as "rental started today"). Prefer explicit bottle rental date, then record creation,
+ * then last location touch, then today.
+ */
+function inferRentalStartDateFromBottle(bottle) {
+  const toYmd = (v) => {
+    if (v == null || v === '') return '';
+    const s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const ms = Date.parse(s);
+    return Number.isNaN(ms) ? '' : new Date(ms).toISOString().slice(0, 10);
+  };
+  return (
+    toYmd(bottle?.rental_start_date) ||
+    toYmd(bottle?.created_at) ||
+    toYmd(bottle?.last_location_update) ||
+    toYmd(new Date().toISOString())
+  );
+}
+
+/** Prefer customer branch from Locations / customers.location; bottle.location is warehouse routing (e.g. Saskatoon). */
 function displayRentalRowLocation(rental, bottle, customer) {
   const pick = (v) => (v == null ? '' : String(v).trim());
-  for (const raw of [pick(rental?.location), pick(bottle?.location), pick(customer?.location)]) {
+  for (const raw of [
+    pick(rental?.location),
+    pick(customer?.location),
+    pick(customer?.city),
+    pick(bottle?.location),
+  ]) {
     if (raw) return formatLocationDisplay(raw);
   }
   return 'Unknown';
+}
+
+/** Raw location key for inventory row / filter — customer branch (Locations page) before bottle warehouse field. */
+function resolveCustomerInventoryLocationRaw(asset, customer) {
+  const pick = (v) => (v == null ? '' : String(v).trim());
+  return (
+    pick(customer?.location) ||
+    pick(customer?.city) ||
+    pick(asset?.location) ||
+    ''
+  );
+}
+
+function displayAssignedAssetLocationChip(asset, customer) {
+  const raw = resolveCustomerInventoryLocationRaw(asset, customer);
+  if (!raw) return 'Unknown';
+  return formatLocationDisplay(raw);
 }
 
 /** Compare barcodes / serials loosely (leading zeros, serial stored as barcode on rental). */
@@ -100,12 +154,12 @@ function normalizeAssetIdKey(v) {
 
 function bottleMatchesRentalRow(bottle, rentalBarcode) {
   if (!rentalBarcode || !bottle) return false;
-  const r = String(rentalBarcode).trim();
+  const r = String(rentalBarcode).trim().replace(/\.0+$/, '');
   const bc = bottle.barcode_number || bottle.barcode || '';
   const sn = bottle.serial_number || '';
   const candidates = [bc, sn].filter(Boolean);
   for (const c of candidates) {
-    const ct = String(c).trim();
+    const ct = String(c).trim().replace(/\.0+$/, '');
     if (!ct) continue;
     if (ct === r) return true;
     if (normalizeAssetIdKey(ct) === normalizeAssetIdKey(r)) return true;
@@ -134,6 +188,61 @@ function findCustomerAssetForRentalExtended(assignedAssets, supplementalBottles,
   return findCustomerAssetForRental(supplementalBottles, rental);
 }
 
+/**
+ * Type/Product column: same SKU must read the same. Prefer Asset type pricing `description`
+ * for the bottle/rental product code, then bottle description (full text) before short `type`.
+ */
+function resolveRentalHistoryTypeProductLabel(rental, bottle, assetPricingMap) {
+  const pricingDesc = (codeRaw) => {
+    const k = normalizePricingKey(codeRaw);
+    if (!k || !assetPricingMap?.get) return '';
+    const row = assetPricingMap.get(k);
+    const d = row?.description != null ? String(row.description).trim() : '';
+    return d;
+  };
+
+  if (bottle) {
+    const strict = bottleStrictProductCode(bottle);
+    const loose = bottleProductCode(bottle);
+    const fromCatalog =
+      pricingDesc(strict) ||
+      pricingDesc(loose);
+    if (fromCatalog) return fromCatalog;
+    return (
+      bottle.description ||
+      bottle.type ||
+      bottle.product_code ||
+      bottle.display_label ||
+      'Unknown'
+    );
+  }
+
+  const rentalCodeCandidates = [
+    rental?.product_code,
+    rental?.product_type,
+    rental?.asset_type,
+    rental?.gas_type,
+    rental?.cylinder_type,
+    rental?.sku,
+    rental?.cylinder?.type,
+  ];
+  for (const c of rentalCodeCandidates) {
+    const d = pricingDesc(c);
+    if (d) return d;
+  }
+
+  return (
+    rental?.cylinder?.type ||
+    rental?.product_code ||
+    rental?.product_type ||
+    rental?.asset_type ||
+    rental?.gas_type ||
+    rental?.cylinder_type ||
+    (typeof rental?.description === 'string' ? rental.description : '') ||
+    'Unknown'
+  );
+}
+
 /** Explains open-rentals vs assigned-bottle count without blaming DNS when dnsCount is 0. */
 function buildOpenRentalsBillingHelper({
   delta,
@@ -142,8 +251,17 @@ function buildOpenRentalsBillingHelper({
   dnsCount,
   rnbCount,
   rnsCount,
+  missingAssignedWithoutOpenRental = 0,
 }) {
-  if (delta <= 0) {
+  if (delta < 0) {
+    const abs = Math.abs(delta);
+    const missing = missingAssignedWithoutOpenRental;
+    if (missing > 0) {
+      return `${openCount} open rental row(s) drive monthly billing; ${assignedBottleCount} bottles are assigned in inventory. ${missing} assigned bottle${missing !== 1 ? 's' : ''} ${missing !== 1 ? 'have' : 'has'} no matching open rental — those cylinders do not add an invoice line until an open rental exists.`;
+    }
+    return `${openCount} open rental row(s); ${assignedBottleCount} bottles assigned (Δ −${abs}). Inventory is higher than open rentals — often assigned assets still missing a rental row, or counts mix customer-owned / DNS rows.`;
+  }
+  if (delta === 0) {
     return 'Monthly rental invoices total these lines — same open rows as the Rentals workspace';
   }
   const dnsLine =
@@ -230,6 +348,32 @@ function canonicalPaymentTermValue(raw) {
 const CUSTOMER_PK_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const filterParentCustomerOptions = createFilterOptions({
+  stringify: (option) =>
+    `${option?.name ?? ''} ${option?.CustomerListID ?? ''}`.trim(),
+});
+
+/** True when bottle assignment fields match this customer (List ID, route id, UUID pk, or legacy name). */
+function bottleAssignedToCurrentCustomer(bottle, customer, routeIdFallback) {
+  if (!bottle || !customer) return false;
+  const listId = String(customer.CustomerListID || '').trim();
+  const routeList = String(routeIdFallback || '').trim();
+  const listKeys = new Set([listId, routeList].filter(Boolean));
+  const name = String(customer.name || '').trim();
+  const pk = String(customer.id || '').trim();
+
+  const ac = String(bottle.assigned_customer ?? '').trim();
+  const cu = String(bottle.customer_uuid ?? '').trim();
+  const cn = String(bottle.customer_name ?? '').trim();
+
+  for (const k of listKeys) {
+    if (k && (ac === k || cu === k)) return true;
+  }
+  if (pk && CUSTOMER_PK_UUID_RE.test(pk) && (ac === pk || cu === pk)) return true;
+  if (name && (ac === name || cu === name || cn === name)) return true;
+  return false;
+}
+
 /**
  * Load one customer row from the URL segment. Handles:
  * - CustomerListID exact match
@@ -268,6 +412,10 @@ async function fetchCustomerRowForRouteParam(supabaseClient, orgId, routeId) {
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const tabWasHiddenRef = useRef(false);
+  /** When true, next fetchData run skips full-page loading (tab focus / bfcache inventory refresh). */
+  const silentInventoryRefreshRef = useRef(false);
   const { organization } = useAuth();
   const subscriptionCtx = useSubscriptions();
   const [customer, setCustomer] = useState(null);
@@ -331,6 +479,15 @@ export default function CustomerDetail() {
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
   const [resolvingDnsId, setResolvingDnsId] = useState(null); // rental id being resolved (DNS close)
   const [fixingDnsRnb, setFixingDnsRnb] = useState(false);
+  const [addManualDnsOpen, setAddManualDnsOpen] = useState(false);
+  const [addManualDnsSaving, setAddManualDnsSaving] = useState(false);
+  const [manualDnsForm, setManualDnsForm] = useState({
+    dns_line_type: 'dns',
+    product_code: '',
+    quantity: '1',
+    rental_start_date: new Date().toISOString().split('T')[0],
+    order_ref: '',
+  });
 
   const [leaseContractRow, setLeaseContractRow] = useState(null);
   const [leaseItemsRows, setLeaseItemsRows] = useState([]);
@@ -343,6 +500,8 @@ export default function CustomerDetail() {
     yearly_price: '',
   });
   const [leaseBusy, setLeaseBusy] = useState(false);
+  /** Yearly leases from `lease_agreements` (Lease agreements page); separate from `lease_contracts` inline editor. */
+  const [yearlyLeaseAgreements, setYearlyLeaseAgreements] = useState([]);
   /** Bottles referenced by open rentals but missing from merged assigned-bottle list (stale/wrong customer link, etc.). */
   const [supplementalBottles, setSupplementalBottles] = useState([]);
   const [reassigningOrphans, setReassigningOrphans] = useState(false);
@@ -352,20 +511,30 @@ export default function CustomerDetail() {
    * Bottles for this account. Legacy import paths could have saved:
    *   - bottles.assigned_customer = CustomerListID (correct)
    *   - bottles.assigned_customer = display name
-   *   - bottles.customer_uuid    = CustomerListID
-   *   - bottles.customer_uuid    = display name
+   *   - bottles.customer_uuid    = customers.id (UUID) only — PostgREST rejects non-UUID filters
+   *     on uuid columns, so we only query customer_uuid when the key looks like a UUID.
    *   - bottles.customer_name    = display name
    * Merge every match so no assignments disappear.
    */
-  const fetchMergedBottlesForCustomer = useCallback(async (orgId, customerName, customerListId) => {
+  const fetchMergedBottlesForCustomer = useCallback(async (orgId, customerName, customerListId, customerPkId = null) => {
     const listId = (customerListId || id || '').toString().trim();
+    const pkTrim = String(customerPkId || '').trim();
+    const pkQueries =
+      pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)
+        ? [
+            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', pkTrim),
+            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', pkTrim),
+          ]
+        : [];
+    const listIdLooksUuid = listId && CUSTOMER_PK_UUID_RE.test(listId);
     const idRuns = await Promise.all([
       listId
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
         : Promise.resolve({ data: [], error: null }),
-      listId
+      listId && listIdLooksUuid
         ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', listId)
         : Promise.resolve({ data: [], error: null }),
+      ...pkQueries,
     ]);
 
     const map = new Map();
@@ -379,9 +548,13 @@ export default function CustomerDetail() {
     // Legacy name-keyed rows: merge even when listId already matched bottles, so mixed assignments
     // (84 on CustomerListID + 1 only on display name) still show the full 85.
     if (customerName) {
+      const nameTrim = String(customerName).trim();
+      const nameLooksUuid = nameTrim && CUSTOMER_PK_UUID_RE.test(nameTrim);
       const legacyRuns = await Promise.all([
         supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName),
-        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', customerName),
+        nameLooksUuid
+          ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', nameTrim)
+          : Promise.resolve({ data: [], error: null }),
         supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName),
       ]);
       legacyRuns.forEach(({ data, error }) => {
@@ -500,13 +673,21 @@ export default function CustomerDetail() {
     return Array.from(byKey.values());
   }, [id]);
 
-  // DNS = approved invoice without a scanned bottle; RNB = return without being on that customer's balance; RNS = return with no scanned bottle
+  // DNS = approved invoice without a scanned bottle.
+  // RNB = return scanned on this customer's order but no matching open rental/assignment for them when approved (order customer ≠ “on rent” for that bottle).
+  // RNS = return with no scanned bottle
   const dnsRentals = useMemo(() => (locationAssets || []).filter(r => r.is_dns), [locationAssets]);
-  const rnbRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not on balance')), [dnsRentals]);
-  const rnsRentals = useMemo(() => dnsRentals.filter(r => (r.dns_description || '').includes('Return not scanned')), [dnsRentals]);
+  const rnbRentals = useMemo(
+    () => dnsRentals.filter((r) => String(r.dns_description || '').toLowerCase().includes('return not on balance')),
+    [dnsRentals]
+  );
+  const rnsRentals = useMemo(
+    () => dnsRentals.filter((r) => String(r.dns_description || '').toLowerCase().includes('return not scanned')),
+    [dnsRentals]
+  );
   const dnsOnlyRentals = useMemo(() => dnsRentals.filter(r => {
-    const desc = r.dns_description || '';
-    return !desc.includes('Return not on balance') && !desc.includes('Return not scanned');
+    const desc = String(r.dns_description || '').toLowerCase();
+    return !desc.includes('return not on balance') && !desc.includes('return not scanned');
   }), [dnsRentals]);
   const dnsSummaryByType = useMemo(() => {
     const byType = {};
@@ -541,7 +722,9 @@ export default function CustomerDetail() {
     const dnsRows = [...dnsOnlyRentals, ...rnbRentals].map((r) => ({
       id: 'dns-' + r.id,
       serial_number: '—',
-      barcode_number: (r.dns_description || '').includes('Return not on balance') ? (r.bottle_barcode || 'RNB') : (r.bottle_barcode || 'DNS'),
+      barcode_number: String(r.dns_description || '').toLowerCase().includes('return not on balance')
+        ? (r.bottle_barcode || 'RNB')
+        : (r.bottle_barcode || 'DNS'),
       type: r.dns_product_code || r.product_code || 'UNCLASSIFIED',
       description: r.dns_description || '',
       location: '—',
@@ -635,7 +818,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customer.id
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'DNS cleared. It will no longer show on this customer.', severity: 'success' });
@@ -644,6 +828,119 @@ export default function CustomerDetail() {
       setTransferMessage({ open: true, message: e?.message || 'Failed to clear DNS', severity: 'error' });
     } finally {
       setResolvingDnsId(null);
+    }
+  };
+
+  const submitManualDns = async () => {
+    const orgId = customer?.organization_id;
+    if (!orgId) return;
+    if (manualDnsProductPickerOptions.length === 0) {
+      setTransferMessage({
+        open: true,
+        message:
+          'No product SKUs available. Add Asset type pricing rows or set product/type on bottles (Assets), then try again.',
+        severity: 'warning',
+      });
+      return;
+    }
+    const productCode = (manualDnsForm.product_code || '').trim();
+    if (!productCode) {
+      setTransferMessage({ open: true, message: 'Select a product code from the list.', severity: 'warning' });
+      return;
+    }
+    if (!manualDnsProductCodeAllowed.has(productCode.toLowerCase())) {
+      setTransferMessage({
+        open: true,
+        message: 'Choose a product code from the list (pricing, rental class, or inventory SKU).',
+        severity: 'warning',
+      });
+      return;
+    }
+    let q = parseInt(manualDnsForm.quantity, 10);
+    if (Number.isNaN(q) || q < 1) q = 1;
+    q = Math.min(q, 500);
+    const startYmd =
+      (manualDnsForm.rental_start_date || '').trim() || new Date().toISOString().split('T')[0];
+    const lineType = manualDnsForm.dns_line_type || 'dns';
+    const dnsDescription =
+      lineType === 'rnb'
+        ? `Return not on balance — ${productCode} (manual)`
+        : lineType === 'rns'
+          ? `Return not scanned — ${productCode} (manual)`
+          : `${productCode} – manual DNS (delivered not scanned)`;
+    const orderRef = (manualDnsForm.order_ref || '').trim();
+    const dnsOrderNumber = orderRef ? `MANUAL-${orderRef}` : `MANUAL-${Date.now()}`;
+    const customerIdForRental = customer.CustomerListID || customer.name;
+    const customerNameForRental = customer.name || '';
+    const rentalLocation =
+      (customer?.location && String(customer.location).trim()) ||
+      (customer?.city && String(customer.city).trim()) ||
+      'SASKATOON';
+
+    setAddManualDnsSaving(true);
+    try {
+      const pricingCtx = await fetchOrgRentalPricingContext(supabase, orgId);
+      let rental_amount = monthlyRateForProductPlaceholder(customerIdForRental, productCode, pricingCtx);
+      if (!(rental_amount > 0)) rental_amount = 10;
+
+      const nowIso = new Date().toISOString();
+      const rows = [];
+      for (let i = 0; i < q; i += 1) {
+        rows.push({
+          organization_id: orgId,
+          customer_id: customerIdForRental,
+          customer_name: customerNameForRental,
+          is_dns: true,
+          dns_product_code: productCode,
+          dns_description: dnsDescription,
+          dns_order_number: dnsOrderNumber,
+          bottle_id: null,
+          bottle_barcode: null,
+          rental_start_date: startYmd,
+          rental_end_date: null,
+          rental_amount,
+          rental_type: 'monthly',
+          tax_code: 'GST+PST',
+          tax_rate: 0.11,
+          location: rentalLocation,
+          status: 'active',
+          created_at: nowIso,
+          updated_at: nowIso,
+        });
+      }
+      const { error } = await supabase.from('rentals').insert(rows);
+      if (error) throw error;
+      const merged = await fetchMergedOpenRentalsForCustomer(
+        orgId,
+        customer.name,
+        customer.CustomerListID,
+        customer.id
+      );
+      setLocationAssets(merged);
+      setAddManualDnsOpen(false);
+      setManualDnsForm({
+        dns_line_type: 'dns',
+        product_code: '',
+        quantity: '1',
+        rental_start_date: new Date().toISOString().split('T')[0],
+        order_ref: '',
+      });
+      const typeWord =
+        lineType === 'rnb' ? 'RNB' : lineType === 'rns' ? 'RNS' : 'DNS';
+      setTransferMessage({
+        open: true,
+        message: `Added ${q} ${typeWord} rental line(s) for ${productCode}.`,
+        severity: 'success',
+      });
+    } catch (e) {
+      logger.error('Manual DNS insert error:', e);
+      setTransferMessage({
+        open: true,
+        message: e?.message || 'Failed to add DNS line',
+        severity: 'error',
+      });
+    } finally {
+      setAddManualDnsSaving(false);
     }
   };
 
@@ -710,7 +1007,8 @@ export default function CustomerDetail() {
       const merged = await fetchMergedOpenRentalsForCustomer(
         customer.organization_id,
         customer.name,
-        customer.CustomerListID
+        customer.CustomerListID,
+        customer.id
       );
       setLocationAssets(merged);
       setTransferMessage({
@@ -735,7 +1033,11 @@ export default function CustomerDetail() {
       if (!organization?.id) {
         return;
       }
-      setLoading(true);
+      const silentRefresh = silentInventoryRefreshRef.current;
+      silentInventoryRefreshRef.current = false;
+      if (!silentRefresh) {
+        setLoading(true);
+      }
       setError(null);
       try {
         const { data: allCustomers, error: checkError } = await fetchCustomerRowForRouteParam(
@@ -784,7 +1086,8 @@ export default function CustomerDetail() {
         const customerAssetsData = await fetchMergedBottlesForCustomer(
           orgId,
           customerData.name,
-          customerData.CustomerListID
+          customerData.CustomerListID,
+          customerData.id
         );
         setCustomerAssets(customerAssetsData);
         
@@ -817,7 +1120,7 @@ export default function CustomerDetail() {
               customer_name: customerData.name,
               bottle_id: bottle.id,
               bottle_barcode: barcode,
-              rental_start_date: bottle.rental_start_date || new Date().toISOString().split('T')[0],
+              rental_start_date: inferRentalStartDateFromBottle(bottle),
               rental_end_date: null,
               rental_amount,
               rental_type: 'monthly',
@@ -845,34 +1148,124 @@ export default function CustomerDetail() {
     fetchData();
   }, [
     id,
+    location.key,
     customerDataVersion,
     organization?.id,
     fetchMergedBottlesForCustomer,
     fetchMergedOpenRentalsForCustomer,
   ]);
 
+  /** Inventory + open rentals can change while this tab is in background or via bfcache back navigation — refetch so assigned bottles match DB. */
   useEffect(() => {
-    if (!customer?.organization_id || !customer?.CustomerListID) {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        tabWasHiddenRef.current = true;
+        return;
+      }
+      if (document.visibilityState === 'visible' && tabWasHiddenRef.current) {
+        tabWasHiddenRef.current = false;
+        silentInventoryRefreshRef.current = true;
+        setCustomerDataVersion((v) => v + 1);
+      }
+    };
+    const onPageShow = (e) => {
+      if (e.persisted) {
+        silentInventoryRefreshRef.current = true;
+        setCustomerDataVersion((v) => v + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!customer?.organization_id || (!customer?.CustomerListID && !customer?.id)) {
       setLeaseContractRow(null);
       setLeaseItemsRows([]);
+      setYearlyLeaseAgreements([]);
+      return;
+    }
+    const leaseCustomerKeys = [
+      ...new Set(
+        [customer.CustomerListID, customer.id]
+          .filter(Boolean)
+          .map((k) => String(k).trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (leaseCustomerKeys.length === 0) {
+      setLeaseContractRow(null);
+      setLeaseItemsRows([]);
+      setYearlyLeaseAgreements([]);
       return;
     }
     let cancelled = false;
     (async () => {
-      const { data: contracts, error } = await supabase
+      const { data: orgCustomers } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', customer.organization_id);
+
+      if (cancelled) return;
+
+      const subKey = customer.CustomerListID || customer.id;
+      const matchKeys = expandLeaseMatchKeys(subKey, customer, orgCustomers || []);
+      const expandedArr = Array.from(matchKeys).filter(Boolean);
+      /** Same alias expansion as Subscriptions — lease rows may key by List ID, UUID, or name. */
+      const inKeys = expandedArr.length > 0 ? expandedArr : leaseCustomerKeys;
+
+      const { data: contracts, error: contractsError } = await supabase
         .from('lease_contracts')
         .select('*')
         .eq('organization_id', customer.organization_id)
-        .eq('customer_id', customer.CustomerListID)
+        .in('customer_id', inKeys)
         .order('start_date', { ascending: false });
-      if (error || cancelled) return;
-      const active = findActiveLeaseContract(
-        contracts || [],
-        customer.CustomerListID,
-        customer.organization_id
-      );
-      const c = active || (contracts && contracts[0]) || null;
+      if (contractsError) {
+        logger.warn('CustomerDetail lease_contracts fetch:', contractsError);
+      }
       if (cancelled) return;
+
+      const contractRows = contractsError ? [] : contracts || [];
+
+      /** Yearly lease workspace (`lease_agreements`) — same customer may have no `lease_contracts` row yet. */
+      let yearlyMerged = [];
+      try {
+        const { data: byCustomerId, error: yErr } = await supabase
+          .from('lease_agreements')
+          .select('*')
+          .eq('organization_id', customer.organization_id)
+          .in('customer_id', inKeys);
+        if (!yErr && byCustomerId?.length) {
+          byCustomerId.forEach((r) => yearlyMerged.push(r));
+        }
+        const displayName = String(customer.name || customer.Name || '').trim();
+        if (displayName) {
+          const { data: byName, error: nErr } = await supabase
+            .from('lease_agreements')
+            .select('*')
+            .eq('organization_id', customer.organization_id)
+            .ilike('customer_name', displayName);
+          if (!nErr && byName?.length) {
+            byName.forEach((r) => yearlyMerged.push(r));
+          }
+        }
+        const dedup = new Map();
+        yearlyMerged.forEach((r) => {
+          if (r?.id) dedup.set(r.id, r);
+        });
+        yearlyMerged = [...dedup.values()];
+      } catch {
+        yearlyMerged = [];
+      }
+
+      const active = findActiveLeaseContract(contractRows, inKeys, customer.organization_id);
+      const c = active || (contractRows && contractRows[0]) || null;
+      if (cancelled) return;
+      setYearlyLeaseAgreements(yearlyMerged);
       setLeaseContractRow(c);
       if (c) {
         setLeaseStartDate(c.start_date || '');
@@ -894,6 +1287,9 @@ export default function CustomerDetail() {
   }, [
     customer?.organization_id,
     customer?.CustomerListID,
+    customer?.id,
+    customer?.name,
+    customer?.Name,
   ]);
 
   // Load parent customer options when entering edit (for "Under parent" selector)
@@ -1001,6 +1397,70 @@ export default function CustomerDetail() {
   );
 
   /**
+   * DNS / RNB / RNS manual lines: union of Asset type pricing, rental classes, and every SKU
+   * appearing on org bottles (same inventory universe as Assets).
+   */
+  const manualDnsProductPickerOptions = useMemo(() => {
+    const byNorm = new Map();
+    const add = (code, description = '', category = '') => {
+      const c = String(code || '').trim();
+      if (!c) return;
+      const k = c.toLowerCase();
+      if (!byNorm.has(k)) {
+        byNorm.set(k, {
+          product_code: c,
+          description,
+          category,
+        });
+      }
+    };
+
+    for (const p of subscriptionCtx.assetTypePricing || []) {
+      if (String(p?.product_code || '').trim() && p.is_active !== false) {
+        add(p.product_code, p.description || '', p.category || '');
+      }
+    }
+
+    for (const row of orgRentalClasses || []) {
+      const code = String(row.match_product_code || '').trim();
+      if (!code) continue;
+      const label = String(row.class_name || row.group_name || '').trim();
+      add(code, label ? `${label} (rental class)` : 'Rental class', row.match_category || '');
+    }
+
+    for (const b of subscriptionCtx.bottles || []) {
+      const code = bottleProductCode(b);
+      if (code) add(code, 'Organization inventory (Assets)', '');
+    }
+
+    for (const asset of customerAssets || []) {
+      const code = bottleProductCode(asset);
+      if (code) add(code, 'This customer’s bottles', '');
+    }
+
+    return [...byNorm.values()].sort((a, b) =>
+      a.product_code.localeCompare(b.product_code, undefined, { sensitivity: 'base' })
+    );
+  }, [subscriptionCtx.assetTypePricing, subscriptionCtx.bottles, orgRentalClasses, customerAssets]);
+
+  const manualDnsProductCodeAllowed = useMemo(() => {
+    const s = new Set();
+    for (const o of manualDnsProductPickerOptions) {
+      s.add(o.product_code.toLowerCase());
+    }
+    return s;
+  }, [manualDnsProductPickerOptions]);
+
+  const filterManualDnsProductOptions = useMemo(
+    () =>
+      createFilterOptions({
+        stringify: (option) =>
+          `${option.product_code} ${option.description || ''} ${option.category || ''}`,
+      }),
+    []
+  );
+
+  /**
    * Supplemental bottle fetch + auto-reassign.
    * When an open rental references a bottle that isn't in the assigned list,
    * look it up in the org, then automatically reassign it here — if there's
@@ -1098,17 +1558,39 @@ export default function CustomerDetail() {
   const orphanRentals = useMemo(() => {
     const assets = customerAssets || [];
     const extras = supplementalBottles || [];
+    const cust = customer;
     return (locationAssets || [])
       .filter((r) => {
         if (r?.is_dns) return false;
         if (findCustomerAssetForRental(assets, r)) return false;
+        const viaExtra = findCustomerAssetForRental(extras, r);
+        if (viaExtra && bottleAssignedToCurrentCustomer(viaExtra, cust, id)) return false;
         return true;
       })
       .map((r) => {
         const bottle = findCustomerAssetForRental(extras, r);
         return { rental: r, bottle };
       });
-  }, [locationAssets, customerAssets, supplementalBottles]);
+  }, [locationAssets, customerAssets, supplementalBottles, customer, id]);
+
+  /** Assigned cylinders (non–customer-owned) with no matching non-DNS open rental — not an invoice line until a rental row exists. */
+  const assignedBottlesMissingOpenRental = useMemo(() => {
+    const rentals = (locationAssets || []).filter((r) => !r?.is_dns);
+    const assets = customerAssets || [];
+    const missing = [];
+    for (const b of assets) {
+      if (isCustomerOwnedForBilling(b)) continue;
+      const matched = rentals.some((r) => {
+        const rid = r?.bottle_id != null ? String(r.bottle_id).trim() : '';
+        const bid = b?.id != null ? String(b.id).trim() : '';
+        if (rid && bid && rid === bid) return true;
+        if (r?.bottle_barcode) return bottleMatchesRentalRow(b, r.bottle_barcode);
+        return false;
+      });
+      if (!matched) missing.push(b);
+    }
+    return missing;
+  }, [locationAssets, customerAssets]);
 
   const handleReassignOrphans = async () => {
     if (!customer || !organization?.id) return;
@@ -1256,6 +1738,7 @@ export default function CustomerDetail() {
         organization.id,
         customer.name,
         listId,
+        customer.id
       );
       setCustomerAssets(freshBottles);
       setTransferMessage({
@@ -1351,6 +1834,9 @@ export default function CustomerDetail() {
     return (locationAssets || []).map((rental) => {
       const isDNS = rental.is_dns === true;
       const isYearly = (rental.rental_type || 'monthly').toLowerCase() === 'yearly';
+      if (isDnsRentalExcludedFromBillableCount(rental)) {
+        return { rental, displayAmount: 0 };
+      }
       if (isYearly) {
         const raw = parseFloat(String(rental.rental_amount ?? ''));
         return {
@@ -1513,7 +1999,8 @@ export default function CustomerDetail() {
         const customerAssetsData = await fetchMergedBottlesForCustomer(
           orgId,
           customer?.name,
-          customer?.CustomerListID
+          customer?.CustomerListID,
+          customer?.id
         );
         setCustomerAssets(customerAssetsData || []);
         setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
@@ -2305,6 +2792,20 @@ export default function CustomerDetail() {
     const normalizedBarcode = (editForm.barcode || '')
       .toString()
       .trim();
+    const rawParent = editForm.parent_customer_id;
+    const normalizedParentId =
+      rawParent != null && String(rawParent).trim() !== ''
+        ? String(rawParent).trim()
+        : null;
+    if (normalizedParentId && customer?.id && normalizedParentId === customer.id) {
+      setSaveError('A customer cannot be its own parent. Choose a different parent account.');
+      setSaving(false);
+      return;
+    }
+    const resolvedCustomerType = resolveCustomerTypeForParentConstraint(
+      editForm.customer_type,
+      normalizedParentId
+    );
     const updateFields = {
       name: editForm.name,
       email: editForm.email,
@@ -2317,10 +2818,10 @@ export default function CustomerDetail() {
       address5: editForm.address5,
       city: editForm.city,
       postal_code: editForm.postal_code,
-      customer_type: editForm.customer_type || 'CUSTOMER',
+      customer_type: resolvedCustomerType,
       location: editForm.location || 'SASKATOON',
       department: (editForm.department || '').trim() || null,
-      parent_customer_id: editForm.parent_customer_id || null,
+      parent_customer_id: normalizedParentId,
       // Include barcode if provided (empty string allowed to clear)
       barcode: normalizedBarcode || null,
       billing_mode: editForm.billing_mode === 'lease' ? 'lease' : 'rental',
@@ -2360,7 +2861,14 @@ export default function CustomerDetail() {
       .eq('CustomerListID', id)
       .eq('organization_id', customer.organization_id);
     if (error) {
-      setSaveError(error.message);
+      const msg = error.message || '';
+      const branchParentHint =
+        /check_branch_has_parent/i.test(msg) || /branch.*parent/i.test(msg)
+          ? ' A row under a parent must use customer type “Branch / location”, and a branch must have a parent selected.'
+          : '';
+      setSaveError(
+        branchParentHint ? `${msg}.${branchParentHint}` : msg
+      );
       setSaving(false);
       return;
     }
@@ -2412,9 +2920,46 @@ export default function CustomerDetail() {
     dnsCount: dnsRentals.length,
     rnbCount: rnbRentals.length,
     rnsCount: rnsRentals.length,
+    missingAssignedWithoutOpenRental: assignedBottlesMissingOpenRental.length,
   });
   const leaseAgreementStatus = (() => {
+    const statusFromYearlyLeases = (rows) => {
+      const activeRows = (rows || []).filter((a) => String(a.status || '').toLowerCase() === 'active');
+      const pool = activeRows.length ? activeRows : rows || [];
+      const primary = [...pool].sort(
+        (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+      )[0];
+      if (!primary) {
+        return {
+          value: 'Yes (yearly)',
+          helper: `${rows.length} yearly lease agreement(s) on file — open Lease agreements to manage.`,
+          color: 'info',
+        };
+      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = primary.start_date ? new Date(primary.start_date) : null;
+      const end = primary.end_date ? new Date(primary.end_date) : null;
+      if (start) start.setHours(0, 0, 0, 0);
+      if (end) end.setHours(0, 0, 0, 0);
+      const isScheduled = start && start > today;
+      const isExpired = end && end < today;
+      const isActive = !isScheduled && !isExpired;
+      const dateParts = [
+        primary.start_date ? `starts ${formatDate(primary.start_date)}` : null,
+        primary.end_date ? `ends ${formatDate(primary.end_date)}` : 'no end date',
+      ].filter(Boolean);
+      return {
+        value: isActive ? 'Active (yearly)' : isScheduled ? 'Scheduled (yearly)' : 'Expired (yearly)',
+        helper: `${rows.length} agreement${rows.length === 1 ? '' : 's'} (${dateParts.join(', ')}) — Lease agreements workspace.`,
+        color: isActive ? 'success' : isScheduled ? 'info' : 'warning',
+      };
+    };
+
     if (!leaseContractRow) {
+      if (yearlyLeaseAgreements.length > 0) {
+        return statusFromYearlyLeases(yearlyLeaseAgreements);
+      }
       return {
         value: 'No',
         helper: 'No lease agreement is linked to this customer.',
@@ -2434,9 +2979,13 @@ export default function CustomerDetail() {
       leaseContractRow.start_date ? `starts ${formatDate(leaseContractRow.start_date)}` : null,
       leaseContractRow.end_date ? `ends ${formatDate(leaseContractRow.end_date)}` : 'no end date',
     ].filter(Boolean);
+    const yearlyHint =
+      yearlyLeaseAgreements.length > 0
+        ? ` Also ${yearlyLeaseAgreements.length} yearly lease record${yearlyLeaseAgreements.length === 1 ? '' : 's'} (Lease agreements).`
+        : '';
     return {
       value: isActive ? 'Active' : isScheduled ? 'Scheduled' : 'Expired',
-      helper: `${leaseItemsRows.length} contract line${leaseItemsRows.length === 1 ? '' : 's'}; ${dateParts.join(', ')}.`,
+      helper: `${leaseItemsRows.length} contract line${leaseItemsRows.length === 1 ? '' : 's'}; ${dateParts.join(', ')}.${yearlyHint}`,
       color: isActive ? 'success' : isScheduled ? 'info' : 'warning',
     };
   })();
@@ -2449,7 +2998,8 @@ export default function CustomerDetail() {
     {
       label: 'Physical inventory',
       value: customerAssets.length,
-      helper: 'Containers assigned to this account in inventory (can be lower than open rentals)',
+      helper:
+        'Containers assigned to this account. Count can be lower than open rentals (DNS, etc.) or higher when assigned bottles still lack an open rental row.',
     },
     {
       label: 'Lease agreement',
@@ -2572,7 +3122,10 @@ export default function CustomerDetail() {
             {!editing && (
               <Chip 
                 label={customer.customer_type || 'CUSTOMER'} 
-                color={customer.customer_type === 'VENDOR' ? 'secondary' : 'primary'} 
+                color={
+                  customer.customer_type === 'VENDOR' ? 'secondary' :
+                  customer.customer_type === 'BRANCH' ? 'info' : 'primary'
+                } 
                 size="medium"
                 sx={{ fontWeight: 'bold' }}
               />
@@ -2603,13 +3156,34 @@ export default function CustomerDetail() {
             {editing ? (
               <Autocomplete
                 options={parentOptions}
+                filterOptions={filterParentCustomerOptions}
                 getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
                 value={parentOptions.find(o => o.id === editForm.parent_customer_id) || null}
-                onChange={(_, v) => setEditForm({ ...editForm, parent_customer_id: v?.id ?? null })}
+                onChange={(_, v) => {
+                  const pid = v?.id ?? null;
+                  setEditForm((prev) => ({
+                    ...prev,
+                    parent_customer_id: pid,
+                    customer_type: pid
+                      ? 'BRANCH'
+                      : prev.customer_type === 'BRANCH'
+                        ? 'CUSTOMER'
+                        : prev.customer_type,
+                  }));
+                }}
                 renderInput={(params) => (
-                  <TextField {...params} size="small" label="Under (parent customer)" placeholder="e.g. Stevenson Industrial" sx={{ mb: 2, minWidth: 220 }} />
+                  <TextField {...params} size="small" label="Under (parent customer)" placeholder="Search name or customer ID…" sx={{ mb: 2, minWidth: 220 }} />
                 )}
                 isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+                autoHighlight
+                openOnFocus
+                selectOnFocus
+                noOptionsText="No matching customers"
+                componentsProps={{
+                  popper: {
+                    sx: { zIndex: (theme) => theme.zIndex.modal + 1 },
+                  },
+                }}
               />
             ) : (
               <Typography variant="body1" sx={{ mb: 2 }}>
@@ -2736,6 +3310,7 @@ export default function CustomerDetail() {
                   onChange={handleEditChange}
                 >
                   <MenuItem value="CUSTOMER">Customer</MenuItem>
+                  <MenuItem value="BRANCH">Branch / location (under parent)</MenuItem>
                   <MenuItem value="VENDOR">Vendor</MenuItem>
                   <MenuItem value="TEMPORARY">Temporary (Walk-in)</MenuItem>
                 </Select>
@@ -2746,7 +3321,8 @@ export default function CustomerDetail() {
                   label={customer.customer_type || 'CUSTOMER'} 
                   color={
                     customer.customer_type === 'VENDOR' ? 'secondary' : 
-                    customer.customer_type === 'TEMPORARY' ? 'warning' : 'primary'
+                    customer.customer_type === 'TEMPORARY' ? 'warning' :
+                    customer.customer_type === 'BRANCH' ? 'info' : 'primary'
                   } 
                   size="small"
                   variant="outlined"
@@ -2889,6 +3465,15 @@ export default function CustomerDetail() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Invoice amounts for lease customers come only from these lines (not org pricing rules). Use yearly price and/or unit price × quantity.
             </Typography>
+            {!leaseContractRow && yearlyLeaseAgreements.length > 0 && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This customer has{' '}
+                <strong>{yearlyLeaseAgreements.length}</strong> yearly lease agreement
+                {yearlyLeaseAgreements.length === 1 ? '' : 's'} on file. Edit them under{' '}
+                <Link to="/lease-agreements">Lease agreements</Link>. The contract lines below are optional — they are for
+                per-SKU lease lines on this profile; yearly invoices can keep using the agreements workspace only.
+              </Alert>
+            )}
             {!leaseContractRow && (
               <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
                 <TextField
@@ -3061,6 +3646,7 @@ export default function CustomerDetail() {
               <Typography variant="body2">
                 <strong>Customer Type:</strong><br/>
                 • <strong>CUSTOMER</strong> - Gets charged rental fees for assigned bottles<br/>
+                • <strong>BRANCH</strong> - Site or department under a parent customer (required when &quot;Under parent&quot; is set; billed like customer)<br/>
                 • <strong>VENDOR</strong> - Does NOT get charged rental fees (business partner)
               </Typography>
             </Alert>
@@ -3238,7 +3824,16 @@ export default function CustomerDetail() {
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary" mt={2}>
-              On-hand roll-up: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted here` : ''}{rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}). Billing uses{' '}
+              On-hand roll-up: {totalBottleCount} ({customerAssets.length} physical{dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}{rnbRentals.length > 0 ? `, ${rnbRentals.length} RNB not counted here` : ''}{rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}).
+            {assignedBottlesMissingOpenRental.length > 0 && (
+              <>
+                {' '}
+                <strong>{assignedBottlesMissingOpenRental.length}</strong> assigned bottle
+                {assignedBottlesMissingOpenRental.length !== 1 ? 's' : ''}{' '}
+                {assignedBottlesMissingOpenRental.length !== 1 ? 'have' : 'has'} no open rental (not on the invoice total yet).
+              </>
+            )}
+            {' '}Billing uses{' '}
               <strong>{locationAssets.length} open rental rows</strong>, which can be higher than physical inventory.
             </Typography>
           </Box>
@@ -3263,24 +3858,45 @@ export default function CustomerDetail() {
               label="Show DNS/RNB rows in bottle list"
               sx={{ mt: 0.5 }}
             />
-            {(dnsOnlyRentals.length > 0 && rnbRentals.length > 0) && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
               <Button
                 size="small"
                 variant="outlined"
-                color="warning"
-                onClick={resolveDnsRnbPairs}
-                disabled={fixingDnsRnb}
-                startIcon={fixingDnsRnb ? <CircularProgress size={14} /> : null}
-                sx={{ mt: 1 }}
+                color="primary"
+                onClick={() => {
+                  setManualDnsForm({
+                    dns_line_type: 'dns',
+                    product_code: '',
+                    quantity: '1',
+                    rental_start_date: new Date().toISOString().split('T')[0],
+                    order_ref: '',
+                  });
+                  setAddManualDnsOpen(true);
+                }}
+                disabled={!customer?.organization_id || !(customer?.CustomerListID || customer?.name)}
               >
-                {fixingDnsRnb ? 'Fixing DNS/RNB…' : 'Fix DNS/RNB for customer'}
+                Add DNS line
               </Button>
-            )}
+              {(dnsOnlyRentals.length > 0 && rnbRentals.length > 0) && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  onClick={resolveDnsRnbPairs}
+                  disabled={fixingDnsRnb}
+                  startIcon={fixingDnsRnb ? <CircularProgress size={14} /> : null}
+                >
+                  {fixingDnsRnb ? 'Fixing DNS/RNB…' : 'Fix DNS/RNB for customer'}
+                </Button>
+              )}
+            </Stack>
             {(dnsOnlyRentals.length > 0 || rnbRentals.length > 0 || rnsRentals.length > 0) && (
               <Typography variant="body2" color="text.secondary">
                 {customerAssets.length} physical
                 {dnsOnlyRentals.length > 0 ? ` + ${dnsOnlyRentals.length} DNS` : ''}
-                {rnbRentals.length > 0 ? ` (${rnbRentals.length} RNB return without being on balance — not counted)` : ''}
+                {rnbRentals.length > 0
+                  ? ` (${rnbRentals.length} RNB: return on their order, but bottle was not on their open rental when approved — not counted as physical)`
+                  : ''}
                 {rnsRentals.length > 0 ? ` − ${rnsRentals.length} RNS` : ''}
                 {totalBottleCount !== customerAssets.length && (dnsOnlyRentals.length > 0 || rnsRentals.length > 0) && ` = ${totalBottleCount} total`}
               </Typography>
@@ -3412,7 +4028,13 @@ export default function CustomerDetail() {
               </TableHead>
               <TableBody>
                 {displayBottleList
-                  .filter(asset => asset.isDns || locationFilter === 'all' || normalizeLocationKey(asset.location) === normalizeLocationKey(locationFilter))
+                  .filter(
+                    (asset) =>
+                      asset.isDns ||
+                      locationFilter === 'all' ||
+                      normalizeLocationKey(resolveCustomerInventoryLocationRaw(asset, customer)) ===
+                        normalizeLocationKey(locationFilter)
+                  )
                   .map((asset) => {
                   const assetIdKey = asset?.id == null ? '' : String(asset.id).trim();
                   const assetBarcodeKey = String(asset?.barcode_number || asset?.barcode || '').trim().toUpperCase();
@@ -3455,10 +4077,7 @@ export default function CustomerDetail() {
                     <TableCell>{asset.product_code || asset.type || asset.description || 'Unknown'}</TableCell>
                     <TableCell>
                       <Chip 
-                        label={(() => {
-                          const raw = asset.location || customer?.city || customer?.name || 'Unknown';
-                          return raw === 'Unknown' ? raw : formatLocationDisplay(raw);
-                        })()} 
+                        label={displayAssignedAssetLocationChip(asset, customer)}
                         color="primary" 
                         size="small"
                         variant="outlined"
@@ -3525,6 +4144,8 @@ export default function CustomerDetail() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
             Rental amount uses your <strong>standard rate table</strong>, product/category matching, and this customer&apos;s pricing — the same rules as the Rentals page. Use the button above to open <strong>Customer Pricing</strong> for per-SKU overrides (same as &quot;Edit Rates&quot; on Rentals).
             {' '}
+            <strong>Start date</strong> comes from each open rental row; when the app auto-creates a rental for an assigned asset, it uses that asset&apos;s dates (not &quot;today&quot;) so this column reflects history, not when you opened the page.
+            {' '}
             <strong>
               Invoices charge each open row below ({locationAssets.length}); customer-owned cylinders are not counted as rent.
             </strong>
@@ -3532,9 +4153,32 @@ export default function CustomerDetail() {
               <>
                 {' '}
                 Physical inventory shows <strong>{customerAssets.length}</strong> assigned containers.
-                {dnsRentals.length === 0 && rnbRentals.length === 0 && rnsRentals.length === 0
-                  ? ` The ${Math.abs(openRentalsDelta)}-row difference is not “DNS without barcodes” — those lines are regular rentals where the bottle is not in the assigned list on this page (wrong assignment, transfer, or lookup mismatch).`
-                  : ' Lower counts often mix DNS/RNB/RNS billing rows with how assigned inventory is loaded.'}
+                {openRentalsDelta < 0 && (
+                  <>
+                    {' '}
+                    You have <strong>{Math.abs(openRentalsDelta)}</strong> more assigned bottle
+                    {Math.abs(openRentalsDelta) !== 1 ? 's' : ''} than open rental row
+                    {Math.abs(openRentalsDelta) !== 1 ? 's' : ''}
+                    {assignedBottlesMissingOpenRental.length > 0 ? (
+                      <>
+                        {' '}
+                        — no matching rental row for barcode
+                        {assignedBottlesMissingOpenRental.length !== 1 ? 's' : ''}:{' '}
+                        <strong>
+                          {assignedBottlesMissingOpenRental
+                            .map((b) => b.barcode_number || b.serial_number || b.id)
+                            .filter(Boolean)
+                            .join(', ')}
+                        </strong>
+                      </>
+                    ) : ''}
+                    . Those assets are not billed monthly until an open rental row exists (this page usually creates one when you load the customer; refresh if data just changed).
+                  </>
+                )}
+                {openRentalsDelta > 0 &&
+                  (dnsRentals.length === 0 && rnbRentals.length === 0 && rnsRentals.length === 0
+                    ? ` The ${openRentalsDelta}-row gap means more open rentals than bottles in the assigned list here — often transfers, DNS-style placeholders, or lookup mismatch (see warning above if shown).`
+                    : ' Higher open-row counts often include DNS/RNB/RNS placeholders versus physical inventory.')}
               </>
             )}
           </Typography>
@@ -3612,8 +4256,9 @@ export default function CustomerDetail() {
               <TableBody>
                 {rentalHistoryDisplayRows.map(({ rental, displayAmount }) => {
                   const isDNS = rental.is_dns === true;
-                  const isRNB = isDNS && (rental.dns_description || '').includes('Return not on balance');
-                  const isRNS = isDNS && (rental.dns_description || '').includes('Return not scanned');
+                  const dnsDescLc = String(rental.dns_description || '').toLowerCase();
+                  const isRNB = isDNS && dnsDescLc.includes('return not on balance');
+                  const isRNS = isDNS && dnsDescLc.includes('return not scanned');
                   const dnsDescriptionText = typeof rental.dns_description === 'string' ? rental.dns_description : '';
                   const dnsDisplayDescription = /delivered not[- ]scanned/i.test(dnsDescriptionText)
                     ? 'DNS'
@@ -3621,16 +4266,11 @@ export default function CustomerDetail() {
                   const bottle =
                     !isDNS &&
                     findCustomerAssetForRentalExtended(customerAssets || [], supplementalBottles, rental);
-                  const typeProduct = bottle
-                    ? (bottle.type || bottle.description || bottle.product_code)
-                    : (rental.cylinder?.type
-                      || rental.product_code
-                      || rental.product_type
-                      || rental.asset_type
-                      || rental.gas_type
-                      || rental.cylinder_type
-                      || (typeof rental.description === 'string' ? rental.description : '')
-                      || 'Unknown');
+                  const typeProduct = resolveRentalHistoryTypeProductLabel(
+                    rental,
+                    bottle,
+                    rentalHistoryAssetPricingMap
+                  );
                   return (
                     <TableRow key={rental.id} hover sx={{ bgcolor: isRNB ? '#ffebee' : isRNS ? '#f5f5f5' : isDNS ? '#fff3cd' : 'inherit' }}>
                       <TableCell>
@@ -3687,11 +4327,20 @@ export default function CustomerDetail() {
                       </TableCell>
                       <TableCell>{rental.rental_start_date || '-'}</TableCell>
                       <TableCell>
-                        <Chip 
-                          label={isRNB ? 'RNB (Return without being on balance)' : isRNS ? 'RNS (Return, no scanned bottle)' : isDNS ? 'DNS (Invoice, no scanned bottle)' : (rental.status || 'Active')} 
-                          color={isRNB ? 'error' : isRNS ? 'default' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
-                          size="small"
-                        />
+                        <Tooltip
+                          title={
+                            isRNB
+                              ? 'Return was on this customer’s order, but when approved there was no open rental (and matching assignment) for this bottle under this customer. Movement history may still show “Customer: …” because that is the order account.'
+                              : ''
+                          }
+                          disableHoverListener={!isRNB}
+                        >
+                          <Chip 
+                            label={isRNB ? 'RNB (order return — not on open rental)' : isRNS ? 'RNS (Return, no scanned bottle)' : isDNS ? 'DNS (Invoice, no scanned bottle)' : (rental.status || 'Active')} 
+                            color={isRNB ? 'error' : isRNS ? 'default' : isDNS ? 'warning' : (rental.status === 'at_home' ? 'warning' : 'success')}
+                            size="small"
+                          />
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         {isRNB && (
@@ -3771,6 +4420,160 @@ export default function CustomerDetail() {
         )}
       </Paper>
 
+      <Dialog
+        open={addManualDnsOpen}
+        onClose={() => !addManualDnsSaving && setAddManualDnsOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add DNS / RNB / RNS line</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Creates open rental placeholder rows for this customer (no bottle record). The line type controls classification here and in roll-ups, using the same description markers as imports.{' '}
+            <strong>Product code</strong> is chosen from the list below:{' '}
+            <Link to="/pricing/asset-types">Asset type pricing</Link>, rental-class match codes, and{' '}
+            <strong>every SKU used on bottles in your organization</strong> (same product keys as the Assets /
+            inventory pages).
+          </Typography>
+          {manualDnsProductPickerOptions.length === 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              No SKUs found. Add products under{' '}
+              <Link to="/pricing/asset-types">Asset type pricing</Link> or ensure bottles on{' '}
+              <Link to="/assets">Assets</Link> have a product / type field set — then reopen this dialog.
+            </Alert>
+          )}
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="manual-dns-type-label">Line type</InputLabel>
+              <Select
+                labelId="manual-dns-type-label"
+                label="Line type"
+                value={manualDnsForm.dns_line_type}
+                onChange={(e) =>
+                  setManualDnsForm((f) => ({ ...f, dns_line_type: e.target.value }))
+                }
+              >
+                <MenuItem value="dns">DNS — Shipped on invoice, no scanned bottle</MenuItem>
+                <MenuItem value="rnb">RNB — Return on order, not on open rental for this customer</MenuItem>
+                <MenuItem value="rns">RNS — Return with no scanned bottle</MenuItem>
+              </Select>
+            </FormControl>
+            <Autocomplete
+              size="small"
+              options={manualDnsProductPickerOptions}
+              filterOptions={filterManualDnsProductOptions}
+              getOptionLabel={(opt) => opt?.product_code || ''}
+              isOptionEqualToValue={(a, b) =>
+                String(a?.product_code || '').toLowerCase() === String(b?.product_code || '').toLowerCase()
+              }
+              value={
+                manualDnsProductPickerOptions.find(
+                  (o) =>
+                    o.product_code.toLowerCase() === (manualDnsForm.product_code || '').trim().toLowerCase()
+                ) || null
+              }
+              onChange={(_, v) =>
+                setManualDnsForm((f) => ({ ...f, product_code: v?.product_code?.trim() || '' }))
+              }
+              disabled={manualDnsProductPickerOptions.length === 0}
+              renderOption={(props, option) => (
+                <li {...props} key={option.product_code}>
+                  <Stack spacing={0}>
+                    <Typography variant="body2" fontFamily="monospace" fontWeight={600}>
+                      {option.product_code}
+                    </Typography>
+                    {(option.description || option.category) && (
+                      <Typography variant="caption" color="text.secondary">
+                        {[option.description, option.category].filter(Boolean).join(' · ')}
+                      </Typography>
+                    )}
+                  </Stack>
+                </li>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Product code"
+                  required
+                  helperText={
+                    manualDnsProductPickerOptions.length === 0
+                      ? 'Add pricing rows or product codes on Assets.'
+                      : 'Search all org SKUs (pricing + inventory). Rates use your pricing rules.'
+                  }
+                />
+              )}
+              noOptionsText="No matching product codes"
+              autoHighlight
+              openOnFocus
+              selectOnFocus
+              componentsProps={{
+                popper: {
+                  disablePortal: true,
+                  sx: { zIndex: (theme) => theme.zIndex.modal + 1 },
+                },
+              }}
+            />
+            <TextField
+              label="Description (stored on rental)"
+              value={
+                (manualDnsForm.product_code || '').trim()
+                  ? manualDnsForm.dns_line_type === 'rnb'
+                    ? `Return not on balance — ${(manualDnsForm.product_code || '').trim()} (manual)`
+                    : manualDnsForm.dns_line_type === 'rns'
+                      ? `Return not scanned — ${(manualDnsForm.product_code || '').trim()} (manual)`
+                      : `${(manualDnsForm.product_code || '').trim()} – manual DNS (delivered not scanned)`
+                  : 'Enter a product code to preview description…'
+              }
+              fullWidth
+              size="small"
+              multiline
+              minRows={2}
+              InputProps={{ readOnly: true }}
+              helperText="Filled automatically from type and product code."
+            />
+            <TextField
+              label="Quantity"
+              type="number"
+              inputProps={{ min: 1, max: 500 }}
+              value={manualDnsForm.quantity}
+              onChange={(e) => setManualDnsForm((f) => ({ ...f, quantity: e.target.value }))}
+              size="small"
+              sx={{ maxWidth: 160 }}
+            />
+            <TextField
+              label="Rental start date"
+              type="date"
+              value={manualDnsForm.rental_start_date}
+              onChange={(e) => setManualDnsForm((f) => ({ ...f, rental_start_date: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+              size="small"
+              sx={{ maxWidth: 220 }}
+            />
+            <TextField
+              label="Order reference (optional)"
+              value={manualDnsForm.order_ref}
+              onChange={(e) => setManualDnsForm((f) => ({ ...f, order_ref: e.target.value }))}
+              fullWidth
+              size="small"
+              helperText="Stored as dns_order_number MANUAL-… for grouping."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddManualDnsOpen(false)} disabled={addManualDnsSaving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={submitManualDns}
+            disabled={addManualDnsSaving || manualDnsProductPickerOptions.length === 0}
+            startIcon={addManualDnsSaving ? <CircularProgress size={16} /> : null}
+          >
+            {addManualDnsSaving ? 'Saving…' : 'Add line'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Transfer Dialog */}
       <Dialog 
         open={transferDialogOpen} 
@@ -3792,6 +4595,7 @@ export default function CustomerDetail() {
             
             <Autocomplete
               options={availableCustomers}
+              filterOptions={filterParentCustomerOptions}
               getOptionLabel={(option) => `${option.name} (${option.CustomerListID})`}
               renderOption={(props, option) => (
                 <Box component="li" {...props}>
@@ -3807,11 +4611,20 @@ export default function CustomerDetail() {
               )}
               value={targetCustomer}
               onChange={(event, newValue) => setTargetCustomer(newValue)}
+              autoHighlight
+              openOnFocus
+              noOptionsText="No matching customers"
+              componentsProps={{
+                popper: {
+                  disablePortal: true,
+                  sx: { zIndex: (theme) => theme.zIndex.modal + 1 },
+                },
+              }}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label="Select Target Customer"
-                  placeholder="Choose customer to transfer assets to..."
+                  placeholder="Search name or customer ID…"
                   fullWidth
                   margin="normal"
                   required

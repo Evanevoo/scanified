@@ -9,13 +9,14 @@ import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, LinearProgress,
-  InputAdornment, Chip, FormControl, InputLabel, Select, MenuItem, Autocomplete,
+  Chip, FormControl, InputLabel, Select, MenuItem, Autocomplete,
   Checkbox,
 } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
-  Refresh as RefreshIcon, Search as SearchIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 /** Writes Custom Yearly (all products) onto active lease_agreements AND lease_contract_items for the same customer. */
 async function syncLeaseAgreementsAnnualFromYearlyOverride(supabaseClient, organizationId, customerId, yearlyAmount) {
@@ -102,9 +103,20 @@ function keySetForCustomerId(raw, customerOptions) {
   return s;
 }
 
+/** Postgres uuid text format — anything else must use INSERT, not UPDATE/DELETE on overrides.id */
+function isCustomerPricingOverrideUuid(id) {
+  const s = String(id || '').trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+}
+
+/** True only when editing a real row in `customer_pricing_overrides` (UUID primary key). */
 function shouldUpdateExistingOverride(editItem) {
   if (!editItem?.id) return false;
-  return !String(editItem.id).startsWith('lease-suggest-');
+  const sid = String(editItem.id);
+  if (sid.startsWith('lease-suggest-')) return false;
+  if (sid.startsWith('legacy-')) return false;
+  if (sid.startsWith('virtual-')) return false;
+  return isCustomerPricingOverrideUuid(sid);
 }
 
 export default function CustomerPricingOverrides() {
@@ -134,6 +146,7 @@ export default function CustomerPricingOverrides() {
   /** Active lease agreements — lease-only customers appear in pickers, bulk, and suggested table rows. */
   const [fallbackLeaseCustomers, setFallbackLeaseCustomers] = useState([]);
   const [legacyOverrides, setLegacyOverrides] = useState([]);
+  const [legacyVersion, setLegacyVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -241,6 +254,7 @@ export default function CustomerPricingOverrides() {
             mapped.push({
               id: `legacy-${row.id || customerId}-all`,
               source: 'legacy',
+              legacy_customer_pricing_id: row.id ?? null,
               product_code: null,
               custom_monthly_price: row.custom_monthly_price ?? row.monthly ?? null,
               custom_yearly_price: row.custom_yearly_price ?? row.yearly ?? null,
@@ -256,6 +270,7 @@ export default function CustomerPricingOverrides() {
                 mapped.push({
                   id: `legacy-${row.id || customerId}-${productCode}`,
                   source: 'legacy',
+                  legacy_customer_pricing_id: row.id ?? null,
                   product_code: productCode,
                   custom_monthly_price: monthly != null && monthly !== '' ? Number(monthly) : null,
                   custom_yearly_price: yearly != null && yearly !== '' ? Number(yearly) : null,
@@ -272,7 +287,7 @@ export default function CustomerPricingOverrides() {
     };
     loadFallbacks();
     return () => { active = false; };
-  }, [organization?.id]);
+  }, [organization?.id, legacyVersion]);
 
   const customerOptions = useMemo(() => {
     const combined = [
@@ -441,6 +456,20 @@ export default function CustomerPricingOverrides() {
         expiry_date: '',
         is_active: true,
       });
+    } else if (item.source === 'legacy') {
+      // Synthetic `legacy-…` ids are for UI keys only; saves must INSERT into customer_pricing_overrides.
+      setEditItem({
+        __lockCustomer: true,
+        customer_id: item.customer_id,
+        product_code: item.product_code || '',
+        custom_monthly_price: item.custom_monthly_price ?? '',
+        custom_yearly_price: item.custom_yearly_price ?? '',
+        discount_percent: item.discount_percent ?? '',
+        fixed_rate_override: item.fixed_rate_override ?? '',
+        effective_date: item.effective_date || '',
+        expiry_date: item.expiry_date || '',
+        is_active: item.is_active !== false,
+      });
     } else {
       setEditItem({ ...item });
     }
@@ -464,7 +493,8 @@ export default function CustomerPricingOverrides() {
         expiry_date: editItem.expiry_date || null,
         is_active: editItem.is_active !== false,
       };
-      if (shouldUpdateExistingOverride(editItem)) {
+      const useUpdate = shouldUpdateExistingOverride(editItem);
+      if (useUpdate) {
         const { error: err } = await supabase.from('customer_pricing_overrides').update(payload).eq('id', editItem.id);
         if (err) throw err;
       } else {
@@ -488,11 +518,29 @@ export default function CustomerPricingOverrides() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (id != null && String(id).startsWith('lease-suggest-')) return;
+  const handleDelete = async (item) => {
+    const id = item?.id ?? item;
+    if (id == null && !item?.legacy_customer_pricing_id) return;
+    const sid = String(id ?? '');
+    if (sid.startsWith('lease-suggest-')) return;
     if (!confirm('Remove this override?')) return;
     try {
-      const { error: err } = await supabase.from('customer_pricing_overrides').delete().eq('id', id);
+      if (item?.source === 'legacy' && item?.legacy_customer_pricing_id) {
+        const { error: err } = await supabase
+          .from('customer_pricing')
+          .delete()
+          .eq('id', item.legacy_customer_pricing_id)
+          .eq('organization_id', organization.id);
+        if (err) throw err;
+        setLegacyVersion((v) => v + 1);
+        ctx.refresh();
+        return;
+      }
+      if (sid.startsWith('legacy-') || sid.startsWith('virtual-') || !isCustomerPricingOverrideUuid(sid)) {
+        setError('Cannot delete this row by id. Refresh the page or remove it in Supabase if needed.');
+        return;
+      }
+      const { error: err } = await supabase.from('customer_pricing_overrides').delete().eq('id', sid);
       if (err) throw err;
       ctx.refresh();
     } catch (err) {
@@ -605,9 +653,12 @@ export default function CustomerPricingOverrides() {
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
         <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <TextField size="small" placeholder="Search by customer or product..." value={search} onChange={(e) => setSearch(e.target.value)}
-            sx={{ minWidth: 300, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          <PageSearchInput
+            placeholder="Search by customer or product..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onClear={() => setSearch('')}
+            className="min-w-[300px]"
           />
         </Box>
         <TableContainer>
@@ -639,8 +690,16 @@ export default function CustomerPricingOverrides() {
                     <TableCell>{item.is_active ? <Chip label="Active" size="small" color="success" /> : <Chip label="Inactive" size="small" />}</TableCell>
                     <TableCell align="right">
                       <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(item)}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                      {!(item.source === 'lease_suggestion' || String(item.id || '').startsWith('lease-suggest-')) && (
-                        <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleDelete(item.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                      {!(
+                        item.source === 'lease_suggestion' ||
+                        String(item.id || '').startsWith('lease-suggest-') ||
+                        String(item.id || '').startsWith('virtual-') ||
+                        (item.source === 'legacy' && !item.legacy_customer_pricing_id) ||
+                        (String(item.id || '').startsWith('legacy-') && !item.legacy_customer_pricing_id)
+                      ) && (
+                        <Tooltip title={item.source === 'legacy' ? 'Remove legacy customer_pricing row' : 'Delete'}>
+                          <IconButton size="small" color="error" onClick={() => handleDelete(item)}><DeleteIcon fontSize="small" /></IconButton>
+                        </Tooltip>
                       )}
                     </TableCell>
                   </TableRow>

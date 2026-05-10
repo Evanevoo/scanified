@@ -41,13 +41,13 @@ import {
   bottleProductCode,
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
+  isDnsRentalExcludedFromBillableCount,
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
 import {
   mergeOpenRentalsForBillingBasis,
   summarizeMergedOpenRentalsByProduct,
 } from '../services/openRentalsBillingBasis';
-import { fetchBillingWorkspaceData } from '../services/billingWorkspaceService';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
 import JSZip from 'jszip';
@@ -57,12 +57,11 @@ import { findActiveLeaseContract } from '../services/leaseBilling';
 import {
   Box, Typography, Card, CardContent, Grid, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip,
-  Button, TextField, InputAdornment, Tooltip, LinearProgress, CircularProgress, Stack,
+  Button, TextField, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Alert, TablePagination,
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   People, Schedule, AccountBalance,
 } from '@mui/icons-material';
 import {
@@ -74,8 +73,11 @@ import {
   IoEyeOutline,
   IoCreateOutline,
   IoPersonCircleOutline,
+  IoRefreshOutline,
 } from 'react-icons/io5';
 import GradientMenu from '../components/ui/gradient-menu';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { expandLeaseMatchKeys, isActiveCustomerRecord as isActiveCustomer } from '../utils/leaseCustomerMatchKeys';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -290,70 +292,6 @@ function getInvoiceNumberFromLastCsvMap(targetSub) {
 const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-/** Id / name variants for matching a subscription row to lease_contracts or legacy lease_agreements. */
-function customerKeysForLeaseMatch(subCustomerId, customer) {
-  const keys = new Set();
-  const add = (v) => {
-    const k = normalize(String(v || '').trim());
-    if (k) keys.add(k);
-  };
-  add(subCustomerId);
-  add(customer?.CustomerListID);
-  add(customer?.id);
-  add(customer?.name);
-  add(customer?.Name);
-  const nk = normalizeName(customer?.name || customer?.Name || '');
-  if (nk) keys.add(nk);
-  return keys;
-}
-
-const isActiveCustomer = (customer) => {
-  if (!customer) return false;
-  if (customer.deleted_at) return false;
-  if (customer.is_deleted === true) return false;
-  if (customer.is_active === false) return false;
-  if (customer.archived === true) return false;
-  return true;
-};
-
-/**
- * Merge all id/name aliases from customers directory rows that touch `keys`, so
- * subscription.customer_id (e.g. CustomerListID) matches lease_contracts.customer_id (e.g. uuid).
- */
-function expandLeaseMatchKeys(subCustomerId, customer, allCustomers) {
-  const keys = customerKeysForLeaseMatch(subCustomerId, customer);
-  if (!allCustomers?.length) return keys;
-  const addFromRecord = (c) => {
-    const add = (v) => {
-      const k = normalize(String(v || '').trim());
-      if (k) keys.add(k);
-    };
-    add(c?.CustomerListID);
-    add(c?.id);
-    const nk = normalizeName(c?.name || c?.Name || '');
-    if (nk) keys.add(nk);
-  };
-  for (let pass = 0; pass < 3; pass += 1) {
-    let grew = false;
-    const beforeSize = keys.size;
-    for (const c of allCustomers) {
-      if (!isActiveCustomer(c)) continue;
-      const candKeys = [
-        normalize(String(c.CustomerListID || '').trim()),
-        normalize(String(c.id || '').trim()),
-        normalizeName(c.name || c.Name || ''),
-      ].filter(Boolean);
-      if (!candKeys.some((k) => keys.has(k))) continue;
-      const sz = keys.size;
-      addFromRecord(c);
-      if (keys.size > sz) grew = true;
-    }
-    if (!grew && keys.size === beforeSize) break;
-  }
-  return keys;
-}
-
-
 /**
  * Isolated search field. Owns its own input state so typing only re-renders
  * this component (not the entire 4000+ line Subscriptions page with 50 table
@@ -393,31 +331,25 @@ const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchFie
   const isPending = value !== debounced;
 
   return (
-    <TextField
-      size="small"
-      placeholder="Search customers..."
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
+    <Box
       sx={{
         ml: 'auto',
         minWidth: 240,
-        '& .MuiOutlinedInput-root': { borderRadius: 2 },
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
         opacity: isPending ? 0.85 : 1,
         transition: 'opacity 0.15s ease',
       }}
-      InputProps={{
-        startAdornment: (
-          <InputAdornment position="start">
-            <SearchIcon fontSize="small" />
-          </InputAdornment>
-        ),
-        endAdornment: isPending ? (
-          <InputAdornment position="end">
-            <CircularProgress size={14} thickness={5} />
-          </InputAdornment>
-        ) : undefined,
-      }}
-    />
+    >
+      <PageSearchInput
+        placeholder="Search customers..."
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="min-w-0 flex-1"
+      />
+      {isPending ? <CircularProgress size={14} thickness={5} sx={{ flexShrink: 0 }} /> : null}
+    </Box>
   );
 }));
 
@@ -440,9 +372,7 @@ export default function Subscriptions() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
-  /** Raw DB rows; folded into `legacyRows` in useMemo so bottle realtime updates do not re-hit Supabase. */
-  const [legacyRentalsRaw, setLegacyRentalsRaw] = useState([]);
-  const [fallbackResolverCustomers, setFallbackResolverCustomers] = useState([]);
+  /** Saved invoice template JSON for PDF/email (localStorage; org-scoped). */
   const [invoiceTemplate, setInvoiceTemplate] = useState(null);
   const [remitAddress, setRemitAddress] = useState(null);
   const [localRatesVersion, setLocalRatesVersion] = useState(0);
@@ -480,6 +410,7 @@ export default function Subscriptions() {
   const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
   const [zipExporting, setZipExporting] = useState(false);
   const [zipExportProgress, setZipExportProgress] = useState({ done: 0, total: 0 });
+  const [rentalsWorkspaceRefreshing, setRentalsWorkspaceRefreshing] = useState(false);
   const [activeLeaseAgreements, setActiveLeaseAgreements] = useState([]);
   const [cycleInvoiceLookup, setCycleInvoiceLookup] = useState(emptyCycleInvoiceLookup);
   /** Bumps after saving a custom invoice # so the grid refetches cycle invoice status. */
@@ -665,16 +596,13 @@ export default function Subscriptions() {
     for (const c of (ctx.customers || [])) {
       addCandidate(c);
     }
-    for (const c of (fallbackResolverCustomers || [])) {
-      addCandidate(c);
-    }
 
     for (const c of bottleDerivedCandidates) {
       addCandidate(c, { preserveExisting: true });
     }
 
     return { byId, byName };
-  }, [ctx.customers, fallbackResolverCustomers, bottleDerivedCandidates]);
+  }, [ctx.customers, bottleDerivedCandidates]);
 
   const resolveCustomer = useCallback((idOrName, fallbackName = '') => {
     const idKey = normalize(idOrName);
@@ -685,38 +613,12 @@ export default function Subscriptions() {
   const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
     if (!customerId) return null;
     const key = normalize(customerId);
-    const pools = [ctx.customers || [], fallbackResolverCustomers || []];
-    for (const pool of pools) {
-      for (const c of pool) {
-        const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
-        if (ids.includes(key)) return c;
-      }
+    for (const c of ctx.customers || []) {
+      const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
+      if (ids.includes(key)) return c;
     }
     return null;
-  }, [ctx.customers, fallbackResolverCustomers]);
-
-  useEffect(() => {
-    let active = true;
-    const loadFallbackResolverCustomers = async () => {
-      if (!organization?.id) return;
-      try {
-        // Broad fallback query so customer names still resolve when org-scoped rows are incomplete.
-        const { data } = await supabase
-          .from('customers')
-          .select(
-            'id, CustomerListID, name, Name, email, purchase_order, payment_terms, billing_address, shipping_address, billing_mode, location, deleted_at, is_deleted, is_active, archived'
-          )
-          .eq('organization_id', organization.id)
-          .order('name');
-        if (!active) return;
-        setFallbackResolverCustomers((data || []).filter(isActiveCustomer));
-      } catch {
-        if (active) setFallbackResolverCustomers([]);
-      }
-    };
-    loadFallbackResolverCustomers();
-    return () => { active = false; };
-  }, [organization?.id]);
+  }, [ctx.customers]);
 
   useEffect(() => {
     if (!organization?.id) {
@@ -751,23 +653,21 @@ export default function Subscriptions() {
   useEffect(() => {
     let active = true;
     const loadActiveLeaseAgreements = async () => {
-      if (!profile?.organization_id) {
+      const orgId = profile?.organization_id;
+      if (!orgId) {
         if (active) setActiveLeaseAgreements([]);
         return;
       }
       try {
-        const workspace = await fetchBillingWorkspaceData(profile.organization_id);
+        // Narrow fetch only — avoid fetchBillingWorkspaceData (duplicate full bottles/customers/rentals pulls).
+        const { data, error } = await supabase
+          .from('lease_agreements')
+          .select('id, customer_id, customer_name, status, max_asset_count, bottle_id')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false });
         if (!active) return;
-        setActiveLeaseAgreements(
-          (workspace?.leaseAgreements || []).map((a) => ({
-            id: a.id,
-            customer_id: a.customer_id,
-            customer_name: a.customer_name,
-            status: a.status,
-            max_asset_count: a.max_asset_count,
-            bottle_id: a.bottle_id,
-          })),
-        );
+        if (error) throw error;
+        setActiveLeaseAgreements(data || []);
       } catch {
         if (active) setActiveLeaseAgreements([]);
       }
@@ -1132,7 +1032,7 @@ export default function Subscriptions() {
           const key = row?.productCode || '__unclassified__';
           rentalProductCounts[key] = (rentalProductCounts[key] || 0) + qty;
         }
-        const rentalItemCount = mergedBillingBasisRows.length;
+        const rentalItemCount = mergedBillingBasisRows.filter((r) => !isDnsRentalExcludedFromBillableCount(r)).length;
 
         return {
           id: `virtual-${groupKey}`,
@@ -1162,34 +1062,12 @@ export default function Subscriptions() {
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
   }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId]);
 
-  useEffect(() => {
-    if (!organization?.id) {
-      setLegacyRentalsRaw([]);
-      return;
-    }
-    let active = true;
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from('rentals')
-          .select('id, customer_id, customer_name, bottle_id, bottle_barcode, product_code, product_type, asset_type, rental_type, rental_amount, rental_end_date, is_dns, dns_description, dns_product_code')
-          .eq('organization_id', organization.id)
-          .is('rental_end_date', null);
-        if (!active) return;
-        if (error) throw error;
-        setLegacyRentalsRaw(data || []);
-      } catch {
-        if (active) setLegacyRentalsRaw([]);
-      }
-    })();
-    return () => { active = false; };
-  }, [organization?.id]);
-
+  /** Legacy “rentals table only” virtual rows — must track `ctx.rentals` (same as SubscriptionContext) so counts stay in sync after refresh/realtime. A one-time fetch on org id alone went stale vs Customer Detail. */
   const legacyRows = useMemo(() => {
     let rows = [];
     try {
       const legacyBottleMaps = buildBottleLookupMaps(ctx.bottles || []);
-      const grouped = (legacyRentalsRaw || [])
+      const grouped = (ctx.rentals || [])
         .filter((r) => {
           if (String(r?.rental_type || '').toLowerCase() === 'yearly') return false;
           // DNS billables ("Delivered Not Scanned") should count.
@@ -1268,7 +1146,7 @@ export default function Subscriptions() {
     }
 
     return rows;
-  }, [legacyRentalsRaw, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
+  }, [ctx.rentals, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -1376,6 +1254,7 @@ export default function Subscriptions() {
       let effectiveProductCounts = row.productCounts && typeof row.productCounts === 'object'
         ? row.productCounts
         : null;
+      let fullyLeaseCoveredRentalRow = false;
       const leaseCoverKeys = [
         row.customer_id,
         row.customer?.id,
@@ -1472,6 +1351,8 @@ export default function Subscriptions() {
         } else {
           computedItemCount = Math.max(0, computedItemCount - leaseCoveredUnits);
         }
+        fullyLeaseCoveredRentalRow = computedItemCount <= 0;
+        if (fullyLeaseCoveredRentalRow) total = 0;
       }
       if (!preserveLeaseContractTotal && effectiveProductCounts && typeof effectiveProductCounts === 'object') {
         const rowForPricing = { ...row, billing_period: period };
@@ -1524,7 +1405,7 @@ export default function Subscriptions() {
 
       // Final fallback: when bottle-based math cannot price a customer,
       // use grouped legacy rentals total if available.
-      if ((parseFloat(total) || 0) <= 0) {
+      if (!fullyLeaseCoveredRentalRow && (parseFloat(total) || 0) <= 0) {
         const legacyKeys = [
           customerKey,
           ...collectNormalizedCustomerKeysForPricingRow(row),
@@ -1540,7 +1421,7 @@ export default function Subscriptions() {
 
       // Absolute fallback: never leave active rows with items at $0 when no
       // resolvable pricing source exists.
-      if (!preserveLeaseContractTotal && (parseFloat(total) || 0) <= 0) {
+      if (!fullyLeaseCoveredRentalRow && !preserveLeaseContractTotal && (parseFloat(total) || 0) <= 0) {
         const qty = computedItemCount;
         if (qty > 0) {
           const periodFallback = String(row.billing_period || 'monthly').toLowerCase();
@@ -1549,8 +1430,9 @@ export default function Subscriptions() {
         }
       }
 
+      if (fullyLeaseCoveredRentalRow) return null;
       return { ...row, itemCount: computedItemCount, ...(effectiveProductCounts ? { productCounts: effectiveProductCounts } : {}), totalPerCycle: total };
-    }).filter((row) => canonicalBillingPeriod(row.billing_period) !== 'yearly');
+    }).filter(Boolean).filter((row) => canonicalBillingPeriod(row.billing_period) !== 'yearly');
   }, [
     enriched,
     customersWithBottlesNoSubscription,
@@ -3721,6 +3603,20 @@ export default function Subscriptions() {
     { label: 'Next Billing', value: derivedNextBilling ? formatDate(derivedNextBilling) : '—', icon: <Schedule />, color: '#F59E0B' },
   ], [activeRentalCount, activeRentalAssetCount, ctx.outstandingBalance, derivedNextBilling]);
 
+  const handleRefreshRentalsWorkspace = useCallback(async () => {
+    setActionError(null);
+    setActionSuccess(null);
+    setRentalsWorkspaceRefreshing(true);
+    try {
+      await ctx.refreshSilent();
+      setActionSuccess('Rentals and bottle counts updated from the server.');
+    } catch (e) {
+      setActionError(e?.message || 'Refresh failed.');
+    } finally {
+      setRentalsWorkspaceRefreshing(false);
+    }
+  }, [ctx]);
+
   const rentalToolbarMenuItems = useMemo(() => {
     const emailTitle = bulkEmailing
       ? `${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
@@ -3730,13 +3626,22 @@ export default function Subscriptions() {
       : 'ZIP';
     return [
       {
+        id: 'refresh',
+        title: rentalsWorkspaceRefreshing ? 'Updating…' : 'Update',
+        action: 'refresh',
+        icon: <IoRefreshOutline />,
+        gradientFrom: '#64748b',
+        gradientTo: '#475569',
+        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
+      },
+      {
         id: 'csv',
         title: 'CSV',
         action: 'csv',
         icon: <IoCloudDownloadOutline />,
         gradientFrom: '#56CCF2',
         gradientTo: '#2F80ED',
-        disabled: saving || zipExporting,
+        disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
         id: 'invoices',
@@ -3745,7 +3650,7 @@ export default function Subscriptions() {
         icon: <IoReceiptOutline />,
         gradientFrom: '#80FF72',
         gradientTo: '#7EE8FA',
-        disabled: saving || zipExporting,
+        disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
         id: 'email',
@@ -3754,7 +3659,7 @@ export default function Subscriptions() {
         icon: <IoMailOutline />,
         gradientFrom: '#FF9966',
         gradientTo: '#FF5E62',
-        disabled: saving || bulkEmailing || zipExporting,
+        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
         id: 'zip',
@@ -3763,7 +3668,7 @@ export default function Subscriptions() {
         icon: <IoArchiveOutline />,
         gradientFrom: '#40B5AD',
         gradientTo: '#2E9B94',
-        disabled: saving || bulkEmailing || zipExporting,
+        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
         id: 'new',
@@ -3777,6 +3682,7 @@ export default function Subscriptions() {
   }, [
     saving,
     zipExporting,
+    rentalsWorkspaceRefreshing,
     bulkEmailing,
     bulkEmailProgress.sent,
     bulkEmailProgress.failed,
@@ -3868,6 +3774,9 @@ export default function Subscriptions() {
               className="min-h-0 w-auto justify-center lg:justify-end py-2 sm:py-2.5 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
               onAction={(action) => {
                 switch (action) {
+                  case 'refresh':
+                    void handleRefreshRentalsWorkspace();
+                    break;
                   case 'csv':
                     handleExportQbInvoiceCsv('monthly', monthlyQbCohort);
                     break;
@@ -4157,6 +4066,10 @@ export default function Subscriptions() {
                         const billableAmount = parseFloat(sub.totalPerCycle) || 0;
                         const canBill = billableAmount > 0;
                         const canEditRates = Boolean(sub.customer_id);
+                        const canOpenProfile = Boolean(String(sub.customer_id || '').trim());
+                        /** Eye = subscription detail only; virtual/legacy rows have no `/rentals/:id` — use Customer for profile. */
+                        const canOpenView =
+                          !sub.isVirtual && Boolean(String(sub.id || '').trim());
                         const rowActionItems = [
                           {
                             id: 'pdf',
@@ -4210,7 +4123,7 @@ export default function Subscriptions() {
                             icon: <IoEyeOutline />,
                             gradientFrom: '#40B5AD',
                             gradientTo: '#2E9B94',
-                            disabled: sub.isVirtual,
+                            disabled: !canOpenView,
                           },
                         ];
 
@@ -4226,7 +4139,14 @@ export default function Subscriptions() {
                         }
 
                         return (
-                          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'flex-end',
+                              position: 'relative',
+                              zIndex: 2,
+                            }}
+                          >
                             <GradientMenu
                               variant="compact"
                               items={rowActionItems}
@@ -4264,9 +4184,16 @@ export default function Subscriptions() {
                                       },
                                     });
                                     break;
-                                  case 'view':
-                                    if (!sub.isVirtual) navigate(`/rentals/${sub.id}`);
+                                  case 'view': {
+                                    if (sub.isVirtual || !sub.id) {
+                                      setActionError(
+                                        'This row has no subscription record — open Customer for the profile.'
+                                      );
+                                      return;
+                                    }
+                                    navigate(`/rentals/${sub.id}`);
                                     break;
+                                  }
                                   default:
                                     break;
                                 }

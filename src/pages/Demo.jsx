@@ -15,7 +15,6 @@ import {
   ListItemIcon,
   ListItemText,
   Chip,
-  Divider,
   IconButton,
   Dialog,
   DialogTitle,
@@ -25,6 +24,7 @@ import {
   Alert,
   Stack
 } from '@mui/material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import {
   QrCodeScanner as QrCodeScannerIcon,
   PhoneIphone as PhoneIcon,
@@ -37,7 +37,6 @@ import {
   Refresh as RefreshIcon,
   Visibility as ViewIcon,
   Add as AddIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Download as DownloadIcon,
   Share as ShareIcon,
@@ -338,13 +337,9 @@ export default function Demo() {
                     <Card>
                       <CardContent>
                         <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                          <TextField
+                          <PageSearchInput
                             placeholder="Search assets..."
-                            size="small"
-                            InputProps={{
-                              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                            }}
-                            sx={{ flexGrow: 1 }}
+                            className="min-w-0 flex-1"
                           />
                           <Button variant="outlined" startIcon={<FilterIcon />}>
                             Filter

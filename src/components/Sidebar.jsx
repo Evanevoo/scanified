@@ -5,7 +5,8 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { useTheme } from '../context/ThemeContext';
-import { ListItem, ListItemButton, ListItemIcon, ListItemText, TextField, InputAdornment } from '@mui/material';
+import { ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
+import { PageSearchInput } from './ui/search-input-with-icon';
 import {
   List, Divider, Box, Typography, Collapse, IconButton, Tooltip, Avatar, Button,
 } from '@mui/material';
@@ -534,40 +535,12 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         {/* Search */}
         {!isCollapsed && (
           <Box sx={{ px: 2, pb: 2 }}>
-            <TextField
-              size="small"
-              variant="outlined"
+            <PageSearchInput
               placeholder="Search menu..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              fullWidth
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: 999,
-                  minHeight: 40,
-                  alignItems: 'center',
-                  bgcolor: 'rgba(255,255,255,0.72)',
-                  fontSize: '0.875rem',
-                  '& fieldset': {
-                    borderColor: 'rgba(255,255,255,0.9)',
-                  },
-                  '&:hover': {
-                    bgcolor: 'rgba(255,255,255,0.92)',
-                  },
-                  '&.Mui-focused': {
-                    bgcolor: 'rgba(255,255,255,0.96)',
-                    boxShadow: `0 0 0 2px ${primaryColor}20`,
-                    '& fieldset': { borderColor: primaryColor },
-                  },
-                },
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-                  </InputAdornment>
-                ),
-              }}
+              onClear={() => setSearchTerm('')}
+              className="w-full"
             />
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, px: 0.5 }}>
               Tip: press Ctrl+K (⌘K on Mac) to search pages, customers, and barcodes

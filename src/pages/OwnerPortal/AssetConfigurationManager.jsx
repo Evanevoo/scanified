@@ -1,5 +1,6 @@
 import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 import {
   Box,
   Typography,
@@ -880,11 +881,12 @@ export default function AssetConfigurationManager() {
                 {previewContent.dashboardTitle}
               </Typography>
 
-              <TextField
-                fullWidth
+              <PageSearchInput
+                readOnly
+                tabIndex={-1}
+                value=""
                 placeholder={previewContent.searchPlaceholder}
-                sx={{ mb: 2 }}
-                size="small"
+                className="mb-2 w-full"
               />
 
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>

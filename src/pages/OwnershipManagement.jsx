@@ -30,6 +30,7 @@ import {
   CardContent,
   TablePagination
 } from '@mui/material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
@@ -541,18 +542,22 @@ export default function OwnershipManagement() {
               <MenuItem value="empty">Empty</MenuItem>
               <MenuItem value="na">N/A (Customer Owned)</MenuItem>
             </TextField>
-            <TextField
-              size="small"
-              placeholder="Search bottles — barcode, serial, product code…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              inputProps={{ 'aria-label': 'Search bottles' }}
+            <Box
               sx={{
                 flex: { lg: '1 1 220px' },
                 width: { xs: '100%', lg: 'auto' },
                 minWidth: { lg: 200 },
               }}
-            />
+            >
+              <PageSearchInput
+                placeholder="Search bottles — barcode, serial, product code…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onClear={() => setSearchTerm('')}
+                aria-label="Search bottles"
+                className="w-full"
+              />
+            </Box>
             <Typography
               variant="body2"
               color="text.secondary"

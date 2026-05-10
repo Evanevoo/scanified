@@ -8,15 +8,19 @@ function normKey(v) {
 
 /**
  * Active contract for subscription billing (today in [start_date, end_date]).
+ * @param {string|string[]} subscriptionCustomerId - CustomerListID, internal customers.id, or both (lease_contracts.customer_id may store either).
  */
 export function findActiveLeaseContract(contracts, subscriptionCustomerId, organizationId) {
   const today = new Date().toISOString().split('T')[0];
-  const subKey = normKey(subscriptionCustomerId);
+  const rawIds = Array.isArray(subscriptionCustomerId)
+    ? subscriptionCustomerId
+    : [subscriptionCustomerId];
+  const idSet = new Set(rawIds.map(normKey).filter(Boolean));
   return (
     (contracts || []).find((c) => {
       if (organizationId && c.organization_id && c.organization_id !== organizationId) return false;
       if (c.status && c.status !== 'active') return false;
-      if (normKey(c.customer_id) !== subKey) return false;
+      if (!idSet.has(normKey(c.customer_id))) return false;
       if (c.start_date && c.start_date > today) return false;
       if (c.end_date && c.end_date < today) return false;
       return true;

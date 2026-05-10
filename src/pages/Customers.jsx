@@ -1,18 +1,18 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Autocomplete, Card, CardContent, Grid, Stack, FormControlLabel
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, Checkbox, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Pagination, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions, Autocomplete, Card, CardContent, Grid, Stack, FormControlLabel
 } from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
-import ClearIcon from '@mui/icons-material/Clear';
+import { createFilterOptions } from '@mui/material/Autocomplete';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
-import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { resolveCustomerTypeForParentConstraint } from '../utils/customerParentConstraint';
 
 // Remove CustomersErrorBoundary and replace with a FallbackComponent
 function CustomersErrorFallback({ error, resetErrorBoundary }) {
@@ -103,6 +103,11 @@ function compareCustomerRows(a, b, sortField, sortDirection) {
   if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
   return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' }) * dir;
 }
+
+const filterParentCustomerOptions = createFilterOptions({
+  stringify: (option) =>
+    `${option?.name ?? ''} ${option?.CustomerListID ?? ''}`.trim(),
+});
 
 async function exportAllCustomersToCSV(organizationId) {
   try {
@@ -376,25 +381,6 @@ function Customers({ profile }) {
     return () => { cancelled = true; };
   }, [addDialogOpen, organization?.id]);
 
-  // Search now happens automatically via debouncedSearch useEffect
-  const handleSearchChange = (e) => {
-    setSearchInput(e.target.value);
-    setPage(1); // Reset to first page when searching
-  };
-
-  const handleSearchKeyPress = (e) => {
-    // Enter key can still be used to trigger immediate search if needed
-    if (e.key === 'Enter') {
-      setDebouncedSearch(searchInput); // Immediately update debounced search
-    }
-  };
-
-  const handleClearSearch = () => {
-    setSearchInput('');
-    setDebouncedSearch('');
-    setPage(1);
-  };
-
   const handleSort = (field) => {
     logger.log('Sorting by:', field, 'Current sort:', sortField, sortDirection);
     if (sortField === field) {
@@ -425,7 +411,7 @@ function Customers({ profile }) {
         name: form.name,
         contact_details: form.contact_details,
         phone: form.phone,
-        customer_type: form.customer_type,
+        customer_type: resolveCustomerTypeForParentConstraint(form.customer_type, form.parent_customer_id),
         location: form.location || 'SASKATOON',
         organization_id: organization.id
       };
@@ -474,7 +460,7 @@ function Customers({ profile }) {
         name: form.name,
         contact_details: form.contact_details,
         phone: form.phone,
-        customer_type: form.customer_type
+        customer_type: resolveCustomerTypeForParentConstraint(form.customer_type, form.parent_customer_id),
       };
       if (form.email !== undefined) payload.email = form.email ?? null;
       if (form.department !== undefined) payload.department = form.department?.trim() || null;
@@ -703,78 +689,71 @@ function Customers({ profile }) {
         </Grid>
         {/* Action Buttons */}
         <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={0}>
-          <Box display="flex" gap={2}>
-            <Button 
-              variant="outlined" 
-              sx={{ 
-                fontWeight: 700, 
-                borderRadius: 8, 
-                px: 3, 
-                color: '#0074e8', 
-                borderColor: '#bdbdbd', 
-                background: '#fff', 
-                ':hover': { borderColor: '#0074e8', background: '#f5faff' } 
-              }} 
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          justifyContent="space-between"
+          flexWrap="wrap"
+          useFlexGap
+        >
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
+            <Button
+              variant="outlined"
+              color="primary"
+              sx={{ minHeight: 40, px: 3 }}
               onClick={() => exportToCSV(customers)}
             >
               Export to CSV
             </Button>
             <Button
               variant="contained"
-              sx={{ 
-                fontWeight: 700, 
-                borderRadius: 8, 
-                px: 3, 
-                bgcolor: selected.length > 0 ? '#e53935' : '#e0e0e0', 
-                color: selected.length > 0 ? '#fff' : '#444', 
-                boxShadow: 'none',
-                ':hover': { bgcolor: selected.length > 0 ? '#d32f2f' : '#e0e0e0' }
-              }}
+              color="error"
+              sx={{ minHeight: 40, px: 3 }}
               disabled={selected.length === 0}
               onClick={handleBulkDelete}
             >
               Delete Selected ({selected.length})
             </Button>
-          </Box>
-          <Box display="flex" gap={2}>
+          </Stack>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
             {canEdit && (
               <Button
                 variant="contained"
                 color="primary"
-                sx={{ fontWeight: 700, borderRadius: 8, px: 3 }}
+                sx={{ minHeight: 40, px: 3 }}
                 onClick={() => setAddDialogOpen(true)}
               >
                 + Add Customer
               </Button>
             )}
-            <Button 
-              variant="contained" 
-              sx={{ 
-                fontWeight: 700, 
-                borderRadius: 8, 
-                px: 3, 
-                bgcolor: '#111', 
-                color: '#fff', 
-                boxShadow: 'none', 
-                ':hover': { bgcolor: '#222' } 
-              }} 
+            <Button
+              variant="contained"
+              color="secondary"
+              sx={{ minHeight: 40, px: 3 }}
               onClick={() => navigate('/')}
             >
               Back to Dashboard
             </Button>
-          </Box>
-        </Box>
+          </Stack>
+        </Stack>
         </Paper>
 
         {/* Search and Controls */}
         <Paper elevation={0} sx={{ p: 2.5, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', backgroundColor: '#fff' }}>
         <Box sx={{ mb: 0 }}>
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
-          
-          <Box display="flex" gap={2} alignItems="center" mb={3}>
-            <Box display="flex" alignItems="center" sx={{ flex: 1, width: '100%' }}>
-              <SearchInputWithIcon
+
+          <Stack
+            direction="row"
+            spacing={2}
+            flexWrap="wrap"
+            useFlexGap
+            alignItems="center"
+            sx={{ mb: 3, rowGap: 1.5, columnGap: 2 }}
+          >
+            <Box sx={{ flex: '1 1 220px', minWidth: 0, display: 'flex', alignItems: 'center' }}>
+              <PageSearchInput
                 placeholder="Search customers by name, ID, or contact..."
                 value={searchInput}
                 onChange={(e) => {
@@ -789,20 +768,36 @@ function Customers({ profile }) {
                 onClear={() => {
                   setSearchInput('');
                   setDebouncedSearch('');
+                  setPage(1);
                 }}
-                className="w-full"
               />
             </Box>
             <TextField
               select
               size="small"
+              margin="none"
               value={locationFilter}
               onChange={(e) => {
                 setLocationFilter(e.target.value);
                 setPage(1);
               }}
               inputProps={{ 'aria-label': 'Location filter' }}
-              sx={{ minWidth: 150 }}
+              sx={{
+                flex: '0 0 auto',
+                minWidth: 150,
+                '& .MuiOutlinedInput-root': {
+                  height: 40,
+                  minHeight: 40,
+                  alignItems: 'center',
+                },
+                '& .MuiSelect-select': {
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: '0 !important',
+                  py: 0,
+                  lineHeight: 1.25,
+                },
+              }}
             >
               <MenuItem value="All">All Locations</MenuItem>
               <MenuItem value="SASKATOON">SASKATOON</MenuItem>
@@ -819,10 +814,19 @@ function Customers({ profile }) {
                     setPage(1);
                   }}
                   color="primary"
+                  size="small"
+                  sx={{ py: 0 }}
                 />
               }
-              label={<Typography variant="body2">With assigned assets only</Typography>}
-              sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
+              label={<Typography variant="body2" sx={{ lineHeight: 1.2 }}>With assigned assets only</Typography>}
+              sx={{
+                ml: 0,
+                mr: 0,
+                my: 0,
+                height: 40,
+                alignItems: 'center',
+                whiteSpace: 'nowrap',
+              }}
             />
             <FormControlLabel
               control={
@@ -833,21 +837,46 @@ function Customers({ profile }) {
                     setPage(1);
                   }}
                   color="primary"
+                  size="small"
+                  sx={{ py: 0 }}
                 />
               }
-              label={<Typography variant="body2">No payment terms only</Typography>}
-              sx={{ ml: 0, mr: 0, whiteSpace: 'nowrap' }}
+              label={<Typography variant="body2" sx={{ lineHeight: 1.2 }}>No payment terms only</Typography>}
+              sx={{
+                ml: 0,
+                mr: 0,
+                my: 0,
+                height: 40,
+                alignItems: 'center',
+                whiteSpace: 'nowrap',
+              }}
             />
             <TextField
               select
               size="small"
+              margin="none"
               value={rowsPerPage}
               onChange={(e) => {
                 setRowsPerPage(Number(e.target.value));
                 setPage(1);
               }}
               inputProps={{ 'aria-label': 'Rows per page' }}
-              sx={{ minWidth: 120 }}
+              sx={{
+                flex: '0 0 auto',
+                minWidth: 120,
+                '& .MuiOutlinedInput-root': {
+                  height: 40,
+                  minHeight: 40,
+                  alignItems: 'center',
+                },
+                '& .MuiSelect-select': {
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: '0 !important',
+                  py: 0,
+                  lineHeight: 1.25,
+                },
+              }}
             >
               {[10, 20, 50, 100].map((opt) => (
                 <MenuItem key={opt} value={opt}>
@@ -855,7 +884,7 @@ function Customers({ profile }) {
                 </MenuItem>
               ))}
             </TextField>
-          </Box>
+          </Stack>
           
           <Typography variant="body2" color="text.secondary" mb={2}>
             {searchInput.trim() 
@@ -979,7 +1008,10 @@ function Customers({ profile }) {
                     <Chip 
                       label={c.customer_type || 'CUSTOMER'} 
                       size="small"
-                      color={c.customer_type === 'VENDOR' ? 'secondary' : 'primary'}
+                      color={
+                        c.customer_type === 'VENDOR' ? 'secondary' :
+                        c.customer_type === 'BRANCH' ? 'info' : 'primary'
+                      }
                       variant="outlined"
                     />
                   </TableCell>
@@ -993,45 +1025,15 @@ function Customers({ profile }) {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Button 
-                      variant="text" 
-                      sx={{ 
-                        color: '#1976d2', 
-                        fontWeight: 700, 
-                        textTransform: 'none', 
-                        minWidth: 0, 
-                        px: 1 
-                      }} 
-                      onClick={() => navigate(`/customer/${c.CustomerListID}`)}
-                    >
+                    <Button variant="text" color="primary" size="small" onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
                       View
                     </Button>
                     {canEdit && (
                       <>
-                        <Button 
-                          variant="text" 
-                          sx={{ 
-                            color: '#1976d2', 
-                            fontWeight: 700, 
-                            textTransform: 'none', 
-                            minWidth: 0, 
-                            px: 1 
-                          }} 
-                          onClick={() => handleEdit(c)}
-                        >
+                        <Button variant="text" color="primary" size="small" onClick={() => handleEdit(c)}>
                           Edit
                         </Button>
-                        <Button 
-                          variant="text" 
-                          sx={{ 
-                            color: '#e53935', 
-                            fontWeight: 700, 
-                            textTransform: 'none', 
-                            minWidth: 0, 
-                            px: 1 
-                          }} 
-                          onClick={() => handleDelete(c.CustomerListID)}
-                        >
+                        <Button variant="text" color="error" size="small" onClick={() => handleDelete(c.CustomerListID)}>
                           Delete
                         </Button>
                       </>
@@ -1129,18 +1131,41 @@ function Customers({ profile }) {
                   onChange={handleChange}
                 >
                   <MenuItem value="CUSTOMER">CUSTOMER</MenuItem>
+                  <MenuItem value="BRANCH">BRANCH (under parent)</MenuItem>
                   <MenuItem value="VENDOR">VENDOR</MenuItem>
                 </Select>
               </FormControl>
               <Autocomplete
                 options={parentOptions}
+                filterOptions={filterParentCustomerOptions}
                 getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
                 value={parentOptions.find(o => o.id === form.parent_customer_id) || null}
-                onChange={(_, v) => setForm({ ...form, parent_customer_id: v?.id ?? null })}
+                onChange={(_, v) => {
+                  const pid = v?.id ?? null;
+                  setForm((prev) => ({
+                    ...prev,
+                    parent_customer_id: pid,
+                    customer_type: pid
+                      ? 'BRANCH'
+                      : prev.customer_type === 'BRANCH'
+                        ? 'CUSTOMER'
+                        : prev.customer_type,
+                  }));
+                }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Under (parent customer)" placeholder="e.g. Stevenson Industrial" margin="normal" fullWidth />
+                  <TextField {...params} label="Under (parent customer)" placeholder="Search name or customer ID…" margin="normal" fullWidth />
                 )}
                 isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+                autoHighlight
+                openOnFocus
+                selectOnFocus
+                noOptionsText="No matching customers"
+                componentsProps={{
+                  popper: {
+                    disablePortal: true,
+                    sx: { zIndex: (theme) => theme.zIndex.modal + 1 },
+                  },
+                }}
               />
               <TextField
                 label="Department / location label (optional)"
@@ -1154,8 +1179,12 @@ function Customers({ profile }) {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-            <Button type="submit" form="add-customer-form" variant="contained">Save</Button>
+            <Button variant="outlined" color="inherit" onClick={() => setAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="add-customer-form" variant="contained" color="primary">
+              Save
+            </Button>
           </DialogActions>
         </Dialog>
       </Paper>

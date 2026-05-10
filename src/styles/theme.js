@@ -1,4 +1,4 @@
-import { createTheme } from '@mui/material/styles';
+import { createTheme, alpha } from '@mui/material/styles';
 
 // Brand colors (exported for pages that are not MUI-theme-driven)
 export const brandColors = {
@@ -252,14 +252,24 @@ export const theme = createTheme({
   
   components: {
     MuiButton: {
+      defaultProps: {
+        disableElevation: true,
+      },
       styleOverrides: {
-        root: {
-          borderRadius: 999,
+        root: ({ ownerState }) => ({
+          borderRadius: ownerState.variant === 'text' ? 12 : 999,
           textTransform: 'none',
           fontWeight: 700,
-          padding: '8px 18px',
-          transition: 'all 0.22s cubic-bezier(0.22, 1, 0.36, 1)'
-        },
+          letterSpacing: '0.01em',
+          padding:
+            ownerState.variant === 'text'
+              ? ownerState.size === 'small'
+                ? '4px 10px'
+                : '6px 14px'
+              : '8px 18px',
+          transition: 'all 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
+          ...(ownerState.variant === 'text' && { minWidth: 0 }),
+        }),
         containedPrimary: {
           color: '#fff',
           background: 'linear-gradient(90deg, #ff8a65 0%, #ff6ec7 100%)',
@@ -267,8 +277,25 @@ export const theme = createTheme({
           '&:hover': {
             background: 'linear-gradient(90deg, #ff7b56 0%, #ff5abf 100%)',
             boxShadow: '0 14px 28px rgba(255, 110, 199, 0.35)',
-            transform: 'translateY(-1px)'
-          }
+            transform: 'translateY(-1px)',
+          },
+        },
+        containedSecondary: {
+          color: '#fff',
+          background: `linear-gradient(135deg, ${brandColors.primary} 0%, ${brandColors.secondary} 100%)`,
+          boxShadow: `0 8px 20px ${alpha(brandColors.primary, 0.35)}`,
+          '&:hover': {
+            filter: 'brightness(1.05)',
+            boxShadow: `0 12px 26px ${alpha(brandColors.primary, 0.4)}`,
+            transform: 'translateY(-1px)',
+          },
+        },
+        containedError: {
+          boxShadow: `0 8px 18px ${alpha(brandColors.error, 0.28)}`,
+          '&:hover': {
+            boxShadow: `0 12px 24px ${alpha(brandColors.error, 0.35)}`,
+            transform: 'translateY(-1px)',
+          },
         },
         outlined: {
           borderColor: 'rgba(138, 149, 180, 0.35)',
@@ -276,10 +303,30 @@ export const theme = createTheme({
           backdropFilter: 'blur(8px)',
           '&:hover': {
             borderColor: 'rgba(64, 181, 173, 0.45)',
-            backgroundColor: 'rgba(255, 255, 255, 0.9)'
-          }
-        }
-      }
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+          },
+        },
+        outlinedPrimary: {
+          borderColor: alpha(brandColors.primary, 0.45),
+          color: brandColors.primary,
+          '&:hover': {
+            borderColor: brandColors.primary,
+            backgroundColor: alpha(brandColors.primary, 0.06),
+          },
+        },
+        textPrimary: {
+          color: brandColors.primary,
+          '&:hover': {
+            backgroundColor: alpha(brandColors.primary, 0.08),
+          },
+        },
+        textError: {
+          color: brandColors.error,
+          '&:hover': {
+            backgroundColor: alpha(brandColors.error, 0.08),
+          },
+        },
+      },
     },
     
     MuiCard: {

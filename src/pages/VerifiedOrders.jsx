@@ -32,9 +32,9 @@ import {
   Assignment as InvoiceIcon,
   Person as CustomerIcon,
   CalendarToday as DateIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
@@ -813,18 +813,18 @@ export default function VerifiedOrders() {
       {/* Filters */}
       <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-          <TextField
-            label="Search"
-            variant="outlined"
-            size="small"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Order #, Customer, Invoice..."
-            InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-            }}
-            sx={{ minWidth: 250 }}
-          />
+          <Box sx={{ minWidth: 250 }}>
+            <Typography component="label" variant="body2" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+              Search
+            </Typography>
+            <PageSearchInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onClear={() => setSearch('')}
+              placeholder="Order #, Customer, Invoice..."
+              className="w-full"
+            />
+          </Box>
           
           <TextField
             select

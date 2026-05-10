@@ -23,6 +23,93 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
+import { fetchMergedAssetMovementHistory } from '../services/assetMovementHistory';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Flatten merged movement rows into the Asset Record Log table shape. Legacy asset_records stay editable. */
+function mergedMovementToLogRows(asset, merged) {
+  return (merged || []).map((row) => {
+    if (row.history_type === 'asset_record') {
+      return {
+        ...row,
+        _rowKey: `asset_record_${row.id}`,
+        _editable: true,
+        type: row.type || row.action || 'RECORD',
+        created_at: row.created_at || '',
+        submitted_at: row.submitted_at || row.created_at || '',
+        user: row.user || '-',
+        device: row.device || '-',
+        location: row.location || '-',
+        data: row.data || '-',
+        associated_assets: row.associated_assets || asset.id,
+        notes: row.notes || '',
+      };
+    }
+
+    const ht = row.history_type || '';
+    const mode = String(row.mode || row.action || '').trim();
+    let typeLabel = mode || 'SCAN';
+    if (ht === 'rental_rnb' || mode === 'RNB') typeLabel = 'RNB (order return — not on open rental)';
+    else if (ht === 'rental_start' || mode === 'SHIP') typeLabel = 'SHIP';
+    else if (ht === 'rental_end' || mode === 'RETURN') typeLabel = 'RETURN';
+    else if (ht === 'fill' || mode === 'FILL') typeLabel = 'FILL';
+    else if (ht === 'transfer') typeLabel = 'TRANSFER';
+    else if (ht === 'exception') typeLabel = row.action || 'EXCEPTION';
+    else if (ht === 'audit') typeLabel = row.action || 'AUDIT';
+    else if (ht === 'creation') typeLabel = 'Add New Asset';
+    else if (ht === 'record_update') typeLabel = 'UPDATE';
+    else if (ht === 'cylinder_scan') typeLabel = mode || 'CYLINDER_SCAN';
+    else if (ht === 'bottle_scan') typeLabel = mode || 'SCAN';
+
+    const cid = row.customer_id || row.assigned_customer || '';
+    const cname = row.customer_name || '';
+    const loc =
+      cname || cid
+        ? (() => {
+            const base = cname
+              ? `Customer: ${cname}${cid ? ` (${cid})` : ''}`
+              : `Customer: (${cid})`;
+            return ht === 'rental_rnb' || mode === 'RNB'
+              ? `${base} · billing exception (not on open rental when approved)`
+              : base;
+          })()
+        : row.location
+          ? `In-House: ${row.location}`
+          : ht === 'fill'
+            ? 'Fill Plant'
+            : '-';
+
+    const dataParts = [
+      ht ? `Source: ${ht}` : null,
+      row.order_number ? `Order: ${row.order_number}` : null,
+      row.product_code ? `Product: ${row.product_code}` : null,
+    ].filter(Boolean);
+
+    const noteParts = [
+      row.notes,
+      row.filled_by ? `Filled by: ${row.filled_by}` : null,
+      row.dns_description ? `DNS: ${row.dns_description}` : null,
+    ].filter(Boolean);
+
+    return {
+      ...row,
+      _rowKey: String(row.id ?? `${ht}_${row.created_at}_${mode}`),
+      _editable: false,
+      type: typeLabel,
+      created_at: row.created_at || '',
+      submitted_at: row.created_at || '',
+      user: row.scanned_by || row.user_name || row.user || row.user_id || '-',
+      device: row.device || row.device_id || '-',
+      location: loc,
+      data: dataParts.length ? dataParts.join(' | ') : '-',
+      associated_assets: asset.id,
+      notes: noteParts.join(' | ') || '',
+    };
+  });
+}
 
 const TRACKED_FIELDS = [
   'barcode_number',
@@ -103,87 +190,28 @@ export default function AssetHistory() {
           return Array.isArray(data) && data.length > 0 ? data[0] : null;
         };
 
-        let assetData = await queryOne('id', searchId);
+        let assetData = null;
+        if (UUID_RE.test(searchId)) {
+          assetData = await queryOne('id', searchId);
+        }
         if (!assetData) assetData = await queryOne('barcode_number', searchId);
+        if (!assetData) {
+          const stripped = searchId.replace(/^0+/, '') || searchId;
+          if (stripped !== searchId) assetData = await queryOne('barcode_number', stripped);
+        }
         if (!assetData) assetData = await queryOne('serial_number', searchId);
         if (!assetData) throw new Error('Asset not found.');
         setAsset(assetData);
         setEditForm(assetData);
-        // Fetch asset history/records.
-        // Primary source: bottle_scans (actual movement events).
-        // Fallback sources: asset_records and audit_logs for legacy/custom events.
-        const barcode = String(assetData.barcode_number || '').trim();
-        const barcodeNoLeadingZeros = barcode.replace(/^0+/, '') || barcode;
-        const barcodeOr = [
-          `barcode_number.eq.${barcode}`,
-          `bottle_barcode.eq.${barcode}`,
-          `cylinder_barcode.eq.${barcode}`,
-          `barcode_number.eq.${barcodeNoLeadingZeros}`,
-          `bottle_barcode.eq.${barcodeNoLeadingZeros}`,
-          `cylinder_barcode.eq.${barcodeNoLeadingZeros}`
-        ].join(',');
-
-        const [scanRes, recordsRes, auditRes] = await Promise.all([
-          supabase
-            .from('bottle_scans')
-            .select('*')
-            .or(barcodeOr)
-            .eq('organization_id', assetData.organization_id)
-            .order('created_at', { ascending: false })
-            .limit(200),
-          supabase
-            .from('asset_records')
-            .select('*')
-            .eq('asset_id', assetData.id)
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('audit_logs')
-            .select('*')
-            .eq('record_id', assetData.id)
-            .order('created_at', { ascending: false })
-            .limit(100)
-        ]);
-
-        const scanRows = (scanRes.data || []).map((row) => ({
-          id: `scan_${row.id}`,
-          type: row.mode || row.scan_type || row.action || 'SCAN',
-          created_at: row.created_at || row.timestamp || '',
-          submitted_at: row.created_at || row.timestamp || '',
-          user: row.scanned_by || row.user_name || row.user || '-',
-          device: row.device || row.device_id || '-',
-          location: row.location || row.resulting_location || '-',
-          data: [
-            row.order_number ? `Order: ${row.order_number}` : null,
-            row.product_code ? `Product: ${row.product_code}` : null,
-            row.barcode_number || row.bottle_barcode || row.cylinder_barcode ? `Barcode: ${row.barcode_number || row.bottle_barcode || row.cylinder_barcode}` : null
-          ].filter(Boolean).join(' | '),
-          associated_assets: row.bottle_id || row.asset_id || '-',
-          notes: row.notes || row.map || ''
-        }));
-
-        const legacyRows = (recordsRes.data || []).map((row) => ({
-          ...row,
-          id: row.id || `asset_record_${Math.random()}`
-        }));
-
-        const auditRows = (auditRes.data || []).map((row) => ({
-          id: `audit_${row.id}`,
-          type: row.action || 'AUDIT',
-          created_at: row.created_at || '',
-          submitted_at: row.created_at || '',
-          user: row.user_id || '-',
-          device: '-',
-          location: row.location || '-',
-          data: row.table_name || 'bottles',
-          associated_assets: row.record_id || '-',
-          notes: typeof row.details === 'string' ? row.details : JSON.stringify(row.details || {})
-        }));
-
-        const merged = [...scanRows, ...legacyRows, ...auditRows].sort((a, b) => {
-          const at = new Date(a.created_at || 0).getTime();
-          const bt = new Date(b.created_at || 0).getTime();
-          return bt - at;
+        // Same merged sources as Asset Detail: scans, rentals (RNB/start/end), fills, transfers,
+        // exceptions, audits, legacy asset_records, creation/update markers.
+        const mergedRaw = await fetchMergedAssetMovementHistory(supabase, {
+          organizationId: assetData.organization_id,
+          asset: assetData,
+          perSourceLimit: 250,
+          maxRecords: 800,
         });
+        const merged = mergedMovementToLogRows(assetData, mergedRaw);
         setRecords(merged);
       } catch (err) {
         setError(err.message);
@@ -231,19 +259,42 @@ export default function AssetHistory() {
     setLoading(false);
   };
 
-  // Record edit handlers
+  // Record edit handlers (only legacy rows in asset_records are editable)
   const handleRecordEdit = (record) => {
+    if (!record._editable) return;
     setRecordEditId(record.id);
-    setRecordEditForm(record);
+    setRecordEditForm({
+      id: record.id,
+      type: record.type ?? '',
+      created_at: record.created_at ?? '',
+      submitted_at: record.submitted_at ?? record.created_at ?? '',
+      user: record.user ?? '',
+      device: record.device ?? '',
+      location: record.location ?? '',
+      data: record.data ?? '',
+      associated_assets: record.associated_assets ?? '',
+      notes: record.notes ?? '',
+    });
   };
   const handleRecordEditChange = e => setRecordEditForm({ ...recordEditForm, [e.target.name]: e.target.value });
   const handleRecordEditSave = async () => {
     setLoading(true);
     setError(null);
-    const { error: updateError } = await supabase.from('asset_records').update(recordEditForm).eq('id', recordEditId);
+    const { id: _omitId, ...payload } = recordEditForm;
+    const { error: updateError } = await supabase.from('asset_records').update(payload).eq('id', recordEditId);
     if (updateError) setError(updateError.message);
     else {
-      setRecords(records.map(r => r.id === recordEditId ? recordEditForm : r));
+      try {
+        const mergedRaw = await fetchMergedAssetMovementHistory(supabase, {
+          organizationId: asset.organization_id,
+          asset,
+          perSourceLimit: 250,
+          maxRecords: 800,
+        });
+        setRecords(mergedMovementToLogRows(asset, mergedRaw));
+      } catch (e) {
+        setError(e?.message || 'Failed to refresh history');
+      }
       setRecordEditId(null);
     }
     setLoading(false);
@@ -385,12 +436,16 @@ export default function AssetHistory() {
       <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 2 }}>
         Asset Record Log
       </Typography>
-      <TextField
-        size="small"
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Includes bottle scans, cylinder scans, rentals (delivery / return / RNB), fills, transfers, exceptions,
+        audits, manual asset records, and creation updates — same timeline as the asset detail movement history.
+      </Typography>
+      <PageSearchInput
         value={searchTerm}
         onChange={e => setSearchTerm(e.target.value)}
+        onClear={() => setSearchTerm('')}
         placeholder="Search records by type, user, location, notes..."
-        sx={{ mb: 2, width: { xs: '100%', sm: 320 } }}
+        className="mb-2 w-full sm:max-w-[320px]"
       />
       <TableContainer sx={{ borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Table size="small">
@@ -414,9 +469,10 @@ export default function AssetHistory() {
               r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
               r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
               r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
               r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
             ).map(record => (
-              <TableRow key={record.id} sx={recordEditId === record.id ? { backgroundColor: '#fefce8' } : {}}>
+              <TableRow key={record._rowKey || record.id} sx={recordEditId === record.id ? { backgroundColor: '#fefce8' } : {}}>
                 {recordEditId === record.id ? (
                   <>
                     <TableCell><TextField size="small" name="type" value={recordEditForm.type || ''} onChange={handleRecordEditChange} sx={{ width: 100 }} /></TableCell>
@@ -447,9 +503,13 @@ export default function AssetHistory() {
                     <TableCell>{record.associated_assets}</TableCell>
                     <TableCell>{record.notes}</TableCell>
                     <TableCell>
-                      <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => handleRecordEdit(record)} sx={{ textTransform: 'none' }}>
-                        Edit
-                      </Button>
+                      {record._editable ? (
+                        <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => handleRecordEdit(record)} sx={{ textTransform: 'none' }}>
+                          Edit
+                        </Button>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">—</Typography>
+                      )}
                     </TableCell>
                   </>
                 )}

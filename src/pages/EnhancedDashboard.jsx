@@ -203,11 +203,11 @@ export default function EnhancedDashboard() {
       },
       {
         id: 3,
-        title: 'Create Invoice',
-        description: 'Generate new invoice',
+        title: 'Rentals & invoices',
+        description: 'Billing and rental invoices',
         icon: <RevenueIcon />,
         color: '#F59E0B',
-        path: '/invoices',
+        path: '/rentals',
         count: null
       },
       {

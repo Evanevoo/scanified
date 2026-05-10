@@ -2,7 +2,7 @@ import logger from '../../utils/logger';
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Card, CardContent, CardActions,
-  Button, Chip, IconButton, TextField, InputAdornment,
+  Button, Chip, IconButton, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Dialog, DialogTitle, DialogContent, DialogActions,
   Alert, CircularProgress, Avatar, Tooltip, Badge,
@@ -14,7 +14,6 @@ import {
   Email as EmailIcon,
   Phone as PhoneIcon,
   LocationOn as LocationIcon,
-  Search as SearchIcon,
   Visibility as ViewIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
@@ -32,6 +31,7 @@ import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import * as XLSX from 'xlsx';
 import { OrganizationDeletionService } from '../../services/organizationDeletionService';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function OwnerCustomers() {
   const { profile } = useAuth();
@@ -908,14 +908,12 @@ export default function OwnerCustomers() {
       {/* Search and Filters */}
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          <TextField
-            fullWidth
+          <PageSearchInput
             placeholder="Search organizations by name, email, or ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-            }}
+            onClear={() => setSearchTerm('')}
+            className="w-full min-w-0"
           />
           <Button
             variant={showDeleted ? 'contained' : 'outlined'}

@@ -142,7 +142,7 @@ export default function Home() {
         { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, color: 'secondary' },
         { title: 'View Analytics', path: '/analytics', icon: <Analytics />, color: 'info' },
         { title: 'Organization Settings', path: '/settings', icon: <Settings />, color: 'warning' },
-        { title: 'Invoices', path: '/invoices', icon: <Receipt />, color: 'success' },
+        { title: 'Rentals & invoices', path: '/rentals', icon: <Receipt />, color: 'success' },
         { title: 'Organization Tools', path: '/organization-tools', icon: <SecurityIcon />, color: 'error' },
       ];
     }
@@ -157,7 +157,7 @@ export default function Home() {
       { title: 'View Customers', path: '/customers', icon: <People />, color: 'primary' },
       { title: 'Check Inventory', path: '/inventory', icon: <Inventory />, color: 'secondary' },
       { title: 'Rentals', path: '/rentals', icon: <Schedule />, color: 'success' },
-      { title: 'View Invoices', path: '/invoices', icon: <Receipt />, color: 'warning' },
+      { title: 'Rentals & invoices', path: '/rentals', icon: <Receipt />, color: 'warning' },
       { title: 'Customer Portal', path: '/portal', icon: <DashboardIcon />, color: 'error' },
     ];
   };

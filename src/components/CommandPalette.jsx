@@ -4,16 +4,14 @@ import {
   Box,
   Dialog,
   DialogContent,
-  TextField,
   Typography,
   List,
   ListItemButton,
   ListItemText,
-  InputAdornment,
   Divider,
   Chip,
 } from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
+import { PageSearchInput } from './ui/search-input-with-icon';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PersonIcon from '@mui/icons-material/Person';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -21,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { filterNavRoutesByQuery } from '../nav/appNavConfig';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 
 const MIN_QUERY_DATA = 2;
 
@@ -42,6 +41,12 @@ export default function CommandPalette({ open, onClose }) {
       setBottles([]);
       return;
     }
+    const ilikeOperand = postgrestQuotedIlikeContains(term);
+    if (!ilikeOperand) {
+      setCustomers([]);
+      setBottles([]);
+      return;
+    }
     setLoadingData(true);
     try {
       const [cRes, bRes] = await Promise.all([
@@ -49,13 +54,13 @@ export default function CommandPalette({ open, onClose }) {
           .from('customers')
           .select('CustomerListID, name')
           .eq('organization_id', organization.id)
-          .or(`CustomerListID.ilike.%${term}%,name.ilike.%${term}%`)
+          .or(`CustomerListID.ilike.${ilikeOperand},name.ilike.${ilikeOperand}`)
           .limit(8),
         supabase
           .from('bottles')
           .select('id, serial_number, barcode_number, product_code, organization_id')
           .eq('organization_id', organization.id)
-          .or(`serial_number.ilike.%${term}%,barcode_number.ilike.%${term}%,product_code.ilike.%${term}%`)
+          .or(`serial_number.ilike.${ilikeOperand},barcode_number.ilike.${ilikeOperand},product_code.ilike.${ilikeOperand}`)
           .limit(8),
       ]);
       if (cRes.error) logger.warn('CommandPalette customers:', cRes.error);
@@ -118,27 +123,14 @@ export default function CommandPalette({ open, onClose }) {
     >
       <DialogContent sx={{ p: 0 }}>
         <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <TextField
-            inputRef={inputRef}
-            fullWidth
+          <PageSearchInput
+            ref={inputRef}
             autoFocus
             placeholder="Search pages, customers, or barcodes…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            variant="standard"
-            InputProps={{
-              disableUnderline: true,
-              startAdornment: (
-                <InputAdornment position="start" sx={{ alignSelf: 'center', mr: 0.5 }}>
-                  <SearchIcon color="action" sx={{ display: 'block' }} />
-                </InputAdornment>
-              ),
-              sx: {
-                fontSize: '1.1rem',
-                alignItems: 'center',
-                minHeight: 44,
-              },
-            }}
+            onClear={() => setQ('')}
+            className="w-full text-[1.1rem]"
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
             Keyboard: <Chip size="small" label="Ctrl K" sx={{ height: 22 }} /> or{' '}

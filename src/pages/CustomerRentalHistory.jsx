@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import {
   Alert,
   Autocomplete,
   Box,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   Grid,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -17,8 +20,10 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { IoRefreshOutline, IoDownloadOutline } from 'react-icons/io5';
 import GradientMenu from '../components/ui/gradient-menu';
 import { supabase } from '../supabase/client';
@@ -123,6 +128,10 @@ export default function CustomerRentalHistory() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    setReturnDetailOpen({});
+  }, [selectedCustomerId, billingMonth]);
+
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId) || null,
     [customers, selectedCustomerId]
@@ -131,8 +140,10 @@ export default function CustomerRentalHistory() {
   const periodStart = useMemo(() => firstDayOfMonth(billingMonth), [billingMonth]);
   const periodEnd = useMemo(() => lastDayOfMonth(billingMonth), [billingMonth]);
 
-  const history = useMemo(() => {
-    if (!selectedCustomer || !periodStart || !periodEnd) return [];
+  const { rows: history, returnsByProductCode } = useMemo(() => {
+    if (!selectedCustomer || !periodStart || !periodEnd) {
+      return { rows: [], returnsByProductCode: {} };
+    }
     return computeCustomerRentalHistory({
       rentals,
       bottles,
@@ -142,6 +153,23 @@ export default function CustomerRentalHistory() {
       periodEnd,
     });
   }, [selectedCustomer, customers, rentals, bottles, periodStart, periodEnd]);
+
+  const [returnDetailOpen, setReturnDetailOpen] = useState({});
+
+  const toggleReturnDetails = useCallback((productCode) => {
+    setReturnDetailOpen((prev) => {
+      const shown = prev[productCode] !== false;
+      return { ...prev, [productCode]: !shown };
+    });
+  }, []);
+
+  const returnsDetailOpen = useCallback(
+    (productCode, rtn) => {
+      if (rtn <= 0) return false;
+      return returnDetailOpen[productCode] !== false;
+    },
+    [returnDetailOpen]
+  );
 
   const totals = useMemo(() => {
     return history.reduce(
@@ -181,6 +209,41 @@ export default function CustomerRentalHistory() {
     URL.revokeObjectURL(url);
   }, [history, totals, selectedCustomer, billingMonth]);
 
+  const handleExportReturnsCsv = useCallback(() => {
+    if (!selectedCustomer) return;
+    const entries = Object.entries(returnsByProductCode || {}).filter(([, items]) => items?.length);
+    if (entries.length === 0) return;
+    const headers = ['product_code', 'rental_end_date', 'bottle_barcode', 'serial_number', 'bottle_id', 'rental_id'];
+    const lines = [headers.join(',')];
+    for (const [code, items] of entries) {
+      for (const d of items) {
+        lines.push(
+          [
+            csvEscape(code),
+            csvEscape(d.rentalEndDate),
+            csvEscape(d.bottleBarcode),
+            csvEscape(d.serialNumber || ''),
+            csvEscape(d.bottleId),
+            csvEscape(d.rentalId),
+          ].join(',')
+        );
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = String(selectedCustomer._displayName || selectedCustomer.id).replace(/[^a-z0-9]+/gi, '_');
+    a.href = url;
+    a.download = `rental_returns_detail_${safeName}_${billingMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [returnsByProductCode, selectedCustomer, billingMonth]);
+
+  const hasReturnLineItems = useMemo(
+    () => Object.values(returnsByProductCode || {}).some((items) => items?.length),
+    [returnsByProductCode]
+  );
+
   const toolbarItems = useMemo(
     () => [
       {
@@ -193,6 +256,15 @@ export default function CustomerRentalHistory() {
         disabled: !history.length,
       },
       {
+        id: 'export-returns-csv',
+        title: 'Export returns (barcodes)',
+        action: 'export-returns-csv',
+        icon: <IoDownloadOutline />,
+        gradientFrom: '#F59E0B',
+        gradientTo: '#D97706',
+        disabled: !hasReturnLineItems,
+      },
+      {
         id: 'refresh',
         title: 'Refresh',
         action: 'refresh',
@@ -201,7 +273,7 @@ export default function CustomerRentalHistory() {
         gradientTo: '#ea51ff',
       },
     ],
-    [history.length]
+    [history.length, hasReturnLineItems]
   );
 
   return (
@@ -233,6 +305,7 @@ export default function CustomerRentalHistory() {
               className="min-h-0 w-full justify-center md:justify-end py-2 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
               onAction={(action) => {
                 if (action === 'export-csv') handleExportCsv();
+                if (action === 'export-returns-csv') handleExportReturnsCsv();
                 if (action === 'refresh') loadData();
               }}
             />
@@ -295,8 +368,10 @@ export default function CustomerRentalHistory() {
           <Chip label={`Net change: ${totals.endCount - totals.startCount >= 0 ? '+' : ''}${totals.endCount - totals.startCount}`} variant="outlined" />
         </Stack>
         <Divider sx={{ my: 1.5 }} />
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="text.secondary" component="div">
           Sanity check: <code>End = Start + Ship − Return</code> for each row.
+          {' '}
+          Expand a row with Return &gt; 0 to see which rental closed (barcode / end date), or use <strong>Export returns (barcodes)</strong>.
         </Typography>
       </Paper>
 
@@ -342,27 +417,115 @@ export default function CustomerRentalHistory() {
               history.map((row) => {
                 const expectedEnd = row.startCount + row.ship - row.rtn;
                 const matches = expectedEnd === row.endCount;
+                const returnItems = returnsByProductCode[row.productCode] || [];
+                const showReturnBreakdown = row.rtn > 0 && returnItems.length > 0;
+                const expanded = returnsDetailOpen(row.productCode, row.rtn);
                 return (
-                  <TableRow key={row.productCode} hover>
-                    <TableCell sx={{ fontFamily: 'monospace' }}>{row.productCode}</TableCell>
-                    <TableCell align="right">{row.startCount}</TableCell>
-                    <TableCell align="right" sx={{ color: row.ship > 0 ? 'info.main' : 'text.secondary' }}>{row.ship}</TableCell>
-                    <TableCell align="right" sx={{ color: row.rtn > 0 ? 'warning.main' : 'text.secondary' }}>{row.rtn}</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>{row.endCount}</TableCell>
-                    <TableCell align="right">{row.rentDays}</TableCell>
-                    <TableCell align="right">
-                      {matches ? (
-                        <Chip size="small" label="✓" color="success" sx={{ height: 20 }} />
-                      ) : (
-                        <Chip
-                          size="small"
-                          label={`expected ${expectedEnd}`}
-                          color="warning"
-                          sx={{ height: 20 }}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
+                  <React.Fragment key={row.productCode}>
+                    <TableRow hover>
+                      <TableCell sx={{ fontFamily: 'monospace' }}>{row.productCode}</TableCell>
+                      <TableCell align="right">{row.startCount}</TableCell>
+                      <TableCell align="right" sx={{ color: row.ship > 0 ? 'info.main' : 'text.secondary' }}>{row.ship}</TableCell>
+                      <TableCell align="right" sx={{ color: row.rtn > 0 ? 'warning.main' : 'text.secondary' }}>
+                        <Stack direction="row" alignItems="center" justifyContent="flex-end" spacing={0.5}>
+                          <span>{row.rtn}</span>
+                          {showReturnBreakdown && (
+                            <Tooltip title={expanded ? 'Hide return details' : 'Show return details'}>
+                              <IconButton
+                                size="small"
+                                aria-expanded={expanded}
+                                aria-label={expanded ? 'Hide return details' : 'Show return details'}
+                                onClick={() => toggleReturnDetails(row.productCode)}
+                                sx={{ p: 0.25 }}
+                              >
+                                <ExpandMoreIcon
+                                  sx={{
+                                    transform: expanded ? 'rotate(180deg)' : 'none',
+                                    transition: 'transform 0.2s',
+                                  }}
+                                />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>{row.endCount}</TableCell>
+                      <TableCell align="right">{row.rentDays}</TableCell>
+                      <TableCell align="right">
+                        {matches ? (
+                          <Chip size="small" label="✓" color="success" sx={{ height: 20 }} />
+                        ) : (
+                          <Chip
+                            size="small"
+                            label={`expected ${expectedEnd}`}
+                            color="warning"
+                            sx={{ height: 20 }}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    {showReturnBreakdown && (
+                      <TableRow>
+                        <TableCell colSpan={7} sx={{ py: 0, borderBottom: expanded ? undefined : 'none' }}>
+                          <Collapse in={expanded} timeout="auto" unmountOnExit>
+                            <Box sx={{ py: 1.5, px: { xs: 0.5, sm: 1 } }}>
+                              <Typography variant="subtitle2" color="warning.dark" gutterBottom sx={{ fontWeight: 700 }}>
+                                Returned in this period ({returnItems.length})
+                              </Typography>
+                              <TableContainer sx={{ maxWidth: 720 }}>
+                                <Table size="small">
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 700 }}>Rental end</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Barcode</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Serial</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }} align="right">
+                                        Bottle
+                                      </TableCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {returnItems.map((d, idx) => (
+                                      <TableRow key={`${row.productCode}-${d.rentalId ?? idx}-${d.rentalEndDate}`}>
+                                        <TableCell>{d.rentalEndDate || '—'}</TableCell>
+                                        <TableCell sx={{ fontFamily: 'monospace' }}>
+                                          {d.bottleBarcode || (
+                                            <Typography component="span" variant="body2" color="text.secondary">
+                                              —
+                                            </Typography>
+                                          )}
+                                        </TableCell>
+                                        <TableCell sx={{ fontFamily: 'monospace' }}>
+                                          {d.serialNumber || '—'}
+                                        </TableCell>
+                                        <TableCell align="right">
+                                          {d.bottleId ? (
+                                            <Chip
+                                              size="small"
+                                              component={RouterLink}
+                                              to={`/bottle/${encodeURIComponent(d.bottleId)}`}
+                                              clickable
+                                              label="Open"
+                                              variant="outlined"
+                                              color="primary"
+                                            />
+                                          ) : (
+                                            <Typography variant="caption" color="text.secondary">
+                                              —
+                                            </Typography>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </TableContainer>
+                            </Box>
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
                 );
               })
             )}

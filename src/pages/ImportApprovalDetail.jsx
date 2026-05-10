@@ -12,6 +12,8 @@ import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { coerceImportedRowPkForRpc } from '../utils/coerceImportedRowPk';
 
 // Enhanced data parsing with better error handling
 function parseDataField(data) {
@@ -29,11 +31,19 @@ function parseDataField(data) {
 }
 
 /** Ownership (e.g. WeldCor) = who owns the asset; customer fields = who it is assigned/rented to. */
-function bottleAssignedCustomerLabel(bottle) {
+function bottleAssignedCustomerLabel(bottle, options = {}) {
   if (!bottle) return '—';
   const name = (bottle.customer_name || '').trim();
   if (name) return name;
   if (bottle.assigned_customer) return `Customer ID: ${bottle.assigned_customer}`;
+  const fb = String(options.fallbackOrderCustomer || '').trim();
+  if (
+    fb &&
+    fb.toLowerCase() !== 'unknown' &&
+    options.showOrderCustomerWhenUnassigned
+  ) {
+    return `Not on asset · order: ${fb}`;
+  }
   return '—';
 }
 
@@ -107,6 +117,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     return id;
   };
 
+  /** DB PK for non–scanned-only routes (strips composite suffix e.g. 638_1 → 638). */
+  const resolveImportedRowPkFromRoute = () => {
+    if (!invoiceNumber || (typeof invoiceNumber === 'string' && invoiceNumber.startsWith('scanned_'))) return null;
+    const pk = getOriginalId(invoiceNumber);
+    return pk != null && String(pk).trim() !== '' ? String(pk).trim() : String(invoiceNumber).trim();
+  };
+
   useEffect(() => {
     async function fetchImport() {
       setLoading(true);
@@ -121,6 +138,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       
       // Handle scanned-only records
       if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
+        if (!organization?.id) {
+          setLoading(true);
+          return;
+        }
         // ID format: scanned_<orderNumber> or scanned_<orderNumber>_<customerSuffix>
         // bottle_scans stores only order_number (e.g. S47744), not the full id suffix
         const afterPrefix = invoiceNumber.replace(/^scanned_/, '');
@@ -221,7 +242,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setLoading(false);
     }
     fetchImport();
-  }, [invoiceNumber]);
+  }, [invoiceNumber, organization?.id]);
 
   // Fetch user information for uploaded_by
   useEffect(() => {
@@ -858,6 +879,25 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     
     return null;
   };
+
+  /** Customer on the import record (order), for labels when the bottle row was never updated. */
+  const importOrderCustomerDisplay = useMemo(() => {
+    if (!importRecord) return '';
+    const data = parseDataField(importRecord.data);
+    const raw = String(getCustomerInfo(data) || '').trim();
+    if (!raw || raw.toLowerCase() === 'unknown') return '';
+    return raw;
+  }, [importRecord]);
+
+  /** SHIP scans tied to this order whose bottle row has no renter — verification may not have run or assignment was cleared later. */
+  const deliveredBottlesMissingDbAssignment = useMemo(() => {
+    if (!scannedBottles?.length || !importOrderCustomerDisplay) return [];
+    return scannedBottles.filter((b) => {
+      const ac = String(b.assigned_customer || '').trim();
+      const cn = String(b.customer_name || '').trim();
+      return !ac && !cn;
+    });
+  }, [scannedBottles, importOrderCustomerDisplay]);
 
   /** Delivered barcodes that still show a different customer on the bottle row (e.g. return not scanned). */
   const deliveredPriorCustomerMismatches = useMemo(() => {
@@ -1568,11 +1608,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
           logger.log('Verify: orderNum=', orderNum, 'orderVariants=', orderVariants, 'returnBarcodes=', returnBarcodesUnique, 'returnBarcodesOnBalance=', returnBarcodesOnBalance, 'shipBarcodes=', shipBarcodesUnique);
 
-          let recordId = originalId;
-          if (typeof originalId === 'string') {
-            const numericPart = originalId.match(/\d+/);
-            recordId = numericPart ? parseInt(numericPart[0], 10) : originalId;
-          }
+          const recordId = coerceImportedRowPkForRpc(originalId);
 
           // Use the transactional RPC — assignment + status update in one transaction
           try {
@@ -1872,21 +1908,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             return;
           }
 
-          // If scanned-only (no import record), manually mark as approved
-          if (isScannedOnly && recordId) {
-            await supabase
-              .from('imported_invoices')
-              .update({ status: 'approved', approved_at: new Date().toISOString() })
-              .eq('id', recordId);
-          }
-
           setTimeout(() => navigate('/import-approvals'), 2000);
           break;
         }
         case 'Unverify This Record': {
           const originalId = getOriginalId(invoiceNumber);
           if (invoiceNumber && invoiceNumber.startsWith('scanned_')) {
-            const orderNumber = invoiceNumber.replace('scanned_', '');
             // bottle_scans has no status; unverify state is on import record only
             setActionMessage('Scanned record unverified. It will appear in pending again.');
             setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
@@ -1896,11 +1923,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             setActionMessage('Cannot unverify: invalid record ID.');
             return;
           }
-          const recordId = typeof originalId === 'string' && originalId.match(/\d+/) ? parseInt(originalId.match(/\d+/)[0], 10) : originalId;
+          const recordId = coerceImportedRowPkForRpc(originalId);
 
           const importDataForUnverify = importRecord?.data ? (typeof importRecord.data === 'string' ? JSON.parse(importRecord.data) : importRecord.data) : {};
           const orderNumForUnverify = effectiveOrderNumber || importDataForUnverify.order_number || importDataForUnverify.invoice_number || importDataForUnverify.reference_number || null;
-          const importRecordIdForRpc = (importRecord?.id && !String(importRecord.id).startsWith('scanned_')) ? importRecord.id : recordId;
+          const importRecordIdForRpc = (importRecord?.id && !String(importRecord.id).startsWith('scanned_'))
+            ? coerceImportedRowPkForRpc(importRecord.id)
+            : recordId;
 
           // Use the transactional RPC to reverse bottle assignments + delete DNS records
           try {
@@ -1961,17 +1990,18 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         case 'Delete This Record':
           if (window.confirm('Are you sure you want to delete this record?')) {
             if (isScannedOnly) {
-              // For scanned-only records, delete from bottle_scans
-              const orderNumber = invoiceNumber.replace('scanned_', '');
-              await supabase
-                .from('bottle_scans')
-                .delete()
-                .eq('order_number', orderNumber);
+              const afterPrefix = invoiceNumber.replace(/^scanned_/, '');
+              const orderNumber = (afterPrefix.includes('_') ? afterPrefix.split('_')[0] : afterPrefix).trim();
+              let del = supabase.from('bottle_scans').delete().eq('order_number', orderNumber);
+              if (organization?.id) del = del.eq('organization_id', organization.id);
+              await del;
             } else {
-              await supabase
-                .from('imported_invoices')
-                .delete()
-                .eq('id', invoiceNumber);
+              const rowPk = resolveImportedRowPkFromRoute();
+              if (!rowPk) {
+                setActionMessage('Cannot delete: invalid record ID.');
+                break;
+              }
+              await supabase.from('imported_invoices').delete().eq('id', rowPk);
             }
             setActionMessage('Record deleted successfully!');
             setTimeout(() => navigate('/import-approvals'), 1500);
@@ -1979,10 +2009,15 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           break;
         case 'Mark for Investigation':
           if (!isScannedOnly) {
+            const rowPkInv = resolveImportedRowPkFromRoute();
+            if (!rowPkInv) {
+              setActionMessage('Cannot update: invalid record ID.');
+              break;
+            }
             await supabase
               .from('imported_invoices')
               .update({ status: 'investigation', notes: 'Marked for investigation' })
-              .eq('id', invoiceNumber);
+              .eq('id', rowPkInv);
             setActionMessage('Record marked for investigation!');
           } else {
             setActionMessage('Cannot mark scanned-only records for investigation');
@@ -2124,6 +2159,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         customer_name: customer.name
       }));
 
+      const rowPkCust = resolveImportedRowPkFromRoute();
+      if (!rowPkCust) {
+        setActionMessage('Cannot update: invalid record ID.');
+        return;
+      }
+
       // Update the imported_invoices table
       const { error } = await supabase
         .from('imported_invoices')
@@ -2138,7 +2179,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
           }
         })
-        .eq('id', invoiceNumber);
+        .eq('id', rowPkCust);
 
       if (error) {
         throw error;
@@ -2148,7 +2189,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const { data: updatedRecord } = await supabase
         .from('imported_invoices')
         .select('*')
-        .eq('id', invoiceNumber)
+        .eq('id', rowPkCust)
         .single();
 
       if (updatedRecord) {
@@ -2190,6 +2231,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         date: newDate
       }));
 
+      const rowPkDate = resolveImportedRowPkFromRoute();
+      if (!rowPkDate) {
+        setActionMessage('Cannot update: invalid record ID.');
+        return;
+      }
+
       const { error } = await supabase
         .from('imported_invoices')
         .update({
@@ -2202,7 +2249,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
           }
         })
-        .eq('id', invoiceNumber);
+        .eq('id', rowPkDate);
 
       if (error) throw error;
 
@@ -2210,7 +2257,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const { data: updatedRecord } = await supabase
         .from('imported_invoices')
         .select('*')
-        .eq('id', invoiceNumber)
+        .eq('id', rowPkDate)
         .single();
 
       if (updatedRecord) {
@@ -2498,6 +2545,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         po_number: newPO
       }));
 
+      const rowPkPo = resolveImportedRowPkFromRoute();
+      if (!rowPkPo) {
+        setActionMessage('Cannot update: invalid record ID.');
+        return;
+      }
+
       const { error } = await supabase
         .from('imported_invoices')
         .update({
@@ -2510,7 +2563,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
           }
         })
-        .eq('id', invoiceNumber);
+        .eq('id', rowPkPo);
 
       if (error) throw error;
 
@@ -2518,7 +2571,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const { data: updatedRecord } = await supabase
         .from('imported_invoices')
         .select('*')
-        .eq('id', invoiceNumber)
+        .eq('id', rowPkPo)
         .single();
 
       if (updatedRecord) {
@@ -2559,6 +2612,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         location: newLocation
       }));
 
+      const rowPkLoc = resolveImportedRowPkFromRoute();
+      if (!rowPkLoc) {
+        setActionMessage('Cannot update: invalid record ID.');
+        return;
+      }
+
       const { error } = await supabase
         .from('imported_invoices')
         .update({
@@ -2572,7 +2631,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           },
           location: newLocation
         })
-        .eq('id', invoiceNumber);
+        .eq('id', rowPkLoc);
 
       if (error) throw error;
 
@@ -2580,7 +2639,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       const { data: updatedRecord } = await supabase
         .from('imported_invoices')
         .select('*')
-        .eq('id', invoiceNumber)
+        .eq('id', rowPkLoc)
         .single();
 
       if (updatedRecord) {
@@ -3310,6 +3369,30 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 </Alert>
               )}
 
+              {deliveredBottlesMissingDbAssignment.length > 0 && (
+                <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                    Delivered scan(s) with no renter on the asset record
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    {deliveredBottlesMissingDbAssignment.length} barcode(s) are listed under Delivered Assets but{' '}
+                    <strong>customer_name</strong> and <strong>assigned_customer</strong> are empty on the bottle row.
+                    Movement history can still show Delivery / Return / Fill from rentals, scans, or audits elsewhere —
+                    it is merged from several sources, not only Trackabout scans for this order.
+                    Use Verify (or asset correction) to persist the order customer ({importOrderCustomerDisplay}) on these assets if they should be rented out.
+                  </Typography>
+                  <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                    {deliveredBottlesMissingDbAssignment.slice(0, 12).map((b) => (
+                      <li key={b.barcode_number || b.id}>
+                        <Typography variant="body2">
+                          {b.barcode_number || '—'}
+                        </Typography>
+                      </li>
+                    ))}
+                  </Box>
+                </Alert>
+              )}
+
               {deliveredPriorCustomerMismatches.length > 0 && (
                 <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>
@@ -3426,8 +3509,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.description || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.ownership || ''}</TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>
-                                <Tooltip title="Ownership is who owns the cylinder; assigned customer is who it is rented to in the system.">
-                                  <span>{bottleAssignedCustomerLabel(bottle)}</span>
+                                <Tooltip title="Ownership is who owns the cylinder; assigned customer is who it is rented to on the bottle row. Movement history may still show events from rentals, fills, or other scans.">
+                                  <span>
+                                    {bottleAssignedCustomerLabel(bottle, {
+                                      fallbackOrderCustomer: importOrderCustomerDisplay,
+                                      showOrderCustomerWhenUnassigned: true,
+                                    })}
+                                  </span>
                                 </Tooltip>
                               </TableCell>
                               <TableCell sx={{ borderRight: '1px solid #e0e6ed' }}>{bottle.barcode_number || ''}</TableCell>
@@ -4107,18 +4195,12 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
             {/* Search Input */}
             <Box mb={2}>
-              <input
-                type="text"
+              <PageSearchInput
                 placeholder="Search customers..."
                 value={customerSearch}
                 onChange={(e) => setCustomerSearch(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px'
-                }}
+                onClear={() => setCustomerSearch('')}
+                className="w-full"
               />
             </Box>
 

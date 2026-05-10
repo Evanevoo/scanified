@@ -9,8 +9,6 @@ import {
   TableRow,
   Paper,
   TablePagination,
-  TextField,
-  InputAdornment,
   IconButton,
   Tooltip,
   Chip,
@@ -24,7 +22,6 @@ import {
   Divider
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
@@ -34,6 +31,7 @@ import {
 import { usePagination } from '../hooks/usePagination';
 import { useLazyLoading } from '../hooks/useLazyLoading';
 import { performanceMonitor } from '../utils/queryOptimizer';
+import { PageSearchInput } from './ui/search-input-with-icon';
 
 const OptimizedTable = ({
   data = [],
@@ -221,19 +219,12 @@ const OptimizedTable = ({
         {(searchable || filterable) && (
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             {searchable && (
-              <TextField
-                size="small"
+              <PageSearchInput
                 placeholder="Search..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ minWidth: 200 }}
+                onClear={() => setSearchTerm('')}
+                className="min-w-[200px]"
               />
             )}
             {filterable && (

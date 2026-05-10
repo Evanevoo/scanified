@@ -9,8 +9,6 @@ import {
   CardContent,
   CardActions,
   Button,
-  TextField,
-  InputAdornment,
   Chip,
   IconButton,
   Divider,
@@ -18,7 +16,6 @@ import {
   Stack
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   Assessment as ReportIcon,
   Inventory as InventoryIcon,
   People as PeopleIcon,
@@ -32,6 +29,7 @@ import {
   Map as MapIcon,
   ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function CustomReports() {
   const navigate = useNavigate();
@@ -234,19 +232,12 @@ export default function CustomReports() {
 
         {/* Search and Filters */}
         <Box mb={4}>
-          <TextField
-            fullWidth
+          <PageSearchInput
             placeholder="Search reports..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ mb: 3 }}
+            onClear={() => setSearchTerm('')}
+            className="mb-3 w-full"
           />
 
           {/* Category Filters */}

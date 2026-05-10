@@ -4,44 +4,17 @@ import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack, Autocomplete
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, MenuItem, Select, InputLabel, FormControl, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Card, CardContent, Grid, Stack, Autocomplete, Tooltip
 } from '@mui/material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { Add, Remove, Edit, Save, Cancel } from '@mui/icons-material';
 
-function AssetWithWarning({ asset, currentCustomer }) {
-  const [warning, setWarning] = useState('');
-  useEffect(() => {
-    async function checkAssetHistory() {
-      if (!asset) return;
-      // Fetch scan history for this asset (barcode or id)
-      const { data: scans, error } = await supabase
-        .from('bottle_scans')
-        .select('customer, mode, scanned_at')
-        .eq('bottle_barcode', asset)
-        .order('scanned_at', { ascending: false });
-      if (error || !scans || scans.length === 0) return;
-      // Find the most recent SHIP and RETURN events
-      let lastShip = null, lastReturn = null;
-      for (const scan of scans) {
-        if (!lastShip && scan.mode === 'SHIP') lastShip = scan;
-        if (!lastReturn && scan.mode === 'RETURN') lastReturn = scan;
-        if (lastShip && lastReturn) break;
-      }
-      // If lastShip is for a different customer than lastReturn, and lastReturn is before lastShip, warn
-      if (lastShip && lastShip.customer !== currentCustomer) {
-        if (!lastReturn || new Date(lastReturn.scanned_at) < new Date(lastShip.scanned_at)) {
-          setWarning('This asset was not returned by the previous customer before being shipped again.');
-        }
-      }
-    }
-    checkAssetHistory();
-  }, [asset, currentCustomer]);
-  return (
-    <Box>
-      <Typography variant="body2">{asset}</Typography>
-      {warning && <Alert severity="warning" sx={{ mt: 0.5 }}>{warning}</Alert>}
-    </Box>
-  );
+/** Rows from Asset Detail saves use order_number "manual" — not handset / Trackabout uploads. */
+function isWebAppManualBottleScan(row) {
+  const on = String(row?.order_number ?? '').trim().toLowerCase();
+  if (on === 'manual') return true;
+  const notes = String(row?.notes ?? '');
+  return notes.includes('[MANUAL_UI]') || notes.includes('[TYPE_CHANGE]');
 }
 
 export default function ScannedOrders() {
@@ -69,19 +42,45 @@ export default function ScannedOrders() {
 
   const selectedOrg = organization?.id ?? '';
 
+  /** Resolve scanner display names: org members first, then any profile IDs appearing on scans (e.g. former members). */
   useEffect(() => {
-    async function fetchUsers() {
-      const { data, error } = await supabase.from('profiles').select('id, email, full_name');
-      if (!error) {
-        const userMap = {};
-        data.forEach(user => {
-          userMap[user.id] = user.full_name || user.email;
-        });
-        setUsers(userMap);
+    let cancelled = false;
+    const mergeProfiles = (rows, into) => {
+      (rows || []).forEach((u) => {
+        if (!u?.id) return;
+        into[String(u.id)] = u.full_name?.trim() || u.email?.trim() || String(u.id);
+      });
+    };
+    (async () => {
+      if (!selectedOrg) {
+        setUsers({});
+        return;
       }
-    }
-    fetchUsers();
-  }, []);
+      const map = {};
+      const { data: orgProfiles, error: orgErr } = await supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .eq('organization_id', selectedOrg);
+      if (cancelled) return;
+      if (!orgErr) mergeProfiles(orgProfiles, map);
+
+      const scanUserIds = [
+        ...new Set((orders || []).map((o) => o.user_id).filter(Boolean).map(String)),
+      ];
+      const missing = scanUserIds.filter((id) => !map[id]);
+      if (missing.length > 0) {
+        const { data: extraProfiles } = await supabase
+          .from('profiles')
+          .select('id, email, full_name')
+          .in('id', missing);
+        if (!cancelled) mergeProfiles(extraProfiles, map);
+      }
+      if (!cancelled) setUsers(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrg, orders]);
 
   useEffect(() => {
     async function fetchCustomers() {
@@ -373,6 +372,7 @@ export default function ScannedOrders() {
               </Typography>
               <Typography variant="body1" sx={{ color: '#64748b', mt: 1, maxWidth: 760 }}>
                 Review scan submissions, correct order metadata, and keep time-sensitive edits visible for the operations team.
+                Rows labeled manual with a Web app badge were saved from Asset Detail (assignment, location, or type), not from a handheld scanner.
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ color: '#64748b', maxWidth: 320 }}>
@@ -412,13 +412,13 @@ export default function ScannedOrders() {
           }}
         >
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }}>
-            <TextField
-              size="small"
+            <PageSearchInput
               placeholder="Search orders, customer, product code, asset..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              inputProps={{ 'aria-label': 'Search scanned orders' }}
-              sx={{ minWidth: { xs: '100%', md: 320 } }}
+              onClear={() => setSearch('')}
+              aria-label="Search scanned orders"
+              className="w-full min-w-0 md:min-w-[320px]"
             />
             <Chip
               label={`${filteredOrders.length} visible row${filteredOrders.length === 1 ? '' : 's'}`}
@@ -448,7 +448,7 @@ export default function ScannedOrders() {
                   <TableCell>Bottle Barcode</TableCell>
                   <TableCell>Mode</TableCell>
                   <TableCell>Scanned At</TableCell>
-                  <TableCell>User ID</TableCell>
+                  <TableCell>Scanned by</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
@@ -482,7 +482,14 @@ export default function ScannedOrders() {
                             size="small"
                           />
                         ) : (
-                          order.order_number
+                          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                            <span>{order.order_number}</span>
+                            {isWebAppManualBottleScan(order) && (
+                              <Tooltip title="Saved from Asset Detail — not a handset / Trackabout scan.">
+                                <Chip size="small" label="Web app" color="info" variant="outlined" sx={{ fontWeight: 600 }} />
+                              </Tooltip>
+                            )}
+                          </Stack>
                         )}
                       </TableCell>
                       <TableCell>
@@ -533,7 +540,13 @@ export default function ScannedOrders() {
                           return scanTime.toLocaleString();
                         }
                       })() : 'N/A'}</TableCell>
-                      <TableCell>{users[order.user_id] || order.user_id || 'N/A'}</TableCell>
+                      <TableCell>
+                        {(() => {
+                          const uid = order.user_id != null && order.user_id !== '' ? String(order.user_id) : '';
+                          if (!uid) return '—';
+                          return users[uid] || uid;
+                        })()}
+                      </TableCell>
                       <TableCell>
                         {editingId === order.id ? (
                           <>

@@ -9,5 +9,9 @@ export { Alert, AlertDescription, AlertTitle } from './alert';
 export { Calendar } from './calendar';
 export { SearchInput } from './search-input';
 export { GooeySearchBar } from './animated-search-bar';
-export { SearchInputWithIcon } from './search-input-with-icon';
+export {
+  SearchInputWithIcon,
+  PageSearchInput,
+  APP_SHELL_SEARCH_INPUT_CLASSNAME,
+} from './search-input-with-icon';
 export { Label } from './label'; 

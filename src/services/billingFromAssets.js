@@ -95,6 +95,24 @@ export function isCustomerOwnedForBilling(bottle) {
   return false;
 }
 
+/**
+ * Fleet cylinders marked lost (`bottles.status` / `asset_status`) are not billable.
+ * Aligns with Asset Detail normalization (stored value `lost`).
+ */
+export function isBottleLostForBilling(bottle) {
+  if (!bottle) return false;
+  const s = String(bottle.status ?? bottle.asset_status ?? '').trim().toLowerCase();
+  return s === 'lost';
+}
+
+/**
+ * When a rental/DNS row resolves to inventory, skip billing if that asset is lost.
+ */
+export function rentalExcludedBecauseLinkedAssetLost(rental, bottleById, bottleByBarcode) {
+  const b = resolveBottleForRental(rental, bottleById, bottleByBarcode);
+  return Boolean(b && isBottleLostForBilling(b));
+}
+
 /** Linked bottle row for a rental when bottle_id / barcode resolves in inventory. */
 export function resolveBottleForRental(rental, bottleById, bottleByBarcode) {
   const bid = rental?.bottle_id != null ? String(rental.bottle_id).trim() : '';
@@ -334,6 +352,7 @@ export function groupAssignedBottleCountsByProductCode(bottles, subscriptionCust
   const map = new Map();
   for (const b of bottles || []) {
     if (isCustomerOwnedForBilling(b)) continue;
+    if (isBottleLostForBilling(b)) continue;
     if (
       !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
         descendantCustomers: descendants,
@@ -483,6 +502,7 @@ export function buildOpenRentalMatchOptionsForSubscription(
   const assignedBarcodes = new Set();
   for (const b of bottles || []) {
     if (isCustomerOwnedForBilling(b)) continue;
+    if (isBottleLostForBilling(b)) continue;
     if (
       !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
         descendantCustomers: descendants,
@@ -511,9 +531,9 @@ export function buildOpenRentalMatchOptionsForSubscription(
  */
 export function isDnsRentalExcludedFromBillableCount(rental) {
   if (!rental || !rentalIsDnsForBilling(rental)) return false;
-  const d = String(rental.dns_description || '');
-  if (d.includes('Return not on balance')) return true;
-  if (d.includes('Return not scanned')) return true;
+  const d = String(rental.dns_description || '').toLowerCase();
+  if (d.includes('return not on balance')) return true;
+  if (d.includes('return not scanned')) return true;
   return false;
 }
 
@@ -723,6 +743,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
   if (allowAssignedBottleRecovery) {
     for (const b of bottles || []) {
       if (isCustomerOwnedForBilling(b)) continue;
+      if (isBottleLostForBilling(b)) continue;
       if (
         !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
           descendantCustomers: descendants,
@@ -764,6 +785,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     // Prefer bottle rows first (custody + SKU are authoritative); then rental-only units (DNS, etc.).
     for (const b of bottles || []) {
       if (isCustomerOwnedForBilling(b)) continue;
+      if (isBottleLostForBilling(b)) continue;
       if (
         !bottleAssignedToCustomer(b, subscriptionCustomerId, customerRecord, {
           descendantCustomers: descendants,
@@ -785,6 +807,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
       if (isDnsRentalExcludedFromBillableCount(r)) continue;
       if (!rentalWasBillableAsOfPeriodEnd(r, asOfPeriodEnd)) continue;
       if (!rentalMatchesCustomerBillable(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+      if (rentalExcludedBecauseLinkedAssetLost(r, bottleById, bottleByBarcode)) continue;
       if (
         !rentalIsDnsForBilling(r)
         && isCustomerOwnedForBilling(resolveBottleForRental(r, bottleById, bottleByBarcode))
@@ -801,6 +824,7 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
     for (const r of rentals || []) {
       if (isDnsRentalExcludedFromBillableCount(r)) continue;
       if (!openRentalMatchesCustomer(r, subscriptionCustomerId, customerRecord, assignOpts)) continue;
+      if (rentalExcludedBecauseLinkedAssetLost(r, bottleById, bottleByBarcode)) continue;
       if (
         !rentalIsDnsForBilling(r)
         && isCustomerOwnedForBilling(resolveBottleForRental(r, bottleById, bottleByBarcode))

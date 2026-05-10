@@ -140,7 +140,8 @@ export function rentalProductCodeForHistory(rental, bottleById, bottleByBarcode)
  * @param {object} customerRecord — { id, CustomerListID, name, ... }
  * @param {string} periodStart — YYYY-MM-DD
  * @param {string} periodEnd   — YYYY-MM-DD
- * @returns {Array<{ productCode, startCount, ship, rtn, endCount, rentDays }>}
+ * @returns {{ rows: Array<{ productCode, startCount, ship, rtn, endCount, rentDays }>,
+ *            returnsByProductCode: Record<string, Array<{ rentalId, rentalEndDate, bottleBarcode, bottleId, serialNumber }>> }}
  *          rentDays is the *typical* days-on-rent within the period (capped at the period length).
  */
 function bottleUnitKey(bottle) {
@@ -197,6 +198,8 @@ export function computeCustomerRentalHistory({
         returned: false,
         atEnd: false,
         rentDays: 0,
+        /** Closed in-period (`rental_end_date`), one entry per contributing rental row */
+        returnDetails: [],
       });
     } else if (productCode && units.get(key).productCode === '__unclassified__') {
       units.get(key).productCode = productCode;
@@ -248,7 +251,21 @@ export function computeCustomerRentalHistory({
 
     if (onAtStart) u.atStart = true;
     if (shippedInPeriod) u.shipped = true;
-    if (returnedInPeriod) u.returned = true;
+    if (returnedInPeriod) {
+      u.returned = true;
+      const barcode = String(
+        r.bottle_barcode || linkedBottle?.barcode_number || linkedBottle?.barcode || ''
+      ).trim();
+      const bottleId = r.bottle_id ?? linkedBottle?.id ?? null;
+      const serialNumber = String(linkedBottle?.serial_number || '').trim();
+      u.returnDetails.push({
+        rentalId: r.id ?? null,
+        rentalEndDate: re,
+        bottleBarcode: barcode,
+        bottleId,
+        serialNumber: serialNumber || null,
+      });
+    }
     if (onAtEnd) {
       u.atEnd = true;
     } else if (returnedInPeriod) {
@@ -317,7 +334,24 @@ export function computeCustomerRentalHistory({
     if (b.endCount !== a.endCount) return b.endCount - a.endCount;
     return String(a.productCode).localeCompare(String(b.productCode));
   });
-  return out;
+
+  /** Line items behind each product row's Return count (rental closes in this period). */
+  const returnsByProductCode = {};
+  for (const u of units.values()) {
+    if (!u.returned || !Array.isArray(u.returnDetails) || u.returnDetails.length === 0) continue;
+    const code = u.productCode || '__unclassified__';
+    if (!returnsByProductCode[code]) returnsByProductCode[code] = [];
+    for (const d of u.returnDetails) {
+      returnsByProductCode[code].push(d);
+    }
+  }
+  for (const code of Object.keys(returnsByProductCode)) {
+    returnsByProductCode[code].sort((a, b) =>
+      String(a.rentalEndDate || '').localeCompare(String(b.rentalEndDate || ''))
+    );
+  }
+
+  return { rows: out, returnsByProductCode };
 }
 
 export function lastDayOfMonth(ym) {

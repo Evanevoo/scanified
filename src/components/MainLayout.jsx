@@ -28,7 +28,8 @@ import CommandPalette from './CommandPalette';
 import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import Avatar from '@mui/material/Avatar';
-import { SearchInputWithIcon } from './ui/search-input-with-icon';
+import { SearchInputWithIcon, APP_SHELL_SEARCH_INPUT_CLASSNAME } from './ui/search-input-with-icon';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 
 
 const drawerWidth = 280;
@@ -126,13 +127,18 @@ export default function MainLayout({ children }) {
           setSuggestions(orgResults);
         }
       } else if (organization?.id) {
+        const ilikeOperand = postgrestQuotedIlikeContains(searchTerm);
+        if (!ilikeOperand) {
+          if (active) setSuggestions([]);
+          return;
+        }
         // For regular users: only show data from their organization
         // Customers: by name or ID (filtered by organization)
         const { data: customers, error: customerError } = await supabase
           .from('customers')
           .select('CustomerListID, name, phone')
           .eq('organization_id', organization.id)
-          .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
+          .or(`CustomerListID.ilike.${ilikeOperand},name.ilike.${ilikeOperand}`)
           .limit(5);
         
         if (customerError) {
@@ -145,7 +151,7 @@ export default function MainLayout({ children }) {
           .from('bottles')
           .select('id, serial_number, barcode_number, assigned_customer, product_code, organization_id')
           .eq('organization_id', organization.id)
-          .or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,product_code.ilike.%${searchTerm}%`)
+          .or(`serial_number.ilike.${ilikeOperand},barcode_number.ilike.${ilikeOperand},product_code.ilike.${ilikeOperand}`)
           .limit(5);
         
         if (bottleError) {
@@ -477,7 +483,7 @@ export default function MainLayout({ children }) {
                     setShowSuggestions(true);
                   }
                 }}
-                className="h-11 min-h-[44px] w-full rounded-full border-slate-200/80 bg-white/90 pl-4 pr-4 shadow-[0_10px_36px_rgba(99,102,241,0.09)] transition-shadow placeholder:text-slate-400 focus-visible:shadow-[0_12px_42px_rgba(64,181,173,0.12)]"
+                className={APP_SHELL_SEARCH_INPUT_CLASSNAME}
               />
               {showSuggestions && suggestions.length > 0 && (
                 <Paper

@@ -9,20 +9,18 @@ import {
   Grid,
   Card,
   CardContent,
-  TextField,
-  InputAdornment,
   Chip,
   Button,
   Stack
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
-  Search as SearchIcon,
   Help as HelpIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
   Chat as ChatIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function FAQ() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -192,19 +190,12 @@ export default function FAQ() {
         <Grid container spacing={6}>
           <Grid item xs={12} md={3}>
             {/* Search */}
-            <TextField
-              fullWidth
+            <PageSearchInput
               placeholder="Search questions..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ mb: 4 }}
+              onClear={() => setSearchTerm('')}
+              className="mb-4 w-full"
             />
 
             {/* Categories */}
