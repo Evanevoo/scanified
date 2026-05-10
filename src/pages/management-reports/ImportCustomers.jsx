@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { supabase } from '../../supabase/client';
+import { finalizeCustomerBranchParentFields } from '../../utils/customerParentConstraint';
 import { Box, Paper, Typography, Card, CardContent, Alert } from '@mui/material';
 import { TableSkeleton } from '../../components/SmoothLoading';
 
@@ -189,9 +190,19 @@ export default function ImportCustomers() {
         insertObj.barcode = `*%${(row[customerIdCol] || '').toLowerCase().replace(/\s+/g, '')}*`;
         insertObj.customer_barcode = insertObj.barcode;
       }
+      // Mapped column becomes ParentCustomerID — DB expects parent_customer_id (customers.id UUID).
+      const parentPkRe =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const rawParent = insertObj.ParentCustomerID;
+      delete insertObj.ParentCustomerID;
+      if (rawParent != null && String(rawParent).trim() !== '') {
+        const p = String(rawParent).trim();
+        if (parentPkRe.test(p)) insertObj.parent_customer_id = p;
+      }
+      const insertPayload = finalizeCustomerBranchParentFields(insertObj);
       const { data, error } = await supabase
         .from('customers')
-        .insert([insertObj])
+        .insert([insertPayload])
         .select();
       if (error) {
         rowError = `Row ${idx + 2}: ${error.message}`;

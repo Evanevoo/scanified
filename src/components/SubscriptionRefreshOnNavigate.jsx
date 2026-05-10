@@ -2,8 +2,22 @@ import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useSubscriptions } from '../context/SubscriptionContext';
 
-/** Avoid hammering Supabase + React on every sidebar click (11 parallel large selects — costly). */
-const MIN_MS_BETWEEN_NAV_REFRESH = 60_000;
+/** Default: avoid hammering Supabase on every sidebar click (11 parallel large selects). */
+const MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT = 60_000;
+/** Rentals / customer / pricing lists merge subscriptions + bottles + rentals — stale merges feel like “cache”. */
+const MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE = 15_000;
+
+function minMsBetweenRefreshForPath(pathname) {
+  if (!pathname) return MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT;
+  if (pathname === '/rentals' || pathname.startsWith('/rentals/')) {
+    return MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE;
+  }
+  if (pathname.startsWith('/customer/')) return MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE;
+  if (pathname.startsWith('/pricing/customers')) return MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE;
+  if (pathname.startsWith('/lease-agreements')) return MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE;
+  return MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT;
+}
+
 /** Let the destination route paint before starting heavy refetches (reduces “navigation lag”). */
 const REFRESH_DEFER_MS = 280;
 
@@ -28,7 +42,8 @@ export default function SubscriptionRefreshOnNavigate() {
       return;
     }
     const now = Date.now();
-    if (now - lastNavRefreshAt.current < MIN_MS_BETWEEN_NAV_REFRESH) {
+    const minGap = minMsBetweenRefreshForPath(pathname);
+    if (now - lastNavRefreshAt.current < minGap) {
       return;
     }
     lastNavRefreshAt.current = now;

@@ -71,6 +71,7 @@ import { fetchOrgRentalPricingContext, monthlyRateForNewRental, monthlyRateForPr
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
 import { coerceImportedRowPkForRpc, isValidImportedRowPk } from '../utils/coerceImportedRowPk';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -3007,16 +3008,18 @@ export default function ImportApprovals() {
             const newCustomerId = customerId || `80000448-${Date.now()}S`;
             const { data: created, error: createError } = await supabase
               .from('customers')
-              .insert({
-                name: customerName,
-                CustomerListID: newCustomerId,
-                organization_id: userProfile.organization_id,
-                barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`
-              })
+              .insert(
+                finalizeCustomerBranchParentFields({
+                  name: customerName,
+                  CustomerListID: newCustomerId,
+                  organization_id: userProfile.organization_id,
+                  barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
+                  customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
+                })
+              )
               .select('CustomerListID, name')
               .single();
-            
+
             if (createError) {
               if (createError.code === '23505') {
                 // Duplicate key error - customer already exists, try to find it
@@ -3026,7 +3029,7 @@ export default function ImportApprovals() {
                   .eq('CustomerListID', newCustomerId)
                   .eq('organization_id', userProfile.organization_id)
                   .single();
-                
+
                 if (existingCustomer) {
                   customer = existingCustomer;
                 } else {
@@ -3276,16 +3279,18 @@ export default function ImportApprovals() {
             const newCustomerId = customerId || `80000448-${Date.now()}S`;
             const { data: created, error: createError } = await supabase
               .from('customers')
-              .insert({
-                name: customerName,
-                CustomerListID: newCustomerId,
-                organization_id: userProfile.organization_id,
-                barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`
-              })
+              .insert(
+                finalizeCustomerBranchParentFields({
+                  name: customerName,
+                  CustomerListID: newCustomerId,
+                  organization_id: userProfile.organization_id,
+                  barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
+                  customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
+                })
+              )
               .select('CustomerListID, name')
               .single();
-            
+
             if (createError) {
               if (createError.code === '23505') {
                 // Duplicate key error - customer already exists, try to find it
@@ -3295,7 +3300,7 @@ export default function ImportApprovals() {
                   .eq('CustomerListID', newCustomerId)
                   .eq('organization_id', userProfile.organization_id)
                   .single();
-                
+
                 if (existingCustomer) {
                   customer = existingCustomer;
                 } else {

@@ -73,6 +73,15 @@ import { isBottleLostForBilling } from '../services/billingFromAssets';
 import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
 import GradientMenu from '../components/ui/gradient-menu';
 
+/** New agreements default to the current calendar year (aligned with annual billing). */
+function getDefaultLeaseYearDateRange() {
+  const y = new Date().getFullYear();
+  return {
+    start_date: `${y}-01-01`,
+    end_date: `${y}-12-31`,
+  };
+}
+
 export default function LeaseAgreements() {
   const { profile, organization } = useAuth();
   const { organizationColors } = useTheme();
@@ -110,14 +119,16 @@ export default function LeaseAgreements() {
   const [billingExportBusy, setBillingExportBusy] = useState(false);
 
   // Form state for adding/editing agreements (bottle_id = per-bottle lease, null = customer-level)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => {
+    const { start_date, end_date } = getDefaultLeaseYearDateRange();
+    return {
     customer_id: '',
     customer_name: '',
     title: 'Annual Lease Agreement',
-    start_date: '',
-    end_date: '',
+    start_date,
+    end_date,
     annual_amount: '',
-    billing_frequency: 'monthly',
+    billing_frequency: 'annual',
     payment_terms: 'Net 30',
     tax_rate: '0.0000',
     terms_and_conditions: '',
@@ -131,6 +142,7 @@ export default function LeaseAgreements() {
     billing_address: '',
     bottle_id: null,
     applyToAllBottles: false
+    };
   });
 
   const parsePositiveNumber = (value) => {
@@ -482,14 +494,15 @@ export default function LeaseAgreements() {
   };
 
   const handleAddAgreement = () => {
+    const { start_date, end_date } = getDefaultLeaseYearDateRange();
     setFormData({
       customer_id: '',
       customer_name: '',
       title: 'Annual Lease Agreement',
-      start_date: '',
-      end_date: '',
+      start_date,
+      end_date,
       annual_amount: '',
-      billing_frequency: 'monthly',
+      billing_frequency: 'annual',
       payment_terms: 'Net 30',
       tax_rate: '0.0000',
       terms_and_conditions: '',
@@ -787,7 +800,7 @@ export default function LeaseAgreements() {
         date.setFullYear(date.getFullYear() + 1);
         break;
       default:
-        date.setMonth(date.getMonth() + 1);
+        date.setFullYear(date.getFullYear() + 1);
     }
     return date;
   };
@@ -1637,7 +1650,9 @@ export default function LeaseAgreements() {
                       onChange={(e) => setFormData({ ...formData, billing_frequency: e.target.value })}
                       label="Billing Frequency"
                     >
-                      <MenuItem value="monthly">Monthly</MenuItem>
+                      {dialogMode !== 'add' && formData.billing_frequency === 'monthly' ? (
+                        <MenuItem value="monthly">Monthly (legacy)</MenuItem>
+                      ) : null}
                       <MenuItem value="quarterly">Quarterly</MenuItem>
                       <MenuItem value="semi-annual">Semi-Annual</MenuItem>
                       <MenuItem value="annual">Annual</MenuItem>

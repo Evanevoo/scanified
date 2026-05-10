@@ -20,3 +20,21 @@ export function resolveCustomerTypeForParentConstraint(customerType, parentCusto
   }
   return 'BRANCH';
 }
+
+/**
+ * Apply `customer_type` + trimmed `parent_customer_id` for INSERT/UPSERT payloads so Postgres
+ * `check_branch_has_parent` passes even when the table default for `customer_type` is wrong
+ * (e.g. default BRANCH with null parent).
+ */
+export function finalizeCustomerBranchParentFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  const parent =
+    row.parent_customer_id != null && String(row.parent_customer_id).trim() !== ''
+      ? String(row.parent_customer_id).trim()
+      : null;
+  return {
+    ...row,
+    parent_customer_id: parent,
+    customer_type: resolveCustomerTypeForParentConstraint(row.customer_type, parent),
+  };
+}

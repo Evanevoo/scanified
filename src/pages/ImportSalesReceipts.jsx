@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 import * as XLSX from 'xlsx';
 
 const REQUIRED_FIELDS = [
@@ -274,11 +275,11 @@ export default function ImportSalesReceipts() {
             else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
             else if (city.includes('SASKATOON')) location = 'SASKATOON';
             
-            return {
+            return finalizeCustomerBranchParentFields({
               CustomerListID: row.customer_id,
               name: row.customer_name,
-              location: location
-            };
+              location: location,
+            });
           });
         if (newCustomers.length) {
           await supabase.from('customers').insert(newCustomers);

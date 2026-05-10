@@ -292,6 +292,51 @@ function getInvoiceNumberFromLastCsvMap(targetSub) {
 const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
+/** Rentals list: omit rows whose customer directory record is inactive / archived / soft-deleted. */
+function rowReferencesDeletedCustomer(row, customers) {
+  if (row?.customer && typeof row.customer === 'object' && !isActiveCustomer(row.customer)) {
+    return true;
+  }
+  const uid = normalize(row.customer_id);
+  if (!uid) return false;
+  for (const c of customers || []) {
+    const ids = [normalize(c.id), normalize(c.CustomerListID)].filter(Boolean);
+    if (!ids.includes(uid)) continue;
+    return !isActiveCustomer(c);
+  }
+  return false;
+}
+
+/**
+ * Customers page deletes rows from `customers` (hard delete); subscriptions/open rentals often remain.
+ * Those rentals rows still show names from Stripe/subscription stubs until we hide “orphan” identities.
+ *
+ * Important: do **not** use display-name matching for persisted subscriptions that still have `customer_id`.
+ * Otherwise `resolveCustomer(sub.customer_name)` can attach a *different* active customer with the same
+ * name, and this check would think the row is still valid — the classic “deleted customer still on Rentals”.
+ */
+function rowBillingCustomerRemovedFromDirectory(row, customers, subscriptionIds) {
+  const list = customers || [];
+  if (!list.length) return false;
+
+  const keys = expandLeaseMatchKeys(row.customer_id, row.customer, list);
+  if (keys.size === 0) return false;
+
+  const isPersistedSubscription = row.id != null && subscriptionIds?.has?.(row.id);
+  const hasStripeCustomerId = String(row.customer_id || '').trim() !== '';
+
+  for (const c of list) {
+    if (!isActiveCustomer(c)) continue;
+    const ids = [normalize(c.id), normalize(c.CustomerListID)].filter(Boolean);
+    if (ids.some((id) => keys.has(id))) return false;
+    const nn = normalizeName(c.name || c.Name || '');
+    if (nn && keys.has(nn) && (!isPersistedSubscription || !hasStripeCustomerId)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Isolated search field. Owns its own input state so typing only re-renders
  * this component (not the entire 4000+ line Subscriptions page with 50 table
@@ -614,6 +659,7 @@ export default function Subscriptions() {
     if (!customerId) return null;
     const key = normalize(customerId);
     for (const c of ctx.customers || []) {
+      if (!isActiveCustomer(c)) continue;
       const ids = [c.id, c.CustomerListID].map(normalize).filter(Boolean);
       if (ids.includes(key)) return c;
     }
@@ -803,16 +849,25 @@ export default function Subscriptions() {
 
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
-      const baseCustomer =
-        resolveCustomer(sub.customer_id) ||
-        resolveCustomer(sub.customer_name || '') ||
-        matchCustomerRecordBySubscriptionId(sub.customer_id) ||
-        {
-          CustomerListID: sub.customer_id,
-          id: sub.customer_id,
-          name: sub.customer_name || sub.customer_id,
-          Name: sub.customer_name,
-        };
+      const hasSubscriptionCustomerId = String(sub.customer_id || '').trim() !== '';
+      /** Never resolve by name when `customer_id` is set — deleted UUID/List ID + shared display name must not attach to a different live customer. */
+      const baseCustomer = hasSubscriptionCustomerId
+        ? resolveCustomer(sub.customer_id) ||
+          matchCustomerRecordBySubscriptionId(sub.customer_id) ||
+          {
+            CustomerListID: sub.customer_id,
+            id: sub.customer_id,
+            name: sub.customer_name || sub.customer_id,
+            Name: sub.customer_name,
+          }
+        : resolveCustomer(sub.customer_name || '') ||
+          resolveCustomer('', sub.customer_name || '') ||
+          {
+            CustomerListID: sub.customer_id,
+            id: sub.customer_id,
+            name: sub.customer_name || sub.customer_id,
+            Name: sub.customer_name,
+          };
       const customer = mergeCustomerDirectoryFields(baseCustomer, sub.customer_id, matchCustomerRecordBySubscriptionId);
       const activeLease = findActiveLeaseContract(
         ctx.leaseContracts || [],
@@ -1175,6 +1230,9 @@ export default function Subscriptions() {
       return k && !existingKeys.has(k);
     });
     const combined = [...merged, ...extraLegacy].filter((row) => {
+      if (rowReferencesDeletedCustomer(row, ctx.customers)) return false;
+      if (rowBillingCustomerRemovedFromDirectory(row, ctx.customers, subscriptionIds)) return false;
+
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
       const fromLegacyRentals = row.legacySource === 'rentals_table';
