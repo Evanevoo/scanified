@@ -1,3 +1,5 @@
+import { isBottleLostForBilling } from './billingFromAssets';
+
 /**
  * Build subscription-shaped rows for yearly lease agreements (QuickBooks CSV, Excel, PDF ZIP).
  * Mirrors Lease agreement pricing used previously on the Rentals page.
@@ -12,6 +14,7 @@ export function buildYearlyLeaseExportRows(workspace) {
 
   const bottleCountByCustomerId = {};
   for (const b of bottles) {
+    if (isBottleLostForBilling(b)) continue;
     const cid = b.assigned_customer;
     if (cid == null || cid === '') continue;
     const key = String(cid);

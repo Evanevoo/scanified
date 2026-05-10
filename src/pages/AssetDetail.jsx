@@ -37,6 +37,12 @@ import { clearRentalsBottleLinksForBottleIds } from '../utils/bottleDeleteHelper
 import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
+import {
+  fetchMergedAssetMovementHistory,
+  normalizeAuditDetails,
+  postAssignmentFromAuditFieldChanges,
+  stringifyHistoryDetails,
+} from '../services/assetMovementHistory';
 
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
 const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost'];
@@ -101,6 +107,50 @@ const modeIndicatesDeliveryForStatus = (record) => {
   return mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT' || record?.history_type === 'rental_start';
 };
 
+/**
+ * Manual edits write audit_logs BOTTLE_UPDATE with field_changes; scan-only inference must not skip these,
+ * otherwise an old RETURN row wins and the Status chip shows Empty despite empty→rented in the audit.
+ */
+const auditBottleUpdateDerivedDisplayStatus = (record) => {
+  if (record?.history_type !== 'audit') return null;
+  const m = String(record?.mode || record?.action || '').toUpperCase();
+  if (!m.includes('BOTTLE_UPDATE')) return null;
+  const d = normalizeAuditDetails(record.details);
+  const fc = d?.field_changes;
+  if (!fc || typeof fc !== 'object') return null;
+  const stRaw = fc.status?.to;
+  if (stRaw !== undefined && stRaw !== null && String(stRaw).trim() !== '') {
+    return normalizeStatus(stRaw);
+  }
+  const post = postAssignmentFromAuditFieldChanges(d);
+  const cid = post?.assigned_customer != null ? String(post.assigned_customer).trim() : '';
+  if (cid) {
+    return 'rented';
+  }
+  return null;
+};
+
+/** Customer shown on assignment / warnings — same gap as status until SHIP existed; audits carry merged or field_changes assignment. */
+const auditBottleUpdateCustomerAssignment = (record) => {
+  if (record?.history_type !== 'audit') return null;
+  const m = String(record?.mode || record?.action || '').toUpperCase();
+  if (!m.includes('BOTTLE_UPDATE')) return null;
+  let customerId = String(record?.customer_id || record?.assigned_customer || '').trim();
+  let customerName = String(record?.customer_name || '').trim();
+  if (!customerId && !customerName) {
+    const d = normalizeAuditDetails(record.details);
+    const post = postAssignmentFromAuditFieldChanges(d);
+    customerId = post?.assigned_customer != null ? String(post.assigned_customer).trim() : '';
+    customerName = post?.customer_name != null ? String(post.customer_name).trim() : '';
+  }
+  if (!customerId && !customerName) return null;
+  return {
+    assignedCustomerId: customerId,
+    customerName,
+    sourceAction: 'set_by_bottle_update_audit',
+  };
+};
+
 const TRACKED_BOTTLE_FIELDS = [
   'barcode_number',
   'serial_number',
@@ -136,41 +186,6 @@ const buildBottleFieldChanges = (previousBottle, updatedFields) => {
     changes[field] = { from, to };
   });
   return changes;
-};
-
-const stringifyHistoryDetails = (details) => {
-  if (!details) return '';
-  if (typeof details === 'string') return details;
-  if (details.field_changes && typeof details.field_changes === 'object') {
-    const lines = Object.entries(details.field_changes).map(([field, change]) => {
-      const from = change?.from == null ? 'empty' : String(change.from);
-      const to = change?.to == null ? 'empty' : String(change.to);
-      return `${field}: ${from} -> ${to}`;
-    });
-    if (lines.length > 0) return lines.join(' | ');
-  }
-  try {
-    return JSON.stringify(details);
-  } catch {
-    return String(details);
-  }
-};
-
-const normalizeAuditDetails = (details) => {
-  if (!details) return {};
-  if (typeof details === 'string') {
-    try {
-      const parsed = JSON.parse(details);
-      return normalizeAuditDetails(parsed);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof details === 'object') {
-    if (details.field_changes && typeof details.field_changes === 'object') return details;
-    if (details.details) return normalizeAuditDetails(details.details);
-  }
-  return {};
 };
 
 const getAuditFieldChangeDisplay = (auditDetails, fieldName, fallbackValue) => {
@@ -250,6 +265,8 @@ export default function AssetDetail() {
       if (modeIndicatesReturn(record) || modeIndicatesFill(record)) {
         return { assignedCustomerId: '', customerName: '', sourceAction: 'cleared_by_return_or_fill' };
       }
+      const auditCust = auditBottleUpdateCustomerAssignment(record);
+      if (auditCust) return auditCust;
       if (modeIndicatesDelivery(record)) {
         const customerId = String(record?.customer_id || record?.assigned_customer || '').trim();
         const customerName = String(record?.customer_name || '').trim();
@@ -273,6 +290,8 @@ export default function AssetDetail() {
       if (modeIndicatesFill(record)) return 'filled';
       if (modeIndicatesReturn(record)) return 'empty';
       if (modeIndicatesDeliveryForStatus(record)) return 'rented';
+      const auditDisp = auditBottleUpdateDerivedDisplayStatus(record);
+      if (auditDisp != null) return auditDisp;
     }
     return fallback;
   }, [movementHistory, asset?.status]);
@@ -386,10 +405,15 @@ export default function AssetDetail() {
     if (profile?.organization_id) {
       fetchOwnershipValues();
     }
-    if (id) {
-      fetchExceptions();
-    }
   }, [id, profile?.organization_id]);
+
+  useEffect(() => {
+    if (asset?.id && profile?.organization_id) {
+      fetchExceptions(asset.id);
+    } else {
+      setExceptions([]);
+    }
+  }, [asset?.id, profile?.organization_id]);
 
   // Fetch movement history when asset is loaded
   useEffect(() => {
@@ -417,19 +441,46 @@ export default function AssetDetail() {
       if (!profile?.organization_id) {
         throw new Error('Organization not found. Please log in again.');
       }
-      
-      const { data, error } = await supabase
-        .from('bottles')
-        .select('id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_id:customer_uuid, customer_name, ownership, description, organization_id, created_at, updated_at, days_at_location, type, category')
-        .eq('id', id)
-        .eq('organization_id', profile.organization_id)
-        .single();
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          throw new Error('Asset not found or you do not have permission to view it');
+      const searchId = String(id || '').trim();
+      if (!searchId) {
+        throw new Error('Asset not found.');
+      }
+
+      const bottleSelect =
+        'id, barcode_number, serial_number, product_code, gas_type, status, location, assigned_customer, customer_id:customer_uuid, customer_name, ownership, description, organization_id, created_at, updated_at, days_at_location, type, category';
+
+      const queryOne = async (column, value) => {
+        const { data, error } = await supabase
+          .from('bottles')
+          .select(bottleSelect)
+          .eq(column, value)
+          .eq('organization_id', profile.organization_id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (error) throw error;
+        return Array.isArray(data) && data.length > 0 ? data[0] : null;
+      };
+
+      let data = null;
+      if (UUID_RE.test(searchId)) {
+        data = await queryOne('id', searchId);
+      }
+      if (!data) {
+        data = await queryOne('barcode_number', searchId);
+      }
+      if (!data) {
+        const stripped = searchId.replace(/^0+/, '') || searchId;
+        if (stripped !== searchId) {
+          data = await queryOne('barcode_number', stripped);
         }
-        throw error;
+      }
+      if (!data) {
+        data = await queryOne('serial_number', searchId);
+      }
+
+      if (!data) {
+        throw new Error('Asset not found or you do not have permission to view it');
       }
       
       // SECURITY CHECK: Double-verify the asset belongs to the user's organization
@@ -527,15 +578,15 @@ export default function AssetDetail() {
     }
   };
 
-  const fetchExceptions = async () => {
+  const fetchExceptions = async (bottleRowId) => {
     try {
       setLoadingExceptions(true);
-      if (!profile?.organization_id || !id) return;
+      if (!profile?.organization_id || !bottleRowId) return;
 
       const { data, error } = await supabase
         .from('asset_exceptions')
         .select('*')
-        .eq('asset_id', id)
+        .eq('asset_id', bottleRowId)
         .eq('organization_id', profile.organization_id)
         .order('created_at', { ascending: false });
 
@@ -634,330 +685,20 @@ export default function AssetDetail() {
 
       const barcodeNumber = sourceAsset.barcode_number;
       const serialNumber = sourceAsset.serial_number;
-      
+
       if (!barcodeNumber && !serialNumber) {
         setMovementHistory([]);
         setLoadingHistory(false);
         return;
       }
 
-      let allHistory = [];
-      const nowIso = new Date().toISOString();
-      const isMissingSourceError = (err) => {
-        const msg = String(err?.message || '').toLowerCase();
-        return (
-          msg.includes('does not exist') ||
-          msg.includes('could not find the table') ||
-          msg.includes('relation') ||
-          msg.includes('schema cache')
-        );
-      };
-      const runOptionalQuery = async (queryFactory, sourceLabel) => {
-        try {
-          const { data, error } = await queryFactory();
-          if (error) {
-            if (!isMissingSourceError(error)) {
-              logger.warn(`Movement history optional source failed (${sourceLabel}):`, error);
-            }
-            return [];
-          }
-          return data || [];
-        } catch (err) {
-          if (!isMissingSourceError(err)) {
-            logger.warn(`Movement history optional source threw (${sourceLabel}):`, err);
-          }
-          return [];
-        }
-      };
-
-      // Fetch from bottle_scans (single source for movement history)
-      // Include barcode variants so leading-zero differences do not hide scans.
-      const barcodeVariants = (() => {
-        const raw = String(barcodeNumber || '').trim();
-        if (!raw) return [];
-        const stripped = raw.replace(/^0+/, '') || raw;
-        return [...new Set([raw, stripped])];
-      })();
-      const barcodeOrClause = barcodeVariants
-        .map((b) => `bottle_barcode.eq.${b}`)
-        .join(',');
-
-      if (barcodeNumber) {
-        const { data: bsData, error: bsError } = await supabase
-          .from('bottle_scans')
-          .select('*')
-          .or(barcodeOrClause)
-          .eq('organization_id', profile.organization_id)
-          .order('created_at', { ascending: false })
-          .limit(50);
-
-        if (!bsError && bsData) {
-          bsData.forEach(scan => {
-            allHistory.push({
-              ...scan,
-              history_type: 'bottle_scan',
-              barcode_number: scan.barcode_number || scan.bottle_barcode,
-              action: scan.mode || 'SCAN'
-            });
-          });
-        }
-      }
-
-      // Include older/parallel scan stream if present
-      if (barcodeNumber) {
-        const cylinderScanRows = await runOptionalQuery(
-          () =>
-            supabase
-              .from('cylinder_scans')
-              .select('*')
-              .eq('organization_id', profile.organization_id)
-              .order('created_at', { ascending: false })
-              .limit(200),
-          'cylinder_scans'
-        );
-        const matchesCylinderScanBarcode = (scan) => {
-          const haystack = JSON.stringify([scan?.ship_cylinders, scan?.return_cylinders]).toLowerCase();
-          return barcodeVariants.some((b) => haystack.includes(String(b).toLowerCase()));
-        };
-        const filteredCylinderRows = cylinderScanRows.filter(matchesCylinderScanBarcode).slice(0, 50);
-        filteredCylinderRows.forEach((scan) => {
-          allHistory.push({
-            ...scan,
-            id: scan.id || `${scan.created_at || nowIso}_cylinder_scan`,
-            history_type: 'cylinder_scan',
-            barcode_number: barcodeNumber,
-            customer_id: scan.customer_id || null,
-            customer_name: scan.customer_name || null,
-            location: scan.location || null,
-            created_at: scan.created_at || scan.timestamp || nowIso,
-            action: scan.mode || scan.action || 'SCAN',
-            mode: scan.mode || scan.action || 'SCAN',
-            order_number: scan.order_number || scan.invoice_number || null
-          });
-        });
-      }
-
-      // 3. Fetch from rentals table (for shipment/return dates)
-      if (barcodeNumber) {
-        const { data: rentalsData, error: rentalsError } = await supabase
-          .from('rentals')
-          .select('*')
-          .or(`bottle_barcode.eq.${barcodeNumber},bottle_id.eq.${sourceAsset.id}`)
-          .eq('organization_id', profile.organization_id)
-          .order('rental_start_date', { ascending: false })
-          .limit(50);
-
-        if (!rentalsError && rentalsData) {
-          rentalsData.forEach(rental => {
-            const isRNB = rental.is_dns === true && (rental.dns_description || '').includes('Return not on balance');
-            // Add rental start (shipment) — RNB is not a delivery, show as RNB
-            if (rental.rental_start_date) {
-              allHistory.push({
-                id: `rental_start_${rental.id}`,
-                history_type: isRNB ? 'rental_rnb' : 'rental_start',
-                barcode_number: rental.bottle_barcode || barcodeNumber,
-                customer_id: rental.customer_id,
-                customer_name: rental.customer_name,
-                location: rental.location,
-                created_at: rental.rental_start_date,
-                action: isRNB ? 'RNB' : 'SHIP',
-                mode: isRNB ? 'RNB' : 'SHIP',
-                order_number: rental.dns_order_number || rental.order_number || null
-              });
-            }
-            // Add rental end (return)
-            if (rental.rental_end_date) {
-              allHistory.push({
-                id: `rental_end_${rental.id}`,
-                history_type: 'rental_end',
-                barcode_number: rental.bottle_barcode || barcodeNumber,
-                customer_id: rental.customer_id,
-                customer_name: rental.customer_name,
-                location: rental.location,
-                created_at: rental.rental_end_date,
-                action: 'RETURN',
-                mode: 'RETURN',
-                order_number: rental.order_number || null
-              });
-            }
-          });
-        }
-      }
-
-      // Include exceptions as timeline events so users can see non-scan changes
-      if (sourceAsset.id && profile?.organization_id) {
-        const exceptionRows = await runOptionalQuery(
-          () =>
-            supabase
-              .from('asset_exceptions')
-              .select('*')
-              .eq('asset_id', sourceAsset.id)
-              .eq('organization_id', profile.organization_id)
-              .order('created_at', { ascending: false })
-              .limit(50),
-          'asset_exceptions'
-        );
-        exceptionRows.forEach((item) => {
-          allHistory.push({
-            ...item,
-            id: `exception_${item.id}`,
-            history_type: 'exception',
-            barcode_number: barcodeNumber,
-            customer_id: item.customer_id || null,
-            customer_name: item.customer_name || null,
-            location: item.location || sourceAsset.location || null,
-            created_at: item.created_at || nowIso,
-            action: item.exception_type ? `EXCEPTION: ${item.exception_type}` : 'EXCEPTION',
-            mode: item.resolution_status || 'EXCEPTION',
-            notes: item.resolution_note || item.notes || null,
-            order_number: item.order_number || null
-          });
-        });
-      }
-
-      // Optional transfer activity source
-      if (profile?.organization_id && sourceAsset.id) {
-        const transferRows = await runOptionalQuery(
-          () =>
-            supabase
-              .from('transfer_history')
-              .select('*')
-              .eq('organization_id', profile.organization_id)
-              .contains('asset_ids', [sourceAsset.id])
-              .order('created_at', { ascending: false })
-              .limit(50),
-          'transfer_history'
-        );
-        transferRows.forEach((item) => {
-          allHistory.push({
-            ...item,
-            id: `transfer_${item.id}`,
-            history_type: 'transfer',
-            barcode_number: barcodeNumber,
-            customer_id: item.to_customer_id || item.from_customer_id || null,
-            customer_name: item.to_customer_name || item.from_customer_name || null,
-            location: null,
-            created_at: item.transferred_at || item.created_at || nowIso,
-            action: item.action || item.transfer_type || 'TRANSFER',
-            mode: 'TRANSFER',
-            notes: item.reason || null,
-            order_number: item.order_number || null
-          });
-        });
-      }
-
-      // Optional audit source for direct bottle edits
-      if (profile?.organization_id && sourceAsset.id) {
-        let auditRows = await runOptionalQuery(
-          () =>
-            supabase
-              .from('audit_logs')
-              .select('*')
-              .eq('organization_id', profile.organization_id)
-              .eq('action', 'BOTTLE_UPDATE')
-              .order('timestamp', { ascending: false })
-              .limit(50),
-          'audit_logs'
-        );
-        const barcodeForAudit = String(barcodeNumber || '').trim();
-        auditRows = (auditRows || []).filter((row) => {
-          const details = row?.details || {};
-          const detailBottleId = String(details?.bottle_id || '').trim();
-          const detailBarcode = String(details?.barcode_number || '').trim();
-          return detailBottleId === String(sourceAsset.id) || (barcodeForAudit && detailBarcode === barcodeForAudit);
-        });
-        auditRows.forEach((item) => {
-          const parsedDetails = normalizeAuditDetails(item.details);
-          allHistory.push({
-            ...item,
-            id: `audit_${item.id}`,
-            history_type: 'audit',
-            barcode_number: barcodeNumber,
-            customer_id: null,
-            customer_name: null,
-            location: item.location || sourceAsset.location || null,
-            created_at: item.timestamp || item.created_at || nowIso,
-            action: item.action ? `AUDIT: ${item.action}` : 'AUDIT UPDATE',
-            mode: item.action || 'AUDIT',
-            notes: stringifyHistoryDetails(parsedDetails),
-            details: parsedDetails,
-            order_number: item.order_number || null
-          });
-        });
-      }
-
-      // 4. Fetch from cylinder_fills table (for fill history)
-      if (barcodeNumber || sourceAsset.id) {
-        const orClauses = [];
-        if (barcodeNumber) orClauses.push(`barcode_number.eq.${barcodeNumber}`);
-        if (sourceAsset.id) orClauses.push(`cylinder_id.eq.${sourceAsset.id}`);
-
-        let fillsQuery = supabase
-          .from('cylinder_fills')
-          .select('*')
-          .or(orClauses.join(','))
-          .order('fill_date', { ascending: false })
-          .limit(50);
-        if (profile?.organization_id) {
-          fillsQuery = fillsQuery.eq('organization_id', profile.organization_id);
-        }
-        const { data: fillsData, error: fillsError } = await fillsQuery;
-
-        if (!fillsError && fillsData) {
-          fillsData.forEach(fill => {
-            allHistory.push({
-              id: `fill_${fill.id}`,
-              history_type: 'fill',
-              barcode_number: fill.barcode_number || barcodeNumber,
-              created_at: fill.fill_date || fill.created_at,
-              action: 'FILL',
-              mode: 'FILL',
-              filled_by: fill.filled_by,
-              notes: fill.notes
-            });
-          });
-        }
-      }
-
-      // 5. Add bottle creation as "Add New Asset" if we have created_at
-      if (sourceAsset.created_at) {
-        allHistory.push({
-          id: 'bottle_created',
-          history_type: 'creation',
-          barcode_number: barcodeNumber,
-          created_at: sourceAsset.created_at,
-          action: 'Add New Asset',
-          mode: 'CREATE',
-          location: sourceAsset.location
-        });
-      }
-      if (sourceAsset.updated_at && sourceAsset.created_at && new Date(sourceAsset.updated_at).getTime() !== new Date(sourceAsset.created_at).getTime()) {
-        allHistory.push({
-          id: 'bottle_last_updated',
-          history_type: 'record_update',
-          barcode_number: barcodeNumber,
-          created_at: sourceAsset.updated_at,
-          action: 'Asset Record Updated',
-          mode: 'UPDATE',
-          location: sourceAsset.location
-        });
-      }
-
-      // Deduplicate by created_at and action type
-      const uniqueHistory = allHistory.reduce((acc, item) => {
-        const key = `${item.created_at}_${item.action || item.mode}_${item.history_type || ''}`;
-        if (!acc.find(existing => {
-          const existingKey = `${existing.created_at}_${existing.action || existing.mode}_${existing.history_type || ''}`;
-          return existingKey === key;
-        })) {
-          acc.push(item);
-        }
-        return acc;
-      }, []);
-
-      // Sort by date, most recent first
-      uniqueHistory.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      setMovementHistory(uniqueHistory.slice(0, 50));
+      const merged = await fetchMergedAssetMovementHistory(supabase, {
+        organizationId: profile.organization_id,
+        asset: sourceAsset,
+        perSourceLimit: 200,
+        maxRecords: 120,
+      });
+      setMovementHistory(merged);
     } catch (error) {
       logger.error('Error fetching movement history:', error);
     } finally {
@@ -985,7 +726,9 @@ export default function AssetDetail() {
       
       // Determine status: respect user's choice unless assignment changed
       let finalStatus = editData.status;
-      const assignmentChanged = previousCustomer !== (editData.assigned_customer || null) && String(editData.assigned_customer || '').trim() !== String(previousCustomer || '').trim();
+      const prevAssign = String(previousCustomer ?? '').trim();
+      const nextAssign = String(editData.assigned_customer ?? '').trim();
+      const assignmentChanged = prevAssign !== nextAssign;
       const ownershipValue = String(editData.ownership || '').trim().toLowerCase();
       const isCustomerOwned = ownershipValue.includes('customer') || 
                              ownershipValue.includes('owned') || 
@@ -1072,10 +815,15 @@ export default function AssetDetail() {
       delete updateData.created_at;
       delete updateData.updated_at;
       
+      const bottleRowId = asset?.id;
+      if (!bottleRowId) {
+        throw new Error('Asset not loaded');
+      }
+
       const { error } = await supabase
         .from('bottles')
         .update(updateData)
-        .eq('id', id)
+        .eq('id', bottleRowId)
         .eq('organization_id', profile.organization_id);
 
       if (error) throw error;
@@ -1084,10 +832,10 @@ export default function AssetDetail() {
       if (Object.keys(fieldChanges).length > 0) {
         await logBottleAuditEvent({
           action: 'BOTTLE_UPDATE',
-          bottleId: id,
+          bottleId: bottleRowId,
           details: {
             event_type: 'bottle_update',
-            bottle_id: id,
+            bottle_id: bottleRowId,
             barcode_number: asset?.barcode_number || updateData?.barcode_number || null,
             field_changes: fieldChanges,
           },
@@ -1123,13 +871,11 @@ export default function AssetDetail() {
         }
       }
 
-      // Create a scan record if assignment changed
-      const assignmentChangedForScan = previousCustomer !== (editData.assigned_customer || null);
-      const locationChangedEffective = previousLocation !== finalLocationForSave;
-      if (assignmentChangedForScan || locationChangedEffective) {
-        const scanMode = assignmentChanged 
-          ? (editData.assigned_customer ? 'SHIP' : 'RETURN')
-          : 'LOCATE';
+      // Create a scan record if assignment or branch location changed (same trim logic as assignmentChanged)
+      const locationChangedEffective =
+        String(previousLocation ?? '').trim() !== String(finalLocationForSave ?? '').trim();
+      if (assignmentChanged || locationChangedEffective) {
+        const scanMode = assignmentChanged ? (nextAssign ? 'SHIP' : 'RETURN') : 'LOCATE';
         
         const scanData = {
           barcode_number: asset.barcode_number || editData.barcode_number,
@@ -1145,6 +891,13 @@ export default function AssetDetail() {
           status: 'approved' // Manual assignments are automatically approved
         };
         
+        const manualUiNote =
+          scanMode === 'SHIP'
+            ? '[MANUAL_UI] Assignment saved from Asset Detail (not a handset / Trackabout scan).'
+            : scanMode === 'RETURN'
+              ? '[MANUAL_UI] Unassignment saved from Asset Detail (not a handset / Trackabout scan).'
+              : '[MANUAL_UI] Location update saved from Asset Detail (not a handset / Trackabout scan).';
+
         const { error: bottleScanError } = await supabase
           .from('bottle_scans')
           .insert({
@@ -1152,8 +905,9 @@ export default function AssetDetail() {
             bottle_barcode: asset.barcode_number || editData.barcode_number,
             mode: scanMode,
             order_number: scanData.order_number,
-            customer_id: editData.assigned_customer || null,
-            customer_name: editData.customer_name || null,
+            customer_id: nextAssign ? editData.assigned_customer || null : null,
+            customer_name: nextAssign ? editData.customer_name || null : null,
+            notes: manualUiNote,
             timestamp: new Date().toISOString(),
             created_at: new Date().toISOString()
           });
@@ -1178,7 +932,7 @@ export default function AssetDetail() {
     } catch (error) {
       logger.error('Error updating asset:', {
         error,
-        bottleId: id,
+        bottleId: asset?.id,
         organizationId: profile?.organization_id,
       });
       setError(error.message || 'Failed to update asset');
@@ -1196,12 +950,17 @@ export default function AssetDetail() {
         throw new Error('Organization not found');
       }
 
+      const bottleRowId = asset?.id;
+      if (!bottleRowId) {
+        throw new Error('Asset not loaded');
+      }
+
       await logBottleAuditEvent({
         action: 'BOTTLE_DELETE',
-        bottleId: id,
+        bottleId: bottleRowId,
         details: {
           event_type: 'bottle_delete',
-          bottle_id: id,
+          bottle_id: bottleRowId,
           barcode_number: asset?.barcode_number || null,
           snapshot: {
             barcode_number: asset?.barcode_number || null,
@@ -1221,14 +980,14 @@ export default function AssetDetail() {
       const { error: detachErr } = await clearRentalsBottleLinksForBottleIds(
         supabase,
         profile.organization_id,
-        [id]
+        [bottleRowId]
       );
       if (detachErr) throw detachErr;
 
       const { error } = await supabase
         .from('bottles') // Keep using bottles table for now
         .delete()
-        .eq('id', id)
+        .eq('id', bottleRowId)
         .eq('organization_id', profile.organization_id); // SECURITY: Only delete assets from user's organization
 
       if (error) throw error;
@@ -1532,14 +1291,18 @@ export default function AssetDetail() {
                   // Determine action type based on mode/action
                   let action = '';
                   const recordMode = record.mode;
+                  const isRnbRecord =
+                    recordMode === 'RNB' ||
+                    record.action === 'RNB' ||
+                    record.history_type === 'rental_rnb';
                   const isTypeChangeScan =
                     recordMode === 'LOCATE' &&
                     typeof record.notes === 'string' &&
                     record.notes.includes('[TYPE_CHANGE]');
                   if (isTypeChangeAudit || isTypeChangeScan) {
                     action = 'Bottle Type Changed';
-                  } else if (recordMode === 'RNB' || record.action === 'RNB' || record.history_type === 'rental_rnb') {
-                    action = 'RNB (Return not on balance)';
+                  } else if (isRnbRecord) {
+                    action = 'RNB (order return — not on open rental)';
                   } else if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
                     action = 'Delivery';
                   } else if (recordMode === 'RETURN' || record.action === 'RETURN' || record.history_type === 'rental_end') {
@@ -1554,11 +1317,17 @@ export default function AssetDetail() {
                     action = recordMode || record.action || 'Scan';
                   }
                   
-                  // Determine resulting location
+                  // Determine resulting location (RNB still shows order customer — that is who the return was billed to on the order, not proof of an open rental row)
                   let resultingLocation = '';
-                  if (record.customer_name) {
-                    const customerId = record.customer_id || record.assigned_customer || '';
-                    resultingLocation = `Customer: ${record.customer_name}${customerId ? ` (${customerId})` : ''}`;
+                  const custIdForDisplay = record.customer_id || record.assigned_customer || '';
+                  const custNameForDisplay = record.customer_name || '';
+                  if (custNameForDisplay || custIdForDisplay) {
+                    const base = custNameForDisplay
+                      ? `Customer: ${custNameForDisplay}${custIdForDisplay ? ` (${custIdForDisplay})` : ''}`
+                      : `Customer: (${custIdForDisplay})`;
+                    resultingLocation = isRnbRecord
+                      ? `${base} · billing exception (not on open rental when approved)`
+                      : base;
                   } else if (record.location) {
                     resultingLocation = `In-House: ${record.location}`;
                   } else if (record.history_type === 'fill') {

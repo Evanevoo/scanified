@@ -8,7 +8,6 @@ import {
 } from '@mui/material';
 import {
   Support as SupportIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Visibility as ViewIcon,
   Reply as ReplyIcon,
@@ -21,6 +20,7 @@ import {
   Email as EmailIcon,
   Restore as RestoreIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
@@ -389,15 +389,18 @@ export default function SupportTickets() {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={6}>
-            <TextField
-              fullWidth
-              label="Search tickets"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-              }}
-            />
+            <Box>
+              <Typography component="label" variant="body2" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                Search tickets
+              </Typography>
+              <PageSearchInput
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onClear={() => setSearchTerm('')}
+                placeholder="Search by subject, requester, or organization..."
+                className="w-full"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>

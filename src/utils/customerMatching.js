@@ -1,5 +1,6 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
+import { postgrestQuotedIlikeContains } from './postgrestFilterEscape';
 
 /**
  * Enhanced customer matching function with multiple strategies
@@ -136,11 +137,14 @@ export async function validateCustomerExists(customerName, customerId) {
  */
 export async function getCustomerSuggestions(searchTerm, limit = 10) {
   if (!searchTerm || searchTerm.trim().length < 2) return [];
-  
+
+  const ilikeOperand = postgrestQuotedIlikeContains(searchTerm);
+  if (!ilikeOperand) return [];
+
   const { data: customers, error } = await supabase
     .from('customers')
     .select('CustomerListID, name, contact_details, phone')
-    .or(`CustomerListID.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
+    .or(`CustomerListID.ilike.${ilikeOperand},name.ilike.${ilikeOperand}`)
     .limit(limit);
   
   if (error) {

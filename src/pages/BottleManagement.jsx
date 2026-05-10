@@ -64,6 +64,8 @@ import ResponsiveTable from '../components/ResponsiveTable';
 
 import OptimizedTable from '../components/OptimizedTable';
 
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
+
 import { usePagination } from '../hooks/usePagination';
 
 import { executeCachedQuery, createOptimizedQuery } from '../utils/queryOptimizer';
@@ -91,6 +93,7 @@ import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 
 import { formatLocationDisplay } from '../utils/locationDisplay';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 
 import * as XLSX from 'xlsx';
 
@@ -206,7 +209,10 @@ const BottleManagement = () => {
 
       if (searchTerm) {
 
-        query = query.or(`serial_number.ilike.%${searchTerm}%,barcode_number.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+        const ilikeOperand = postgrestQuotedIlikeContains(searchTerm);
+        if (ilikeOperand) {
+          query = query.or(`serial_number.ilike.${ilikeOperand},barcode_number.ilike.${ilikeOperand},customer_name.ilike.${ilikeOperand},description.ilike.${ilikeOperand}`);
+        }
 
       }
 
@@ -2293,7 +2299,7 @@ const BottleManagement = () => {
 
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
 
-          <TextField
+          <PageSearchInput
 
             placeholder="Search by barcode, serial, customer, or description"
 
@@ -2307,11 +2313,17 @@ const BottleManagement = () => {
 
             }}
 
-            size="small"
+            onClear={() => {
 
-            inputProps={{ 'aria-label': 'Search bottles' }}
+              setSearchTerm('');
 
-            sx={{ minWidth: 300 }}
+              handleChangePage(null, 0);
+
+            }}
+
+            aria-label="Search bottles"
+
+            className="min-w-[300px]"
 
           />
 

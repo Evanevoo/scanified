@@ -8,7 +8,6 @@ import {
 } from '@mui/material';
 import {
   History as HistoryIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Download as DownloadIcon,
   Visibility as ViewIcon,
@@ -23,6 +22,7 @@ import {
   Refresh as RefreshIcon,
   Delete as DeleteIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
@@ -344,15 +344,18 @@ export default function AuditLog() {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={3}>
-            <TextField
-              fullWidth
-              label="Search logs"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-              }}
-            />
+            <Box>
+              <Typography component="label" variant="body2" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                Search logs
+              </Typography>
+              <PageSearchInput
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onClear={() => setSearchTerm('')}
+                placeholder="Search logs..."
+                className="w-full"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} md={2}>
             <FormControl fullWidth>

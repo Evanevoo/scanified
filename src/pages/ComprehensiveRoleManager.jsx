@@ -52,7 +52,7 @@ export default function ComprehensiveRoleManager() {
         { id: 'user_management', title: 'User Management', path: '/settings?tab=team' },
         { id: 'join_codes', title: 'Join Codes', path: '/organization-join-codes' },
         { id: 'role_management', title: 'Role Management', path: '/comprehensive-role-manager' },
-        { id: 'billing', title: 'Invoices', path: '/invoices' },
+        { id: 'billing', title: 'Rentals & invoices', path: '/rentals' },
         { id: 'settings', title: 'Settings', path: '/settings' }
       ]
     },

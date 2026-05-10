@@ -39,7 +39,7 @@ import {
   Badge,
   InputAdornment
 } from '@mui/material';
-import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import {
   QrCodeScanner as ScanIcon,
   Add as AddIcon,
@@ -921,7 +921,7 @@ export default function WebScanning() {
               <Typography variant="h6">
                 All Scan Results ({scannedItems.length})
               </Typography>
-              <SearchInputWithIcon
+              <PageSearchInput
                 placeholder="Search scans..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}

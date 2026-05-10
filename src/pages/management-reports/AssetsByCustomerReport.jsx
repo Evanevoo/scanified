@@ -12,7 +12,6 @@ import {
   TableRow,
   Button,
   TextField,
-  InputAdornment,
   CircularProgress,
   Alert,
   Chip,
@@ -26,7 +25,6 @@ import {
   MenuItem
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   Download as DownloadIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
@@ -40,6 +38,7 @@ import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
 import { formatLocationDisplay } from '../../utils/locationDisplay';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function AssetsByCustomerReport() {
   const navigate = useNavigate();
@@ -448,19 +447,12 @@ export default function AssetsByCustomerReport() {
         </Grid>
 
         {/* Search */}
-        <TextField
-          fullWidth
+        <PageSearchInput
           placeholder="Search customers..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-          sx={{ mb: 3 }}
+          onClear={() => setSearchTerm('')}
+          className="mb-3 w-full"
         />
 
         {/* Customer Bottles List */}

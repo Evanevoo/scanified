@@ -25,6 +25,7 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import logger from '../utils/logger';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 function normalizeDetails(details) {
   if (!details) return {};
@@ -495,12 +496,12 @@ export default function BottleActivity() {
             onChange={(e) => setEndDate(e.target.value)}
             InputLabelProps={{ shrink: true }}
           />
-          <TextField
-            size="small"
+          <PageSearchInput
             placeholder="Search barcode, user, field..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ minWidth: 260, flex: 1 }}
+            onClear={() => setSearch('')}
+            className="min-w-[260px] flex-1"
           />
         </Stack>
       </Paper>

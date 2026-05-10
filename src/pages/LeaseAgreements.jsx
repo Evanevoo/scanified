@@ -50,12 +50,12 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Visibility as ViewIcon,
-  Search as SearchIcon,
   AttachMoney as MoneyIcon,
   DateRange as DateIcon,
   Business as BusinessIcon,
   Autorenew as RenewIcon,
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import {
   IoDownloadOutline,
   IoCloudDownloadOutline,
@@ -69,6 +69,7 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../context/ThemeContext';
 import { fetchBillingWorkspaceData, computeLeaseAgreementStats } from '../services/billingWorkspaceService';
+import { isBottleLostForBilling } from '../services/billingFromAssets';
 import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
 import GradientMenu from '../components/ui/gradient-menu';
 
@@ -89,8 +90,12 @@ export default function LeaseAgreements() {
   const [dialogMode, setDialogMode] = useState('view'); // 'view', 'add', 'edit'
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [customers, setCustomers] = useState([]);
+  /** Tracks lease-dialog customer field input length for Autocomplete empty-state messaging. */
+  const [leaseCustomerInputLen, setLeaseCustomerInputLen] = useState(0);
   /** Current assigned-bottle counts by customer id (from workspace inventory). */
   const [bottleCountByCustomerId, setBottleCountByCustomerId] = useState({});
+  /** Inventory bottle UUIDs with status lost — excluded from lease counts / billable totals. */
+  const [lostBottleIds, setLostBottleIds] = useState(() => new Set());
   const [customerBottles, setCustomerBottles] = useState([]); // bottles assigned to selected customer (for assign-to-bottle)
   const [billingHistory, setBillingHistory] = useState([]);
   const [retroactiveBilling, setRetroactiveBilling] = useState({ isRetroactive: false, proRatedAmount: 0, message: '' });
@@ -159,9 +164,61 @@ export default function LeaseAgreements() {
       createFilterOptions({
         stringify: (option) =>
           `${getCustomerLabelValue(option)} ${getCustomerIdValue(option)}`,
+        ignoreCase: true,
+        trim: true,
       }),
     [getCustomerLabelValue, getCustomerIdValue]
   );
+
+  /** One row per billing identity — avoids duplicate picks when List ID and UUID both appear. */
+  const dedupedLeaseCustomers = useMemo(() => {
+    const byKey = new Map();
+    for (const c of customers || []) {
+      const listId = String(c.CustomerListID || '').trim().toLowerCase();
+      const pk = String(c.id || '').trim().toLowerCase();
+      const key = listId || pk;
+      if (!key) continue;
+      const prev = byKey.get(key);
+      byKey.set(
+        key,
+        prev
+          ? {
+              ...prev,
+              ...c,
+              CustomerListID: prev.CustomerListID || c.CustomerListID,
+              id: prev.id || c.id,
+              name: prev.name || prev.Name || c.name || c.Name,
+              Name: prev.Name || prev.name || c.Name || c.name,
+            }
+          : { ...c }
+      );
+    }
+    return [...byKey.values()];
+  }, [customers]);
+
+  const LEASE_CUSTOMER_SEARCH_MIN = 2;
+
+  const filterLeaseCustomerOptions = useCallback(
+    (options, params) => {
+      const q = String(params.inputValue || '').trim();
+      if (q.length < LEASE_CUSTOMER_SEARCH_MIN) return [];
+      return filterCustomers(options, params);
+    },
+    [filterCustomers]
+  );
+
+  useEffect(() => {
+    if (!dialogOpen) setLeaseCustomerInputLen(0);
+  }, [dialogOpen]);
+
+  useEffect(() => {
+    if (!dialogOpen || dialogMode === 'view') return;
+    if (!formData.customer_id) {
+      setLeaseCustomerInputLen(0);
+      return;
+    }
+    setLeaseCustomerInputLen(String(formData.customer_name || '').trim().length);
+  }, [dialogOpen, dialogMode, formData.customer_id, formData.customer_name]);
 
   const recalculateAnnualAmountForBottleCount = (nextCountRaw, prevData) => {
     const nextCount = parsePositiveInt(nextCountRaw);
@@ -192,12 +249,18 @@ export default function LeaseAgreements() {
         setCustomers(data.customersData);
         setStats(computeLeaseAgreementStats(data.leaseAgreements));
         const counts = {};
+        const lost = new Set();
         for (const b of data.allBottles || []) {
+          if (isBottleLostForBilling(b) && b?.id != null && String(b.id).trim() !== '') {
+            lost.add(String(b.id).trim());
+          }
+          if (isBottleLostForBilling(b)) continue;
           const cid = b.assigned_customer;
           if (cid == null || cid === '') continue;
           const key = String(cid);
           counts[key] = (counts[key] || 0) + 1;
         }
+        setLostBottleIds(lost);
         setBottleCountByCustomerId(counts);
       } catch (error) {
         logger.error('Error loading billing workspace:', error);
@@ -452,7 +515,7 @@ export default function LeaseAgreements() {
       end_date: agreement.end_date?.split('T')[0] || '',
       asset_types: agreement.asset_types || [],
       asset_locations: agreement.asset_locations || [],
-      applyToAllBottles: false
+      applyToAllBottles: !agreement.bottle_id,
     });
     setSelectedAgreement(agreement);
     setDialogMode('edit');
@@ -483,7 +546,11 @@ export default function LeaseAgreements() {
         setSnackbar({ open: true, message: 'Please enter a valid start date', severity: 'warning' });
         return;
       }
-      if (dialogMode === 'add' && !formData.applyToAllBottles && !formData.bottle_id) {
+      if (
+        (dialogMode === 'add' || dialogMode === 'edit') &&
+        !formData.applyToAllBottles &&
+        !formData.bottle_id
+      ) {
         const selectedBottleCount = parseInt(formData.max_asset_count, 10);
         if (!selectedBottleCount || selectedBottleCount <= 0) {
           setSnackbar({
@@ -538,13 +605,24 @@ export default function LeaseAgreements() {
           severity: 'success'
         });
       } else {
+        const applyToAll = formData.applyToAllBottles;
         const { error } = await supabase
           .from('lease_agreements')
-          .update({ ...baseData, bottle_id: formData.bottle_id || null })
+          .update({
+            ...baseData,
+            bottle_id: applyToAll ? null : formData.bottle_id || null,
+          })
           .eq('id', selectedAgreement.id);
 
         if (error) throw error;
-        setSnackbar({ open: true, message: 'Agreement updated successfully', severity: 'success' });
+        setSnackbar({
+          open: true,
+          message:
+            applyToAll && customerBottles.length > 0
+              ? `Agreement updated — customer-level lease covering all ${customerBottles.length} bottle${customerBottles.length !== 1 ? 's' : ''}`
+              : 'Agreement updated successfully',
+          severity: 'success',
+        });
       }
 
       setDialogOpen(false);
@@ -780,7 +858,7 @@ export default function LeaseAgreements() {
   };
 
   const getBottleDisplay = (agreement) => {
-    if (!agreement || !agreement.bottle_id) return 'â€”';
+    if (!agreement || !agreement.bottle_id) return '\u2014';
     const barcode = Array.isArray(agreement.bottles) ? agreement.bottles[0]?.barcode_number : agreement.bottles?.barcode_number;
     return barcode ?? agreement.bottle_id;
   };
@@ -788,7 +866,10 @@ export default function LeaseAgreements() {
   /** Live assigned bottle count for this customer (inventory), for customer-level leases. */
   const getLeaseAssignedBottleCount = (agreement) => {
     if (!agreement) return 0;
-    if (agreement.bottle_id) return 1;
+    if (agreement.bottle_id) {
+      const bid = String(agreement.bottle_id).trim();
+      return lostBottleIds.has(bid) ? 0 : 1;
+    }
     const key = agreement.customer_id != null ? String(agreement.customer_id) : '';
     const n = key ? bottleCountByCustomerId[key] : 0;
     return typeof n === 'number' ? n : 0;
@@ -800,7 +881,10 @@ export default function LeaseAgreements() {
    */
   const getLeaseBottleCount = (agreement) => {
     if (!agreement) return 0;
-    if (agreement.bottle_id) return 1;
+    if (agreement.bottle_id) {
+      const bid = String(agreement.bottle_id).trim();
+      return lostBottleIds.has(bid) ? 0 : 1;
+    }
     const capRaw = agreement.max_asset_count;
     const cap = capRaw != null && capRaw !== '' ? parseInt(capRaw, 10) : NaN;
     if (Number.isFinite(cap) && cap > 0) return cap;
@@ -812,7 +896,11 @@ export default function LeaseAgreements() {
   const getDisplayedAnnualAmount = (agreement) => {
     if (!agreement) return 0;
     const baseAnnual = parseFloat(agreement.annual_amount) || 0;
-    if (agreement.bottle_id) return baseAnnual;
+    if (agreement.bottle_id) {
+      const bid = String(agreement.bottle_id).trim();
+      if (lostBottleIds.has(bid)) return 0;
+      return baseAnnual;
+    }
     const count = getLeaseBottleCount(agreement);
     const effectiveCount = count > 0 ? count : 1;
     return baseAnnual * effectiveCount;
@@ -1059,18 +1147,12 @@ export default function LeaseAgreements() {
       {/* Filters */}
       <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
       <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
-        <TextField
+        <PageSearchInput
           placeholder="Search by customer, agreement #, or bottle..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-          sx={{ minWidth: { xs: '100%', md: 320 } }}
+          onClear={() => setSearchTerm('')}
+          className="w-full min-w-0 md:min-w-[320px]"
         />
         <FormControl sx={{ minWidth: 150 }}>
           <InputLabel>Status</InputLabel>
@@ -1354,11 +1436,13 @@ export default function LeaseAgreements() {
                 <Grid item xs={12} md={6}>
                   <Autocomplete
                     fullWidth
-                    openOnFocus
-                    options={customers}
-                    loading={loading && customers.length === 0}
+                    openOnFocus={false}
+                    selectOnFocus
+                    autoHighlight
+                    options={dedupedLeaseCustomers}
+                    loading={loading && dedupedLeaseCustomers.length === 0}
                     value={
-                      customers.find(
+                      dedupedLeaseCustomers.find(
                         (c) => getCustomerIdValue(c) === String(formData.customer_id || '').trim()
                       ) || null
                     }
@@ -1366,12 +1450,20 @@ export default function LeaseAgreements() {
                       getCustomerIdValue(option) === getCustomerIdValue(value)
                     }
                     getOptionLabel={(option) => getCustomerLabelValue(option)}
-                    filterOptions={filterCustomers}
-                    PopperProps={{ sx: { zIndex: (theme) => theme.zIndex.modal + 1 } }}
+                    filterOptions={filterLeaseCustomerOptions}
+                    ListboxProps={{ sx: { maxHeight: 280 } }}
+                    componentsProps={{
+                      popper: {
+                        sx: { zIndex: (theme) => theme.zIndex.modal + 1 },
+                      },
+                    }}
                     onOpen={() => {
-                      if (customers.length === 0 && profile?.organization_id) {
+                      if (dedupedLeaseCustomers.length === 0 && profile?.organization_id) {
                         loadWorkspace({ fullPage: false });
                       }
+                    }}
+                    onInputChange={(_, value) => {
+                      setLeaseCustomerInputLen(String(value || '').trim().length);
                     }}
                     onChange={(_, customer) => {
                       const newCustomerId = getCustomerIdValue(customer);
@@ -1391,19 +1483,32 @@ export default function LeaseAgreements() {
                       });
                       fetchCustomerBottles(newCustomerId);
                     }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Customer"
-                        placeholder="Type customer name or ID..."
-                      />
-                    )}
-                    noOptionsText="No matching customers"
+                    renderInput={(params) => {
+                      const typed = String(params.inputProps?.value ?? '').trim();
+                      const showHint = typed.length > 0 && typed.length < LEASE_CUSTOMER_SEARCH_MIN;
+                      return (
+                        <TextField
+                          {...params}
+                          label="Customer"
+                          placeholder="Type name or customer ID (min 2 characters)…"
+                          helperText={
+                            showHint
+                              ? `Type at least ${LEASE_CUSTOMER_SEARCH_MIN} characters to see suggestions`
+                              : undefined
+                          }
+                        />
+                      );
+                    }}
+                    noOptionsText={
+                      leaseCustomerInputLen < LEASE_CUSTOMER_SEARCH_MIN
+                        ? `Type at least ${LEASE_CUSTOMER_SEARCH_MIN} characters to search`
+                        : 'No matching customers'
+                    }
                   />
                 </Grid>
                 {formData.customer_id && (
                   <>
-                    {dialogMode === 'add' && customerBottles.length > 0 && (
+                    {(dialogMode === 'add' || dialogMode === 'edit') && customerBottles.length > 0 && (
                       <Grid item xs={12}>
                         <FormControlLabel
                           control={
@@ -1428,13 +1533,13 @@ export default function LeaseAgreements() {
                           }
                           label={
                             <Typography>
-                              Apply to all bottles ({customerBottles.length} bottle{customerBottles.length !== 1 ? 's' : ''}) â€” creates one customer-level lease covering all bottles
+                              Apply to all bottles ({customerBottles.length} bottle{customerBottles.length !== 1 ? 's' : ''}) — one customer-level lease covering every assigned bottle (clears per-bottle assignment)
                             </Typography>
                           }
                         />
                       </Grid>
                     )}
-                    {(!formData.applyToAllBottles || dialogMode === 'edit') && (
+                    {!formData.applyToAllBottles && (
                       <Grid item xs={12} md={6}>
                         <FormControl fullWidth>
                           <InputLabel>Assign to bottle</InputLabel>
@@ -1443,7 +1548,7 @@ export default function LeaseAgreements() {
                             onChange={(e) => setFormData({ ...formData, bottle_id: e.target.value || null })}
                             label="Assign to bottle"
                           >
-                            <MenuItem value="">None GÃ‡Ã´ customer-level agreement</MenuItem>
+                            <MenuItem value="">None — customer-level agreement</MenuItem>
                             {customerBottles.map((bottle) => (
                               <MenuItem key={bottle.id} value={bottle.id}>
                                 {bottle.barcode_number || bottle.id}

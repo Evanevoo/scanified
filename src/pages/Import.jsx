@@ -2553,7 +2553,7 @@ export default function Import() {
                   <Box sx={{ mt: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
                     <Typography variant="body2" fontWeight={600} gutterBottom>Where to find your data</Typography>
                     <Stack direction="row" spacing={1} flexWrap="wrap">
-                      <Button component={Link} to="/invoices" size="small" variant="outlined">View Invoices</Button>
+                      <Button component={Link} to="/rentals" size="small" variant="outlined">View rentals & invoices</Button>
                       <Button component={Link} to="/customers" size="small" variant="outlined">View Customers</Button>
                     </Stack>
                   </Box>

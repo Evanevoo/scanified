@@ -9,17 +9,15 @@ import {
   Button,
   Stack,
   Chip,
-  TextField,
-  InputAdornment,
   Avatar,
   Paper
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   Code as CodeIcon,
   Api as ApiIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 /** live = shipped workflows in the product; on_request = professional services / custom; coming_soon = roadmap */
 const integrations = [
@@ -106,19 +104,12 @@ export default function Integrations() {
       <Container maxWidth="lg" sx={{ py: 8 }}>
         {/* Search */}
         <Box sx={{ mb: 6 }}>
-          <TextField
-            fullWidth
+          <PageSearchInput
             placeholder="Search integrations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ width: '100%', display: 'block' }}
+            onClear={() => setSearchQuery('')}
+            className="w-full"
           />
         </Box>
 

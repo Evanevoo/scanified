@@ -10,17 +10,15 @@ import {
   TableHead,
   TableRow,
   Button,
-  TextField,
-  InputAdornment,
   Alert,
   Chip,
   IconButton
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
   OpenInNew as OpenInNewIcon
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -147,20 +145,12 @@ export default function RecentCylinders() {
       </Paper>
 
       <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-        <TextField
-          fullWidth
-          size="small"
-          placeholder={'Search by barcode, serial, product code, description, or location...'}
+        <PageSearchInput
+          placeholder="Search by barcode, serial, product code, description, or location..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon color="action" />
-              </InputAdornment>
-            )
-          }}
-          sx={{ width: '100%' }}
+          onClear={() => setSearchTerm('')}
+          className="w-full"
         />
       </Paper>
 

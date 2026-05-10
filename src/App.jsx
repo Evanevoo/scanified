@@ -279,9 +279,14 @@ function AppContent() {
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
                   <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
-                  <Route path="/test-landing" element={<RedirectIfInApp><LandingPage /></RedirectIfInApp>} />
                   <Route path="/demo" element={<RedirectIfInApp><Demo /></RedirectIfInApp>} />
-                  <Route path="/particle-demo" element={<RedirectIfInApp><ParticleTextDemo /></RedirectIfInApp>} />
+                  {/* Experimental pages — dev-only (not linked from prod nav; avoids extra lazy chunks in prod). */}
+                  {import.meta.env.DEV && (
+                    <>
+                      <Route path="/test-landing" element={<RedirectIfInApp><LandingPage /></RedirectIfInApp>} />
+                      <Route path="/particle-demo" element={<RedirectIfInApp><ParticleTextDemo /></RedirectIfInApp>} />
+                    </>
+                  )}
                   <Route path="/features" element={<Features />} />
                   <Route path="/about" element={<About />} />
                   <Route path="/case-studies" element={<CaseStudiesPage />} />

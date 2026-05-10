@@ -8,7 +8,9 @@
 
 import {
   buildBottleLookupMaps,
+  isDnsRentalExcludedFromBillableCount,
   isRentalOpen,
+  rentalExcludedBecauseLinkedAssetLost,
   resolvedRentalProductCode,
 } from './billingFromAssets';
 import { normalizePricingKey } from './pricingResolution';
@@ -122,11 +124,14 @@ export function mergeOpenRentalsForBillingBasis(openRentals, { customerListId, c
 
 /**
  * Per-SKU counts for pricing / PDF lines (normalized keys, same as `groupBillableUnitCountsByProductCode`).
+ * Skips RNB/RNS DNS exception rows — only plain DNS (delivered-not-scanned shippers) add billable units here.
  */
 export function summarizeMergedOpenRentalsByProduct(mergedRows, bottles) {
   const { byId, byBarcode } = buildBottleLookupMaps(bottles || []);
   const map = new Map();
   for (const r of mergedRows || []) {
+    if (isDnsRentalExcludedFromBillableCount(r)) continue;
+    if (rentalExcludedBecauseLinkedAssetLost(r, byId, byBarcode)) continue;
     const raw = resolvedRentalProductCode(r, byId, byBarcode);
     const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
     map.set(pkey, (map.get(pkey) || 0) + 1);

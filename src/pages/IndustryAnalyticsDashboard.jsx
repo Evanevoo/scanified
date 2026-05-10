@@ -45,8 +45,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useDebounce, useOptimizedFetch, usePagination } from '../utils/performance';
 import { FadeIn, SlideIn, StatsSkeleton, TableSkeleton, SmoothButton } from '../components/SmoothLoading';
 import { useNavigate } from 'react-router-dom';
-import { SearchInputWithIcon } from '../components/ui/search-input-with-icon';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { formatLocationDisplay } from '../utils/locationDisplay';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 
 export default function IndustryAnalyticsDashboard() {
   const { profile } = useAuth();
@@ -93,6 +94,9 @@ export default function IndustryAnalyticsDashboard() {
   const { data: searchResults, loading: searchLoading } = useOptimizedFetch(
     useCallback(async () => {
       if (!debouncedSearch || !profile?.organization_id) return [];
+
+      const ilikeOperand = postgrestQuotedIlikeContains(debouncedSearch);
+      if (!ilikeOperand) return [];
       
       const { data, error } = await supabase
         .from('bottles')
@@ -107,7 +111,7 @@ export default function IndustryAnalyticsDashboard() {
           customers(name)
         `)
         .eq('organization_id', profile.organization_id)
-        .or(`barcode_number.ilike.%${debouncedSearch}%,serial_number.ilike.%${debouncedSearch}%,assigned_customer.ilike.%${debouncedSearch}%`)
+        .or(`barcode_number.ilike.${ilikeOperand},serial_number.ilike.${ilikeOperand},assigned_customer.ilike.${ilikeOperand}`)
         .limit(50);
 
       if (error) throw error;
@@ -463,7 +467,7 @@ export default function IndustryAnalyticsDashboard() {
             <Typography variant="h6" gutterBottom>
               Quick Search
             </Typography>
-            <SearchInputWithIcon
+            <PageSearchInput
               placeholder="Search by barcode, serial number, or customer..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

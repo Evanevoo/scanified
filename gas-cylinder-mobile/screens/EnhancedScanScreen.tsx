@@ -1384,6 +1384,7 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         order_number: orderNumber || scanSessionId,
         customer_name: routeCustomerName || null,
         customer_id: customerId || null,
+        user_id: user?.id ?? null,
         timestamp: new Date().toISOString(),
         created_at: new Date().toISOString()
       };

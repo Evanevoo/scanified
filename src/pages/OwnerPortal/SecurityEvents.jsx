@@ -16,7 +16,6 @@ import {
   Block as BlockIcon,
   Refresh as RefreshIcon,
   Download as DownloadIcon,
-  Search as SearchIcon,
   FilterList as FilterIcon,
   Timeline as TimelineIcon,
   Person as PersonIcon,
@@ -32,6 +31,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function SecurityEvents() {
   const { profile } = useAuth();
@@ -387,14 +387,12 @@ export default function SecurityEvents() {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
+            <PageSearchInput
               placeholder="Search events..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-              }}
+              onClear={() => setSearchTerm('')}
+              className="w-full"
             />
           </Grid>
           <Grid item xs={12} md={3}>

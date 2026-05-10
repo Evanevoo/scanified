@@ -5,8 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField, CircularProgress, Alert, Snackbar, FormControl, InputLabel, Select, MenuItem, Chip, IconButton, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
-import { SearchInput } from '@/components/ui';
-import { SearchInputWithIcon } from '@/components/ui/search-input-with-icon';
+import { PageSearchInput } from '@/components/ui/search-input-with-icon';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -382,7 +381,7 @@ function BottlesForDay({ profile }) {
             sx={{ minWidth: 200 }}
           />
           <Box sx={{ flex: 1, width: '100%' }}>
-            <SearchInputWithIcon
+            <PageSearchInput
               placeholder="Search bottles by barcode, serial, customer..."
               value={searchInput}
               onChange={(e) => {

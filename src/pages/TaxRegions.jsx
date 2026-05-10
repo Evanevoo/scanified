@@ -6,12 +6,12 @@ import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, LinearProgress,
-  InputAdornment,
 } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
-  Refresh as RefreshIcon, Search as SearchIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function TaxRegions() {
   const { organization } = useAuth();
@@ -177,9 +177,12 @@ export default function TaxRegions() {
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
         <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <TextField size="small" placeholder="Search regions..." value={search} onChange={(e) => setSearch(e.target.value)}
-            sx={{ minWidth: 300, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          <PageSearchInput
+            placeholder="Search regions..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onClear={() => setSearch('')}
+            className="min-w-[300px]"
           />
         </Box>
         <TableContainer>

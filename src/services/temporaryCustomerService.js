@@ -1,5 +1,6 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
+import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 
 /**
  * Service for handling temporary customer workflow
@@ -348,8 +349,10 @@ export class TemporaryCustomerService {
         .neq('customer_type', 'TEMPORARY'); // Exclude temp customers
 
       if (searchTerm && searchTerm.trim()) {
-        const term = `%${searchTerm.trim()}%`;
-        query = query.or(`name.ilike.${term},CustomerListID.ilike.${term},contact_details.ilike.${term}`);
+        const ilikeOperand = postgrestQuotedIlikeContains(searchTerm);
+        if (ilikeOperand) {
+          query = query.or(`name.ilike.${ilikeOperand},CustomerListID.ilike.${ilikeOperand},contact_details.ilike.${ilikeOperand}`);
+        }
       }
 
       const { data, error } = await query
