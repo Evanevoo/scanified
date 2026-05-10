@@ -77,7 +77,11 @@ import {
 } from 'react-icons/io5';
 import GradientMenu from '../components/ui/gradient-menu';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
-import { expandLeaseMatchKeys, isActiveCustomerRecord as isActiveCustomer } from '../utils/leaseCustomerMatchKeys';
+import {
+  customerKeysForLeaseMatch,
+  expandLeaseMatchKeys,
+  isActiveCustomerRecord as isActiveCustomer,
+} from '../utils/leaseCustomerMatchKeys';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -315,14 +319,15 @@ function rowReferencesDeletedCustomer(row, customers) {
  * Otherwise `resolveCustomer(sub.customer_name)` can attach a *different* active customer with the same
  * name, and this check would think the row is still valid — the classic “deleted customer still on Rentals”.
  */
-function rowBillingCustomerRemovedFromDirectory(row, customers, subscriptionIds) {
+function rowBillingCustomerRemovedFromDirectory(row, customers) {
   const list = customers || [];
   if (!list.length) return false;
 
-  const keys = expandLeaseMatchKeys(row.customer_id, row.customer, list);
+  /** Direct keys only — `expandLeaseMatchKeys` merges aliases via active directory rows, so a stub name
+   *  matching a *different* live customer incorrectly pulls that customer’s ids in and hides the orphan. */
+  const keys = customerKeysForLeaseMatch(row.customer_id, row.customer);
   if (keys.size === 0) return false;
 
-  const isPersistedSubscription = row.id != null && subscriptionIds?.has?.(row.id);
   const hasStripeCustomerId = String(row.customer_id || '').trim() !== '';
 
   for (const c of list) {
@@ -330,7 +335,9 @@ function rowBillingCustomerRemovedFromDirectory(row, customers, subscriptionIds)
     const ids = [normalize(c.id), normalize(c.CustomerListID)].filter(Boolean);
     if (ids.some((id) => keys.has(id))) return false;
     const nn = normalizeName(c.name || c.Name || '');
-    if (nn && keys.has(nn) && (!isPersistedSubscription || !hasStripeCustomerId)) {
+    /** Never “validate” orphans by name when the row carries any customer id (Stripe, UUID, List ID).
+     *  Virtual bottle/subscription rows used `isPersistedSubscription` before and still matched wrong names. */
+    if (nn && keys.has(nn) && !hasStripeCustomerId) {
       return false;
     }
   }
@@ -996,16 +1003,15 @@ export default function Subscriptions() {
       const n = normName(customer.name || customer.Name);
       if (n) customerByName.set(n, customer);
     }
-    const existingCustomerIdKeys = new Set(customerById.keys());
-    const existingCustomerNameKeys = new Set(customerByName.keys());
 
     const groups = new Map();
     for (const bottle of (ctx.bottles || [])) {
       const assignedId = norm(bottle.assigned_customer || bottle.customer_id);
       const assignedName = normName(bottle.customer_name);
+      /** If bottles still reference a deleted List ID / UUID, do not attach another active customer by name. */
       const matchedCustomer =
         (assignedId && customerById.get(assignedId)) ||
-        (assignedName && customerByName.get(assignedName)) ||
+        (!assignedId && assignedName && customerByName.get(assignedName)) ||
         null;
 
       const groupKey = matchedCustomer
@@ -1033,14 +1039,16 @@ export default function Subscriptions() {
 
     return Array.from(groups.entries())
       .map(([groupKey, group]) => {
-        const customer = group.matchedCustomer || resolveCustomer(group.assignedId, group.assignedName);
         const assignedIdKey = norm(group.assignedId);
         const assignedNameKey = normName(group.assignedName);
-        const existsInCurrentCustomers =
-          (assignedIdKey && existingCustomerIdKeys.has(assignedIdKey)) ||
-          (assignedNameKey && existingCustomerNameKeys.has(assignedNameKey)) ||
-          !!customer;
-        if (!existsInCurrentCustomers) return null;
+        const matchedCustomer =
+          (assignedIdKey && customerById.get(assignedIdKey)) ||
+          (!assignedIdKey && assignedNameKey && customerByName.get(assignedNameKey)) ||
+          null;
+        const customer =
+          matchedCustomer ||
+          (!assignedIdKey ? resolveCustomer(group.assignedId, group.assignedName) : null);
+        if (!customer) return null;
         const customerKeys = customer
           ? [customer.id, customer.CustomerListID, customer.name, customer.Name].map(norm).filter(Boolean)
           : [norm(group.assignedId), norm(group.assignedName)].filter(Boolean);
@@ -1135,7 +1143,10 @@ export default function Subscriptions() {
         .reduce((acc, row) => {
           const key = String(row.customer_id || row.customer_name || 'unassigned').trim();
           if (!key) return acc;
-          const resolvedCustomer = resolveCustomer(row.customer_id || row.customer_name, row.customer_name);
+          const rentalCid = String(row.customer_id || '').trim();
+          const resolvedCustomer = rentalCid
+            ? resolveCustomer(rentalCid, '')
+            : resolveCustomer(row.customer_name, row.customer_name);
           const fallbackId = String(row.customer_id || row.customer_name || key).trim();
           const fallbackName =
             row.customer_name ||
@@ -1231,7 +1242,7 @@ export default function Subscriptions() {
     });
     const combined = [...merged, ...extraLegacy].filter((row) => {
       if (rowReferencesDeletedCustomer(row, ctx.customers)) return false;
-      if (rowBillingCustomerRemovedFromDirectory(row, ctx.customers, subscriptionIds)) return false;
+      if (rowBillingCustomerRemovedFromDirectory(row, ctx.customers)) return false;
 
       const itemCount = parseFloat(row.itemCount) || 0;
       const rawTotal = parseFloat(row.totalPerCycle) || 0;
