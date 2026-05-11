@@ -51,7 +51,6 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ReceiptIcon from '@mui/icons-material/Receipt';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import SettingsIcon from '@mui/icons-material/Settings';
 import EditIcon from '@mui/icons-material/Edit';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
@@ -85,7 +84,10 @@ import {
   isCustomerOwnedForBilling,
   isDnsRentalExcludedFromBillableCount,
 } from '../services/billingFromAssets';
-import { resolveCustomerTypeForParentConstraint } from '../utils/customerParentConstraint';
+import {
+  finalizeCustomerBranchParentFields,
+  resolveCustomerTypeForParentConstraint,
+} from '../utils/customerParentConstraint';
 import { expandLeaseMatchKeys } from '../utils/leaseCustomerMatchKeys';
 import { normalizePricingKey } from '../services/pricingResolution';
 
@@ -282,42 +284,6 @@ const UUID_RE =
 
 const getLocalSkuRatesKey = (organizationId, customerId) =>
   `customer_sku_rates:${organizationId || ''}:${customerId || ''}`;
-const getLocalClassRatesKey = (organizationId, customerId) =>
-  `customer_class_rates:${organizationId || ''}:${customerId || ''}`;
-
-const getUnifiedClasses = (orgRows) => orgRows || [];
-const formatUnifiedClassLabel = (c) => {
-  const readable = [
-    c?.label,
-    c?.name,
-    c?.class_name,
-    c?.rental_class_name,
-    c?.title,
-    c?.class_code,
-    c?.code,
-    c?.product_code,
-    c?.productCode,
-    c?.group_name,
-    c?.category,
-  ].find((v) => String(v || '').trim());
-  if (readable) return String(readable).trim();
-
-  const rawId = String(c?.id || c?.class_id || '').trim();
-  if (rawId && !UUID_RE.test(rawId)) return rawId;
-
-  const order = Number(c?.sort_order);
-  if (Number.isFinite(order)) return `Class ${order + 1}`;
-  return 'Unnamed class';
-};
-const getResolvedClassRates = (customerClassRates, classId, orgRows) => {
-  const orgBase = (orgRows || []).find((r) => String(r.id) === String(classId)) || {};
-  const ov = customerClassRates?.[classId] || {};
-  return {
-    daily: ov.daily != null && ov.daily !== '' ? Number(ov.daily) : Number(orgBase.daily),
-    weekly: ov.weekly != null && ov.weekly !== '' ? Number(ov.weekly) : Number(orgBase.weekly),
-    monthly: ov.monthly != null && ov.monthly !== '' ? Number(ov.monthly) : Number(orgBase.monthly),
-  };
-};
 
 // Helper to check if a string looks like an address
 function looksLikeAddress(str) {
@@ -464,16 +430,11 @@ export default function CustomerDetail() {
     tax_status: 'default'
   });
   const [rentalSettingsSaving, setRentalSettingsSaving] = useState(false);
-  const [rentalClassRatesDialogOpen, setRentalClassRatesDialogOpen] = useState(false);
-  const [classRatesDraft, setClassRatesDraft] = useState({});
-  const [savingClassRates, setSavingClassRates] = useState(false);
   const [productSkuRatesDialogOpen, setProductSkuRatesDialogOpen] = useState(false);
   const [productSkuRatesDraft, setProductSkuRatesDraft] = useState({});
   const [productSkuExtraCode, setProductSkuExtraCode] = useState('');
   const [productSkuExtraMonthly, setProductSkuExtraMonthly] = useState('');
   const [savingProductSkuRates, setSavingProductSkuRates] = useState(false);
-  const [negotiatedForm, setNegotiatedForm] = useState({ fixed_rate: '', discount_percent: '' });
-  const [savingNegotiated, setSavingNegotiated] = useState(false);
   const [orgRentalClasses, setOrgRentalClasses] = useState([]);
   const [resolvingRnbId, setResolvingRnbId] = useState(null); // rental id being resolved (RNB close)
   const [resolvingRnsId, setResolvingRnsId] = useState(null); // rental id being resolved (RNS close)
@@ -1320,20 +1281,6 @@ export default function CustomerDetail() {
   }, [customer?.CustomerListID, organization?.id]);
 
   useEffect(() => {
-    if (!customerPricing) {
-      setNegotiatedForm({ fixed_rate: '', discount_percent: '' });
-      return;
-    }
-    const fr = customerPricing.fixed_rate_override;
-    const dp = customerPricing.discount_percent;
-    setNegotiatedForm({
-      fixed_rate: fr != null && fr !== '' ? String(fr) : '',
-      discount_percent:
-        dp != null && dp !== '' && Number.parseFloat(String(dp)) > 0 ? String(dp) : '',
-    });
-  }, [customerPricing]);
-
-  useEffect(() => {
     if (!organization?.id) return;
     let cancelled = false;
     (async () => {
@@ -1351,8 +1298,6 @@ export default function CustomerDetail() {
       cancelled = true;
     };
   }, [organization?.id]);
-
-  const unifiedRentalClasses = useMemo(() => getUnifiedClasses(orgRentalClasses), [orgRentalClasses]);
 
   const [rentalHistoryLocalRatesVersion, setRentalHistoryLocalRatesVersion] = useState(0);
   useEffect(() => {
@@ -2233,134 +2178,6 @@ export default function CustomerDetail() {
     }
   };
 
-  const openRentalClassRatesDialog = () => {
-    let stored = customerPricing?.rental_class_rates;
-    try {
-      if (organization?.id && customer?.CustomerListID) {
-        const localRaw = localStorage.getItem(getLocalClassRatesKey(organization.id, customer.CustomerListID));
-        const localRates = localRaw ? JSON.parse(localRaw) : null;
-        if (localRates && typeof localRates === 'object') {
-          stored = localRates;
-        }
-      }
-    } catch {
-      // Ignore local storage parse failures and fall back to DB values.
-    }
-    const initial = {};
-    unifiedRentalClasses.forEach((c) => {
-      const ex = stored && typeof stored === 'object' ? stored[c.id] : null;
-      initial[c.id] = {
-        daily: ex?.daily != null && ex.daily !== '' ? String(ex.daily) : '',
-        weekly: ex?.weekly != null && ex.weekly !== '' ? String(ex.weekly) : '',
-        monthly: ex?.monthly != null && ex.monthly !== '' ? String(ex.monthly) : '',
-      };
-    });
-    setClassRatesDraft(initial);
-    setRentalClassRatesDialogOpen(true);
-  };
-
-  const formatMethodLabel = (m) => {
-    if (m === 'starting_balance') return 'Starting balance';
-    if (m === 'equipment') return 'Equipment';
-    if (m === 'no_rent') return 'No rent';
-    if (m === 'daily') return 'Daily';
-    return m ? m.charAt(0).toUpperCase() + m.slice(1) : '—';
-  };
-
-  const handleSaveRentalClassRates = async () => {
-    if (!organization?.id || !customer?.CustomerListID) return;
-    setSavingClassRates(true);
-    try {
-      const rental_class_rates = {};
-      unifiedRentalClasses.forEach((c) => {
-        const d = classRatesDraft[c.id] || {};
-        const entry = {};
-        ['daily', 'weekly', 'monthly'].forEach((k) => {
-          const raw = d[k];
-          if (raw === '' || raw == null) return;
-          const n = parseFloat(String(raw));
-          if (Number.isFinite(n)) entry[k] = n;
-        });
-        if (Object.keys(entry).length > 0) rental_class_rates[c.id] = entry;
-      });
-
-      let savedViaLocalFallback = false;
-      try {
-        const { data: existing, error: selErr } = await supabase
-          .from('customer_pricing')
-          .select('id')
-          .eq('organization_id', organization.id)
-          .eq('customer_id', customer.CustomerListID)
-          .maybeSingle();
-        if (selErr) throw selErr;
-
-        if (existing?.id) {
-          const { error } = await supabase
-            .from('customer_pricing')
-            .update({ rental_class_rates })
-            .eq('id', existing.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('customer_pricing').insert({
-            organization_id: organization.id,
-            customer_id: customer.CustomerListID,
-            discount_percent: 0,
-            markup_percent: 0,
-            rental_period: 'monthly',
-            is_active: true,
-            effective_date: new Date().toISOString().split('T')[0],
-            rental_class_rates,
-            rental_rates_by_product_code: {},
-          });
-          if (error) throw error;
-        }
-      } catch (writeErr) {
-        const writeMsg = writeErr?.message || '';
-        const missingClassColumn = /rental_class_rates|column|schema cache/i.test(writeMsg);
-        if (!missingClassColumn) throw writeErr;
-        try {
-          localStorage.setItem(
-            getLocalClassRatesKey(organization.id, customer.CustomerListID),
-            JSON.stringify(rental_class_rates)
-          );
-          window.dispatchEvent(new Event('rental-pricing-local-updated'));
-          savedViaLocalFallback = true;
-        } catch {
-          throw writeErr;
-        }
-      }
-
-      const { data: refreshed, error: refErr } = await supabase
-        .from('customer_pricing')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .eq('customer_id', customer.CustomerListID)
-        .maybeSingle();
-      if (!refErr && refreshed) setCustomerPricing(refreshed);
-      else setCustomerPricing((prev) => ({ ...(prev || {}), rental_class_rates }));
-
-      invalidateOrgRentalPricingCache(organization.id);
-      setRentalClassRatesDialogOpen(false);
-      setTransferMessage({
-        open: true,
-        message: savedViaLocalFallback
-          ? 'Rental class rates saved on this device only (database update failed — often missing customer_pricing.rental_class_rates). Run sql/add_rental_class_rates_to_customer_pricing.sql in Supabase, then save again to sync for all users.'
-          : 'Rental class rates saved.',
-        severity: 'success',
-      });
-    } catch (e) {
-      logger.error('Save rental class rates error:', e);
-      const msg = e?.message || 'Failed to save rental class rates';
-      const hint =
-        /rental_class_rates|column/i.test(msg)
-          ? ' Run sql/add_rental_class_rates_to_customer_pricing.sql in Supabase, then try again.'
-          : '';
-      setTransferMessage({ open: true, message: msg + hint, severity: 'error' });
-    } finally {
-      setSavingClassRates(false);
-    }
-  };
-
   const openProductSkuRatesDialog = async () => {
     let stored =
       customerPricing?.rental_rates_by_product_code &&
@@ -2595,81 +2412,6 @@ export default function CustomerDetail() {
     }
   };
 
-  const handleSaveNegotiatedPricing = async () => {
-    if (!organization?.id || !customer?.CustomerListID) return;
-    const fixedRaw = negotiatedForm.fixed_rate.trim();
-    const discRaw = negotiatedForm.discount_percent.trim();
-    const fixedParsed = fixedRaw === '' ? null : Number.parseFloat(fixedRaw);
-    const discParsed = discRaw === '' ? 0 : Number.parseFloat(discRaw);
-    if (fixedParsed != null && (!Number.isFinite(fixedParsed) || fixedParsed < 0)) {
-      setTransferMessage({ open: true, message: 'Fixed rate must be empty or a non-negative number.', severity: 'error' });
-      return;
-    }
-    if (!Number.isFinite(discParsed) || discParsed < 0 || discParsed > 100) {
-      setTransferMessage({ open: true, message: 'Discount must be between 0 and 100%.', severity: 'error' });
-      return;
-    }
-    setSavingNegotiated(true);
-    try {
-      const { data: existing, error: selErr } = await supabase
-        .from('customer_pricing')
-        .select('id')
-        .eq('organization_id', organization.id)
-        .eq('customer_id', customer.CustomerListID)
-        .maybeSingle();
-      if (selErr) throw selErr;
-
-      const patch = {
-        fixed_rate_override: fixedParsed,
-        discount_percent: discParsed,
-      };
-
-      if (existing?.id) {
-        const { error } = await supabase.from('customer_pricing').update(patch).eq('id', existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('customer_pricing').insert({
-          organization_id: organization.id,
-          customer_id: customer.CustomerListID,
-          ...patch,
-          markup_percent: 0,
-          rental_period: 'monthly',
-          is_active: true,
-          effective_date: new Date().toISOString().split('T')[0],
-          rental_class_rates: {},
-          rental_rates_by_product_code: {},
-        });
-        if (error) throw error;
-      }
-
-      const { data: refreshed, error: refErr } = await supabase
-        .from('customer_pricing')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .eq('customer_id', customer.CustomerListID)
-        .maybeSingle();
-      if (!refErr && refreshed) setCustomerPricing(refreshed);
-      else
-        setCustomerPricing((prev) => ({
-          ...(prev || {}),
-          fixed_rate_override: fixedParsed,
-          discount_percent: discParsed,
-        }));
-
-      invalidateOrgRentalPricingCache(organization.id);
-      setTransferMessage({ open: true, message: 'Customer-wide pricing saved.', severity: 'success' });
-    } catch (e) {
-      logger.error('Save negotiated pricing error:', e);
-      setTransferMessage({
-        open: true,
-        message: e?.message || 'Failed to save customer-wide pricing',
-        severity: 'error',
-      });
-    } finally {
-      setSavingNegotiated(false);
-    }
-  };
-
   const handleCreateLeaseContract = async () => {
     if (!customer?.organization_id || !customer?.CustomerListID) return;
     setLeaseBusy(true);
@@ -2855,9 +2597,10 @@ export default function CustomerDetail() {
     if (customerIdChanged) {
       updateFields.CustomerListID = newCustomerListID;
     }
+    const updatePayload = finalizeCustomerBranchParentFields(updateFields);
     const { error } = await supabase
       .from('customers')
-      .update(updateFields)
+      .update(updatePayload)
       .eq('CustomerListID', id)
       .eq('organization_id', customer.organization_id);
     if (error) {
@@ -2878,10 +2621,10 @@ export default function CustomerDetail() {
       await supabase.from('rentals').update({ customer_id: newCustomerListID }).eq('customer_id', id).eq('organization_id', orgId);
       navigate(`/customer/${newCustomerListID}`, { replace: true });
     }
-    setCustomer({ ...customer, ...updateFields });
+    setCustomer({ ...customer, ...updatePayload });
     subscriptionCtx.refresh?.();
-    if (updateFields.parent_customer_id) {
-      const { data: p } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', updateFields.parent_customer_id).single();
+    if (updatePayload.parent_customer_id) {
+      const { data: p } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', updatePayload.parent_customer_id).single();
       setParentCustomer(p || null);
     } else {
       setParentCustomer(null);
@@ -3158,7 +2901,15 @@ export default function CustomerDetail() {
                 options={parentOptions}
                 filterOptions={filterParentCustomerOptions}
                 getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
-                value={parentOptions.find(o => o.id === editForm.parent_customer_id) || null}
+                value={
+                  !editForm.parent_customer_id
+                    ? null
+                    : parentOptions.find((o) => o.id === editForm.parent_customer_id) ??
+                      (parentCustomer?.id != null &&
+                      String(parentCustomer.id) === String(editForm.parent_customer_id)
+                        ? parentCustomer
+                        : null)
+                }
                 onChange={(_, v) => {
                   const pid = v?.id ?? null;
                   setEditForm((prev) => ({
@@ -4431,14 +4182,14 @@ export default function CustomerDetail() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Creates open rental placeholder rows for this customer (no bottle record). The line type controls classification here and in roll-ups, using the same description markers as imports.{' '}
             <strong>Product code</strong> is chosen from the list below:{' '}
-            <Link to="/pricing/asset-types">Asset type pricing</Link>, rental-class match codes, and{' '}
+            <Link to="/inventory/asset-classifications">Asset Classifications</Link>, rental-class match codes, and{' '}
             <strong>every SKU used on bottles in your organization</strong> (same product keys as the Assets /
             inventory pages).
           </Typography>
           {manualDnsProductPickerOptions.length === 0 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               No SKUs found. Add products under{' '}
-              <Link to="/pricing/asset-types">Asset type pricing</Link> or ensure bottles on{' '}
+              <Link to="/inventory/asset-classifications">Asset Classifications</Link> or ensure bottles on{' '}
               <Link to="/assets">Assets</Link> have a product / type field set — then reopen this dialog.
             </Alert>
           )}
@@ -4951,81 +4702,15 @@ export default function CustomerDetail() {
             </Stack>
           </Paper>
 
-          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>Rental rates</Typography>
-          <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Organization standard rate table</Typography>
-              <Button component={Link} to="/pricing/asset-types" size="small" variant="text" color="primary">Manage</Button>
-            </Box>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Per-class rates for this customer</Typography>
-              <Button size="small" variant="text" color="primary" onClick={openRentalClassRatesDialog}>
-                Edit (e.g. lower skid / industrial)
-              </Button>
-            </Box>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Rentals workspace</Typography>
-              <Button component={Link} to="/rentals" state={{ openEditForCustomerId: id }} size="small" variant="text" color="primary">
-                Open
-              </Button>
-            </Box>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Daily calculation method</Typography>
-              <Typography variant="body2" color="text.secondary">{rentalSettingsForm.daily_calculation_method === 'end_of_day' ? 'End of day' : 'Default (start of day)'}</Typography>
-            </Box>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Minimum billable amount</Typography>
-              <Typography variant="body2" color="text.secondary">${rentalSettingsForm.minimum_billable_amount}, Default</Typography>
-            </Box>
-          </Box>
-
-          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 1 }}>
-            Customer-wide pricing
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-            <strong>Fixed monthly rate</strong> applies the same dollar amount to <em>every</em> billable monthly line for this customer and overrides class-based pricing (use for a simple negotiated flat).{' '}
-            <strong>Discount %</strong> reduces the system default when no class rate applies. For different amounts by product group, use <strong>per-class rates</strong> below instead.
-          </Typography>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ sm: 'flex-start' }}>
-            <TextField
-              label="Fixed monthly rate (all cylinders)"
-              type="number"
-              size="small"
-              value={negotiatedForm.fixed_rate}
-              onChange={(e) => setNegotiatedForm((f) => ({ ...f, fixed_rate: e.target.value }))}
-              inputProps={{ min: 0, step: 0.01 }}
-              helperText="Leave empty to use class table + per-class overrides"
-              sx={{ flex: 1, maxWidth: 280 }}
-            />
-            <TextField
-              label="Discount % off default"
-              type="number"
-              size="small"
-              value={negotiatedForm.discount_percent}
-              onChange={(e) => setNegotiatedForm((f) => ({ ...f, discount_percent: e.target.value }))}
-              inputProps={{ min: 0, max: 100, step: 0.5 }}
-              helperText="0–100; used when class pricing does not apply"
-              sx={{ flex: 1, maxWidth: 220 }}
-            />
-            <Button
-              variant="contained"
-              onClick={handleSaveNegotiatedPricing}
-              disabled={savingNegotiated}
-              sx={{ mt: { xs: 0, sm: 0.5 }, borderRadius: 2, fontWeight: 700, alignSelf: { sm: 'center' } }}
-            >
-              {savingNegotiated ? <CircularProgress size={22} color="inherit" /> : 'Save'}
-            </Button>
-          </Stack>
-
-          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 1 }}>
+          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 1 }}>
             Rates by product code (SKU)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-            Price by <strong>inventory product code</strong>, not barcode. When this customer swaps to another cylinder with the same code, the monthly rate stays the same. Overrides class-based pricing for that SKU (does not apply if you set a customer-wide <strong>fixed monthly rate</strong> above).
+            Price by <strong>inventory product code</strong>. When this customer swaps to another cylinder with the same code, the monthly rate stays the same. Overrides class-based pricing for that SKU. Clear a row to remove the override and fall back to the organization rate table.
           </Typography>
           <Box display="flex" flexWrap="wrap" gap={1} alignItems="center" sx={{ mb: 2 }}>
             <Button
-              variant="outlined"
+              variant="contained"
               startIcon={<Inventory2Icon />}
               onClick={openProductSkuRatesDialog}
               sx={{ borderRadius: 2, fontWeight: 700 }}
@@ -5040,90 +4725,27 @@ export default function CustomerDetail() {
               </Typography>
             ) : (
               <Typography variant="caption" color="text.secondary">
-                No SKU-specific rates — class table applies
+                No SKU-specific rates — org rate table applies
               </Typography>
             )}
-          </Box>
-
-          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 2, mb: 1 }}>
-            Rental class rates
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-            Organization defaults come from the standard rate table. Use <strong>Edit rental class rates</strong> to adjust by <em>rental class</em> (group). Prefer <strong>product code</strong> above when each SKU should have its own negotiated price.
-          </Typography>
-          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ mb: 1 }}>
-            <Button variant="outlined" startIcon={<AttachMoneyIcon />} onClick={openRentalClassRatesDialog} sx={{ borderRadius: 2, fontWeight: 700 }}>
-              Edit rental class rates
-            </Button>
-            {!customerPricing?.rental_class_rates || Object.keys(customerPricing.rental_class_rates).length === 0 ? (
-              <Typography variant="caption" color="text.secondary">No customer overrides — org / built-in defaults apply</Typography>
-            ) : (
-              <Typography variant="caption" color="text.secondary">
-                {Object.keys(customerPricing.rental_class_rates).length} customer bracket override(s)
-              </Typography>
-            )}
-          </Box>
-          <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 280, borderRadius: 2 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'action.hover' }}>
-                  <TableCell><strong>Rental class</strong></TableCell>
-                  <TableCell><strong>Method</strong></TableCell>
-                  <TableCell><strong>Scope</strong></TableCell>
-                  <TableCell align="right"><strong>Daily</strong></TableCell>
-                  <TableCell align="right"><strong>Weekly</strong></TableCell>
-                  <TableCell align="right"><strong>Monthly</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {unifiedRentalClasses.map((c) => {
-                  const r = getResolvedClassRates(customerPricing?.rental_class_rates, c.id, orgRentalClasses);
-                  const ov = customerPricing?.rental_class_rates?.[c.id];
-                  const hasOverride = ov && typeof ov === 'object' && Object.keys(ov).length > 0;
-                  const inOrg = orgRentalClasses.some((row) => String(row.id) === String(c.id));
-                  const scope = hasOverride ? 'Customer' : inOrg ? 'Org default' : 'Built-in';
-                  const fmt = (v) => (v != null && Number.isFinite(v) ? v.toFixed(3) : '—');
-                  return (
-                    <TableRow key={c.id} hover>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatUnifiedClassLabel(c)}</TableCell>
-                      <TableCell>{formatMethodLabel(c.method)}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={scope} variant="outlined" color={hasOverride ? 'primary' : 'default'} />
-                      </TableCell>
-                      <TableCell align="right">{fmt(r.daily)}</TableCell>
-                      <TableCell align="right">{fmt(r.weekly)}</TableCell>
-                      <TableCell align="right">{fmt(r.monthly)}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-
-          <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other billing methods</Typography>
-          <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Flat fees</Typography>
-              <Button component={Link} to="/rentals" size="small" variant="text" color="primary">Rentals workspace</Button>
-            </Box>
-            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Asset agreements</Typography>
-              <Typography variant="body2" color="text.secondary">None set — Add</Typography>
-            </Box>
           </Box>
 
           <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mt: 3, mb: 2 }}>Other settings</Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, listStyle: 'none' }}>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="body2">Purchase order</Typography>
-              <Typography variant="body2" color={customer?.purchase_order ? 'text.primary' : 'text.secondary'}>
-                {customer?.purchase_order ? customer.purchase_order : '—'}
-              </Typography>
+              <Typography variant="body2">Daily calculation method</Typography>
+              <Typography variant="body2" color="text.secondary">{rentalSettingsForm.daily_calculation_method === 'end_of_day' ? 'End of day' : 'Default (start of day)'}</Typography>
+              <Button size="small" variant="text" color="primary" onClick={handleOpenRentalSettings}>Change</Button>
+            </Box>
+            <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="body2">Minimum billable amount</Typography>
+              <Typography variant="body2" color="text.secondary">${rentalSettingsForm.minimum_billable_amount}</Typography>
               <Button size="small" variant="text" color="primary" onClick={handleOpenRentalSettings}>Change</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Tax region</Typography>
               <Typography variant="body2" color="text.secondary">{customer?.location ? formatLocationDisplay(customer.location) : 'SSK'}</Typography>
+              <Button size="small" variant="text" color="primary" onClick={handleOpenRentalSettings}>Change</Button>
             </Box>
             <Box component="li" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Typography variant="body2">Rental bill format</Typography>
@@ -5208,102 +4830,9 @@ export default function CustomerDetail() {
       </Dialog>
 
       <Dialog
-        open={rentalClassRatesDialogOpen}
-        onClose={() => setRentalClassRatesDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 700 }}>Edit rental class rates</DialogTitle>
-        <DialogContent sx={{ pt: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Leave blank to keep the organization or built-in default for that class. These values are customer-specific overrides only.
-          </Typography>
-          <TableContainer sx={{ maxHeight: 420 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'action.hover' }}>
-                  <TableCell><strong>Class</strong></TableCell>
-                  <TableCell><strong>Method</strong></TableCell>
-                  <TableCell align="right"><strong>Daily</strong></TableCell>
-                  <TableCell align="right"><strong>Weekly</strong></TableCell>
-                  <TableCell align="right"><strong>Monthly</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {unifiedRentalClasses.map((c) => {
-                  const row = classRatesDraft[c.id] || { daily: '', weekly: '', monthly: '' };
-                  const setField = (field, val) => {
-                    setClassRatesDraft((prev) => ({
-                      ...prev,
-                      [c.id]: { ...(prev[c.id] || {}), [field]: val },
-                    }));
-                  };
-                  const methodNorm = ((c.method ?? 'monthly') + '').trim().toLowerCase() || 'monthly';
-                  const showDailyCol = methodNorm === 'equipment' || methodNorm === 'daily';
-                  const showWeeklyCol = methodNorm === 'equipment';
-                  // Monthly override always; equipment gets D/W/M; daily-method classes get daily + monthly (TrackAbout-style)
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell sx={{ maxWidth: 260, whiteSpace: 'normal', wordBreak: 'break-word' }}>{formatUnifiedClassLabel(c)}</TableCell>
-                      <TableCell>{formatMethodLabel(c.method)}</TableCell>
-                      <TableCell align="right">
-                        {showDailyCol ? (
-                          <TextField
-                            size="small"
-                            type="number"
-                            inputProps={{ min: 0, step: 0.001 }}
-                            value={row.daily}
-                            onChange={(e) => setField('daily', e.target.value)}
-                            sx={{ width: 100 }}
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        {showWeeklyCol ? (
-                          <TextField
-                            size="small"
-                            type="number"
-                            inputProps={{ min: 0, step: 0.001 }}
-                            value={row.weekly}
-                            onChange={(e) => setField('weekly', e.target.value)}
-                            sx={{ width: 100 }}
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        <TextField
-                          size="small"
-                          type="number"
-                          inputProps={{ min: 0, step: 0.001 }}
-                          value={row.monthly}
-                          onChange={(e) => setField('monthly', e.target.value)}
-                          sx={{ width: 100 }}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRentalClassRatesDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSaveRentalClassRates} disabled={savingClassRates}>
-            {savingClassRates ? <CircularProgress size={20} /> : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
         open={productSkuRatesDialogOpen}
         onClose={() => setProductSkuRatesDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
         PaperProps={{ sx: { borderRadius: 3 } }}
       >
@@ -5312,87 +4841,133 @@ export default function CustomerDetail() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Monthly rent per SKU on this customer. Clear a field to remove the override and fall back to class pricing. You can prefix-match longer codes (e.g. key <code>BOX300</code> applies to <code>BOX300-16PK</code>) using the same rules as the org rate table.
           </Typography>
-          <TableContainer sx={{ maxHeight: 360 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'action.hover' }}>
-                  <TableCell><strong>Product code</strong></TableCell>
-                  <TableCell align="right"><strong>On hand</strong></TableCell>
-                  <TableCell align="right"><strong>Monthly ($)</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {Object.keys(productSkuRatesDraft)
-                  .sort((a, b) => a.localeCompare(b))
-                  .map((code) => {
-                    const row = productSkuRatesDraft[code] || { monthly: '' };
-                    const onHand = (customerAssets || []).filter(
-                      (b) => (b.product_code || '').trim() === code
-                    ).length;
-                    return (
-                      <TableRow key={code}>
-                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{code}</TableCell>
-                        <TableCell align="right">{onHand || '—'}</TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            size="small"
-                            type="number"
-                            inputProps={{ min: 0, step: 0.01 }}
-                            placeholder="—"
-                            value={row.monthly}
-                            onChange={(e) =>
-                              setProductSkuRatesDraft((prev) => ({
-                                ...prev,
-                                [code]: { ...prev[code], monthly: e.target.value },
-                              }))
-                            }
-                            sx={{ width: 120 }}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          {Object.keys(productSkuRatesDraft).length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-              No product codes yet. Add a SKU below (e.g. before inventory arrives).
-            </Typography>
-          )}
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }} alignItems={{ sm: 'flex-end' }}>
-            <TextField
-              size="small"
-              label="Add product code"
-              value={productSkuExtraCode}
-              onChange={(e) => setProductSkuExtraCode(e.target.value)}
-              sx={{ flex: 1 }}
-            />
-            <TextField
-              size="small"
-              label="Monthly ($)"
-              type="number"
-              inputProps={{ min: 0, step: 0.01 }}
-              value={productSkuExtraMonthly}
-              onChange={(e) => setProductSkuExtraMonthly(e.target.value)}
-              sx={{ width: 140 }}
-            />
-            <Button
-              variant="outlined"
-              onClick={() => {
-                const c = productSkuExtraCode.trim();
-                if (!c) return;
-                setProductSkuRatesDraft((prev) => ({
-                  ...prev,
-                  [c]: { monthly: productSkuExtraMonthly.trim() },
-                }));
-                setProductSkuExtraCode('');
-                setProductSkuExtraMonthly('');
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
+            <TableContainer sx={{ maxHeight: 360, overflow: 'auto' }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: 'action.hover' }}>
+                    <TableCell sx={{ fontWeight: 700, minWidth: 160 }}>Product code</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700, width: 96, whiteSpace: 'nowrap' }}>
+                      On hand
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700, width: 140, whiteSpace: 'nowrap' }}>
+                      Monthly ($)
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {Object.keys(productSkuRatesDraft).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} sx={{ border: 0, py: 3, color: 'text.secondary' }}>
+                        No product codes yet. Use the fields below to add your first SKU (e.g. before inventory arrives).
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    Object.keys(productSkuRatesDraft)
+                      .sort((a, b) => a.localeCompare(b))
+                      .map((code) => {
+                        const row = productSkuRatesDraft[code] || { monthly: '' };
+                        const onHand = (customerAssets || []).filter(
+                          (b) => (b.product_code || '').trim() === code
+                        ).length;
+                        return (
+                          <TableRow key={code} hover>
+                            <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{code}</TableCell>
+                            <TableCell align="right">{onHand || '—'}</TableCell>
+                            <TableCell align="right">
+                              <TextField
+                                size="small"
+                                type="number"
+                                inputProps={{ min: 0, step: 0.01 }}
+                                placeholder="—"
+                                value={row.monthly}
+                                onChange={(e) =>
+                                  setProductSkuRatesDraft((prev) => ({
+                                    ...prev,
+                                    [code]: { ...prev[code], monthly: e.target.value },
+                                  }))
+                                }
+                                sx={{ width: 128, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box
+              sx={{
+                px: 2,
+                py: 2,
+                bgcolor: 'action.hover',
+                borderTop: '1px solid',
+                borderColor: 'divider',
               }}
             >
-              Add row
-            </Button>
-          </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5, fontWeight: 600 }}>
+                Add a row
+              </Typography>
+              <Stack spacing={2}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Product code (e.g. BOX300)"
+                  value={productSkuExtraCode}
+                  onChange={(e) => setProductSkuExtraCode(e.target.value)}
+                  inputProps={{ 'aria-label': 'Product code to add' }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                />
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+                  <TextField
+                    size="small"
+                    type="number"
+                    inputProps={{ min: 0, step: 0.01, 'aria-label': 'Monthly amount' }}
+                    placeholder="Monthly amount (USD)"
+                    value={productSkuExtraMonthly}
+                    onChange={(e) => setProductSkuExtraMonthly(e.target.value)}
+                    sx={{
+                      minWidth: { xs: '100%', sm: 220 },
+                      maxWidth: { sm: 280 },
+                      flex: { sm: '0 0 auto' },
+                      '& .MuiOutlinedInput-root': { borderRadius: 1.5 },
+                    }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="medium"
+                    onClick={() => {
+                      const c = productSkuExtraCode.trim();
+                      if (!c) return;
+                      setProductSkuRatesDraft((prev) => ({
+                        ...prev,
+                        [c]: { monthly: productSkuExtraMonthly.trim() },
+                      }));
+                      setProductSkuExtraCode('');
+                      setProductSkuExtraMonthly('');
+                    }}
+                    sx={{
+                      borderRadius: 2,
+                      fontWeight: 600,
+                      px: 2.5,
+                      minHeight: 40,
+                      alignSelf: { xs: 'stretch', sm: 'center' },
+                    }}
+                  >
+                    Add row
+                  </Button>
+                </Stack>
+              </Stack>
+            </Box>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setProductSkuRatesDialogOpen(false)}>Cancel</Button>

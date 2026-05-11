@@ -96,7 +96,8 @@ const DailyUpdateAdmin = lazy(() => import('./pages/DailyUpdateAdmin'));
 const Subscriptions = lazy(() => import('./pages/Subscriptions'));
 const SubscriptionDetail = lazy(() => import('./pages/SubscriptionDetail'));
 const CustomerRentalHistory = lazy(() => import('./pages/CustomerRentalHistory'));
-const AssetTypePricing = lazy(() => import('./pages/AssetTypePricing'));
+const AssetClassifications = lazy(() => import('./pages/AssetClassifications'));
+const AssetClassificationTreePricing = lazy(() => import('./pages/AssetClassificationTreePricing'));
 const CustomerPricingOverrides = lazy(() => import('./pages/CustomerPricingOverrides'));
 const QuickBooksExport = lazy(() => import('./pages/QuickBooksExport'));
 const TaxRegionsPage = lazy(() => import('./pages/TaxRegions'));
@@ -328,7 +329,9 @@ function AppContent() {
                     <Route path="/rentals/customer-history" element={<CustomerRentalHistory />} />
                     <Route path="/subscriptions" element={<Navigate to="/rentals" replace />} />
                     <Route path="/subscriptions/:id" element={<SubscriptionsIdLegacyRedirect />} />
-                    <Route path="/pricing/asset-types" element={<AssetTypePricing />} />
+                    <Route path="/pricing/asset-types" element={<Navigate to="/inventory/asset-classifications/pricing" replace />} />
+                    <Route path="/inventory/asset-classifications/pricing" element={<AssetClassificationTreePricing />} />
+                    <Route path="/inventory/asset-classifications" element={<AssetClassifications />} />
                     <Route path="/pricing/customers" element={<CustomerPricingOverrides />} />
                     <Route path="/pricing/tax-regions" element={<TaxRegionsPage />} />
                     <Route path="/invoices" element={<Navigate to="/rentals" replace />} />

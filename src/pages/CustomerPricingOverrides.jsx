@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { supabase } from '../supabase/client';
 import { formatCurrency } from '../utils/subscriptionUtils';
 import {
@@ -123,8 +123,8 @@ export default function CustomerPricingOverrides() {
   const { organization } = useAuth();
   const location = useLocation();
   const ctx = useSubscriptions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
 
   const [search, setSearch] = useState('');
   const [editOpen, setEditOpen] = useState(false);

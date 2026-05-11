@@ -13,10 +13,30 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/StyledComponents';
-import { resolveCustomerTypeForParentConstraint } from '../utils/customerParentConstraint';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 import { isActiveCustomerRecord as isCustomerRowActive } from '../utils/leaseCustomerMatchKeys';
 
 const toolbarBtnSx = { minHeight: 40, px: 3 };
+
+/** Match `PageSearchInput` pill (h-11 / 44px) so search + selects + checkboxes align on one row */
+const customersToolbarControlHeight = 44;
+const customersToolbarSelectSx = {
+  flex: '0 0 auto',
+  '& .MuiOutlinedInput-root': {
+    height: customersToolbarControlHeight,
+    minHeight: customersToolbarControlHeight,
+    borderRadius: 2,
+    alignItems: 'center',
+  },
+  '& .MuiSelect-select': {
+    display: 'flex',
+    alignItems: 'center',
+    minHeight: '0 !important',
+    py: 0,
+    lineHeight: 1.25,
+    boxSizing: 'border-box',
+  },
+};
 const tableActionBtnSx = {
   minWidth: 'auto',
   px: 1.75,
@@ -417,18 +437,19 @@ function Customers({ profile }) {
     }
     try {
       // Only include columns that exist in the customers table
-      const payload = {
-        CustomerListID: form.CustomerListID,
+      const basePayload = {
+        CustomerListID: form.CustomerListID.trim(),
         name: form.name,
         contact_details: form.contact_details,
         phone: form.phone,
-        customer_type: resolveCustomerTypeForParentConstraint(form.customer_type, form.parent_customer_id),
+        customer_type: form.customer_type,
+        parent_customer_id: form.parent_customer_id,
         location: form.location || 'SASKATOON',
-        organization_id: organization.id
+        organization_id: organization.id,
       };
-      if (form.department?.trim()) payload.department = form.department.trim();
-      if (form.email?.trim()) payload.email = form.email.trim();
-      if (form.parent_customer_id) payload.parent_customer_id = form.parent_customer_id;
+      if (form.department?.trim()) basePayload.department = form.department.trim();
+      if (form.email?.trim()) basePayload.email = form.email.trim();
+      const payload = finalizeCustomerBranchParentFields(basePayload);
       const { error } = await supabase.from('customers').insert([payload]);
       if (error) throw error;
       
@@ -743,15 +764,26 @@ function Customers({ profile }) {
         <Box sx={{ mb: 0 }}>
           <Typography variant="h4" fontWeight={800} color="#1976d2" sx={{ mb: 2 }}>Customer Management</Typography>
 
-          <Stack
-            direction="row"
-            spacing={2}
-            flexWrap="wrap"
-            useFlexGap
-            alignItems="center"
-            sx={{ mb: 3, rowGap: 1.5, columnGap: 2 }}
+          <Box
+            sx={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 2,
+              rowGap: 1.5,
+              mb: 3,
+            }}
           >
-            <Box sx={{ flex: '1 1 220px', minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <Box
+              sx={{
+                flex: '1 1 240px',
+                minWidth: { xs: '100%', sm: 200 },
+                maxWidth: { lg: 'min(560px, 100%)' },
+                display: 'flex',
+                alignItems: 'center',
+                minHeight: customersToolbarControlHeight,
+              }}
+            >
               <PageSearchInput
                 placeholder="Search customers by name, ID, or contact..."
                 value={searchInput}
@@ -782,19 +814,17 @@ function Customers({ profile }) {
               }}
               inputProps={{ 'aria-label': 'Location filter' }}
               sx={{
-                flex: '0 0 auto',
-                minWidth: 150,
-                '& .MuiOutlinedInput-root': {
-                  height: 40,
-                  minHeight: 40,
-                  alignItems: 'center',
-                },
-                '& .MuiSelect-select': {
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: '0 !important',
-                  py: 0,
-                  lineHeight: 1.25,
+                ...customersToolbarSelectSx,
+                minWidth: 168,
+              }}
+              SelectProps={{
+                MenuProps: {
+                  disableScrollLock: true,
+                  anchorOrigin: { vertical: 'bottom', horizontal: 'left' },
+                  transformOrigin: { vertical: 'top', horizontal: 'left' },
+                  PaperProps: {
+                    sx: { borderRadius: 2, mt: 0.5, minWidth: 168 },
+                  },
                 },
               }}
             >
@@ -817,12 +847,12 @@ function Customers({ profile }) {
                   sx={{ py: 0 }}
                 />
               }
-              label={<Typography variant="body2" sx={{ lineHeight: 1.2 }}>With assigned assets only</Typography>}
+              label={<Typography variant="body2" sx={{ lineHeight: 1.25 }}>With assigned assets only</Typography>}
               sx={{
                 ml: 0,
                 mr: 0,
                 my: 0,
-                height: 40,
+                minHeight: customersToolbarControlHeight,
                 alignItems: 'center',
                 whiteSpace: 'nowrap',
               }}
@@ -840,12 +870,12 @@ function Customers({ profile }) {
                   sx={{ py: 0 }}
                 />
               }
-              label={<Typography variant="body2" sx={{ lineHeight: 1.2 }}>No payment terms only</Typography>}
+              label={<Typography variant="body2" sx={{ lineHeight: 1.25 }}>No payment terms only</Typography>}
               sx={{
                 ml: 0,
                 mr: 0,
                 my: 0,
-                height: 40,
+                minHeight: customersToolbarControlHeight,
                 alignItems: 'center',
                 whiteSpace: 'nowrap',
               }}
@@ -861,19 +891,17 @@ function Customers({ profile }) {
               }}
               inputProps={{ 'aria-label': 'Rows per page' }}
               sx={{
-                flex: '0 0 auto',
-                minWidth: 120,
-                '& .MuiOutlinedInput-root': {
-                  height: 40,
-                  minHeight: 40,
-                  alignItems: 'center',
-                },
-                '& .MuiSelect-select': {
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: '0 !important',
-                  py: 0,
-                  lineHeight: 1.25,
+                ...customersToolbarSelectSx,
+                minWidth: 112,
+              }}
+              SelectProps={{
+                MenuProps: {
+                  disableScrollLock: true,
+                  anchorOrigin: { vertical: 'bottom', horizontal: 'right' },
+                  transformOrigin: { vertical: 'top', horizontal: 'right' },
+                  PaperProps: {
+                    sx: { borderRadius: 2, mt: 0.5, minWidth: 112 },
+                  },
                 },
               }}
             >
@@ -883,7 +911,7 @@ function Customers({ profile }) {
                 </MenuItem>
               ))}
             </TextField>
-          </Stack>
+          </Box>
           
           <Typography variant="body2" color="text.secondary" mb={2}>
             {searchInput.trim() 

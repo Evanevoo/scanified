@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
+import { alpha, useTheme as useMuiTheme } from '@mui/material/styles';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import PortalSnackbar from '../components/PortalSnackbar';
 import {
   Box,
@@ -290,7 +291,9 @@ function TabPanel({ children, value, index, ...other }) {
 export default function Settings() {
   const { user, profile, organization, reloadOrganization, reloadUserData } = useAuth();
   const { actualRole } = usePermissions();
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { isDarkMode, toggleDarkMode, accent, setAccent } = useTheme();
+  const muiTheme = useMuiTheme();
+  const isDarkUi = muiTheme.palette.mode === 'dark';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(0);
@@ -1198,14 +1201,29 @@ export default function Settings() {
   };
 
   const handleThemeToggle = async () => {
+    const nextDark = !isDarkMode;
     toggleDarkMode();
+    if (!user?.id) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from('profiles')
-        .update({ theme_mode: isDarkMode ? 'dark' : 'light' })
+        .update({ theme_mode: nextDark ? 'dark' : 'light' })
         .eq('id', user.id);
+      if (error) throw error;
     } catch (e) {
       logger.error('Error saving theme preference:', e);
+    }
+  };
+
+  const handlePersonalAccentChange = async (hex) => {
+    setAccent(hex);
+    if (!user?.id) return;
+    try {
+      const { error } = await supabase.from('profiles').update({ theme_accent: hex }).eq('id', user.id);
+      if (error) throw error;
+      if (reloadUserData) await reloadUserData();
+    } catch (e) {
+      logger.error('Error saving accent color:', e);
     }
   };
 
@@ -1281,7 +1299,10 @@ export default function Settings() {
             borderRadius: 3,
             border: '1px solid',
             borderColor: 'divider',
-            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+            bgcolor: 'background.paper',
+            background: isDarkUi
+              ? `linear-gradient(180deg, ${muiTheme.palette.background.paper} 0%, ${alpha(muiTheme.palette.background.default, 1)} 100%)`
+              : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
           }}
         >
           <Stack
@@ -1332,7 +1353,7 @@ export default function Settings() {
                 borderColor: 'divider',
                 position: { md: 'sticky' },
                 top: { md: 16 },
-                backgroundColor: '#fcfcfb',
+                bgcolor: isDarkUi ? alpha(muiTheme.palette.background.paper, 0.94) : '#fcfcfb',
               }}
             >
               <Typography variant="overline" sx={{ px: 1.25, color: 'text.secondary', fontWeight: 700, letterSpacing: '0.08em' }}>
@@ -1371,7 +1392,7 @@ export default function Settings() {
                 borderColor: 'divider',
                 borderRadius: 3,
                 overflow: 'hidden',
-                backgroundColor: '#fff',
+                bgcolor: 'background.paper',
               }}
             >
               <Tabs
@@ -1588,7 +1609,7 @@ export default function Settings() {
                   
                   {/* Password Strength Indicators */}
                   {newPassword && (
-                    <Card variant="outlined" sx={{ mt: 2, mb: 2, bgcolor: 'grey.50' }}>
+                    <Card variant="outlined" sx={{ mt: 2, mb: 2, bgcolor: isDarkUi ? 'action.hover' : 'grey.50' }}>
                       <CardContent sx={{ py: 2 }}>
                         <Typography variant="body2" gutterBottom>
                           <strong>Password Requirements:</strong>
@@ -1843,7 +1864,7 @@ export default function Settings() {
               <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>Theme</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Choose light or dark mode for the application.
+                  Choose light or dark mode for the application. Your choice is saved to your account so it follows you across devices.
                 </Typography>
                 <Button
                   variant="outlined"
@@ -1852,6 +1873,45 @@ export default function Settings() {
                 >
                   Switch to {isDarkMode ? 'Light' : 'Dark'} mode
                 </Button>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2 }}>
+                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                  Your accent color
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Your accent drives the app primary color: buttons, links, tab labels, focus rings, and default heading colors (H4–H6) when a page does not set its own text color. Paragraphs and body copy stay neutral for readability. Organization branding under Asset Configuration still applies to shared customer-facing materials your admin configures.
+                </Typography>
+                <TextField
+                  fullWidth
+                  label="Accent"
+                  type="color"
+                  value={accent?.startsWith('#') ? accent : '#40B5AD'}
+                  onChange={(e) => handlePersonalAccentChange(e.target.value)}
+                  sx={{ maxWidth: 280, mb: 2, '& input': { height: 40, cursor: 'pointer' } }}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                  Quick picks
+                </Typography>
+                <Stack direction="row" flexWrap="wrap" gap={1}>
+                  {themeColors.map(({ name, value }) => {
+                    const chipHex = resolveAccentToHex(value);
+                    const selected = resolveAccentToHex(accent) === chipHex;
+                    return (
+                      <Chip
+                        key={value}
+                        label={name}
+                        size="small"
+                        onClick={() => handlePersonalAccentChange(chipHex)}
+                        sx={{
+                          border: selected ? 2 : 1,
+                          borderColor: selected ? 'primary.main' : 'divider',
+                        }}
+                      />
+                    );
+                  })}
+                </Stack>
               </Paper>
 
               {hasElevatedSettingsAccess && (
@@ -1963,7 +2023,7 @@ export default function Settings() {
                   </Typography>
 
                   {invoiceTemplate && (
-                    <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1, display: 'inline-block' }}>
+                    <Box sx={{ mb: 3, p: 2, bgcolor: isDarkUi ? 'action.hover' : 'grey.50', borderRadius: 1, display: 'inline-block' }}>
                       <Typography variant="subtitle2" gutterBottom>
                         Current Template: <strong>{invoiceTemplate.name || 'Modern'}</strong>
                       </Typography>
@@ -2620,6 +2680,9 @@ export default function Settings() {
                       <CardContent>
                         <Typography variant="h6" gutterBottom>
                           App Branding
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          Primary and secondary colors here apply to your whole organization (all users), not just your account. Use Appearance → Your accent color for a personal theme.
                         </Typography>
                         
                         <TextField

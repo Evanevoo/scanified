@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { recordPayment } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
 import jsPDF from 'jspdf';
@@ -23,8 +23,8 @@ import { PageSearchInput } from '../components/ui/search-input-with-icon';
 export default function Invoices() {
   const { organization, user, profile } = useAuth();
   const ctx = useSubscriptions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');

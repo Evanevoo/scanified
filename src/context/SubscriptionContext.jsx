@@ -23,6 +23,7 @@ const REALTIME_TABLES = [
   'subscriptions',
   'subscription_items',
   'asset_type_pricing',
+  'asset_classification_nodes',
   'customer_pricing',
   'customer_pricing_overrides',
   'subscription_invoices',
@@ -52,6 +53,7 @@ export function SubscriptionProvider({ children }) {
   const [openRentals, setOpenRentals] = useState([]);
   const [leaseContracts, setLeaseContracts] = useState([]);
   const [leaseContractItems, setLeaseContractItems] = useState([]);
+  const [classificationNodes, setClassificationNodes] = useState([]);
 
   const mountedRef = useRef(true);
   const channelRef = useRef(null);
@@ -59,6 +61,8 @@ export function SubscriptionProvider({ children }) {
   const lastFetchAtRef = useRef(0);
   /** Set to true while a fetch is in flight to avoid stacking concurrent refetches. */
   const fetchInFlightRef = useRef(false);
+  /** If true, run another fetch as soon as the current one finishes (so deletes/refreshes are not dropped). */
+  const fetchQueuedRef = useRef(false);
 
   useEffect(() => {
     if (!orgId) {
@@ -78,11 +82,13 @@ export function SubscriptionProvider({ children }) {
   const fetchAll = useCallback(async (options = {}) => {
     const silent = options.silent === true;
     if (!orgId) {
+      if (mountedRef.current) setClassificationNodes([]);
       if (mountedRef.current && !silent) setLoading(false);
       return;
     }
-    // Avoid stacking concurrent fetches (esp. for silent background refreshes).
+    // Avoid stacking concurrent fetches; queue one follow-up so callers still get fresh data.
     if (fetchInFlightRef.current) {
+      fetchQueuedRef.current = true;
       return;
     }
     fetchInFlightRef.current = true;
@@ -191,6 +197,28 @@ export function SubscriptionProvider({ children }) {
       setOpenRentals(rentalsRes.data || []);
       setLeaseContracts(leaseRes.data || []);
       setLeaseContractItems(leaseItemsRes.data || []);
+
+      let classNodesList = [];
+      try {
+        let cr = await supabase
+          .from('asset_classification_nodes')
+          .select('id, organization_id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
+          .eq('organization_id', orgId)
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true });
+        if (cr.error?.code === '42703') {
+          cr = await supabase
+            .from('asset_classification_nodes')
+            .select('id, organization_id, parent_id, name, sort_order')
+            .eq('organization_id', orgId)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true });
+        }
+        if (!cr.error && cr.data) classNodesList = cr.data;
+      } catch {
+        classNodesList = [];
+      }
+      if (mountedRef.current) setClassificationNodes(classNodesList);
     } catch (err) {
       console.error('SubscriptionContext fetch error:', err);
       if (mountedRef.current && !silent) setError(err.message);
@@ -198,6 +226,11 @@ export function SubscriptionProvider({ children }) {
       lastFetchAtRef.current = Date.now();
       fetchInFlightRef.current = false;
       if (mountedRef.current && !silent) setLoading(false);
+      const runQueued = fetchQueuedRef.current;
+      fetchQueuedRef.current = false;
+      if (runQueued && mountedRef.current && orgId) {
+        void fetchAll({ silent: true });
+      }
     }
   }, [orgId]);
 
@@ -331,6 +364,7 @@ export function SubscriptionProvider({ children }) {
           assetPricingMap,
           defaultMonthly: defaultRates.monthly,
           defaultYearly: defaultRates.yearly,
+          classificationNodes,
         },
         {
           bottles,
@@ -340,7 +374,7 @@ export function SubscriptionProvider({ children }) {
           customers,
         }
       ),
-    [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, bottles, openRentals, leaseContracts, leaseContractItems]
+    [subscriptions, customers, customerOverrideMap, assetPricingMap, defaultRates, classificationNodes, bottles, openRentals, leaseContracts, leaseContractItems]
   );
 
   const arr = Math.round(mrr * 12 * 100) / 100;
@@ -379,6 +413,7 @@ export function SubscriptionProvider({ children }) {
     payments,
     customers,
     bottles,
+    classificationNodes,
     rentals: openRentals,
     leaseContracts,
     leaseContractItems,
@@ -392,7 +427,7 @@ export function SubscriptionProvider({ children }) {
   }), [
     loading, error, subscriptions, subscriptionItems, assetTypePricing,
     customerPricingRows, legacyPricingOverrides, customerPricingOverrides,
-    invoices, payments, customers, bottles, openRentals,
+    invoices, payments, customers, bottles, classificationNodes, openRentals,
     leaseContracts, leaseContractItems, activeSubscriptions,
     mrr, arr, outstandingBalance, nextBillingDate, refresh, refreshSilent,
   ]);

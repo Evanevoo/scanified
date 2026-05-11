@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useSubscriptions } from '../context/SubscriptionContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { formatCurrency, formatDate } from '../utils/subscriptionUtils';
 import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
@@ -10,8 +10,8 @@ import { Download as DownloadIcon, Refresh as RefreshIcon } from '@mui/icons-mat
 
 export default function QuickBooksExport() {
   const ctx = useSubscriptions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
 
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();

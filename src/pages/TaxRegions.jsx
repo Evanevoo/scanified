@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { supabase } from '../supabase/client';
 import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
@@ -15,8 +15,8 @@ import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 export default function TaxRegions() {
   const { organization } = useAuth();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
 
   const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);

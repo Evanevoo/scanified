@@ -2,7 +2,7 @@ import logger from '../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { supabase } from '../supabase/client';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import { useNavigate } from 'react-router-dom';
@@ -58,8 +58,8 @@ const getQuickActionPalette = (color) =>
 export default function Home() {
   const { profile, organization } = useAuth();
   const { isAdmin, isManager } = usePermissions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
   const secondaryPurple = '#8B7BA8';
   const navigate = useNavigate();
 

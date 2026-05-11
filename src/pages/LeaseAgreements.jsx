@@ -67,7 +67,7 @@ import {
 } from 'react-icons/io5';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { fetchBillingWorkspaceData, computeLeaseAgreementStats } from '../services/billingWorkspaceService';
 import { isBottleLostForBilling } from '../services/billingFromAssets';
 import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
@@ -84,8 +84,8 @@ function getDefaultLeaseYearDateRange() {
 
 export default function LeaseAgreements() {
   const { profile, organization } = useAuth();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
   const navigate = useNavigate();
   const [agreements, setAgreements] = useState([]);
   const [loading, setLoading] = useState(true);

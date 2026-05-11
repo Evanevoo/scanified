@@ -1,6 +1,8 @@
 /**
  * Canonical rental / subscription unit pricing resolution.
- * Hierarchy: customer-specific override (SKU, prefix, or __all__) → org asset_type_pricing → optional line fallback.
+ * Hierarchy: customer-specific override (SKU, prefix, or __all__) → classification tree defaults
+ * (branch rates; node = bottle's classification_node_id, else asset_type_pricing.classification_node_id)
+ * → org asset_type_pricing SKU row → line / org fallbacks.
  * All UI, invoices, and aggregates should use these functions with live data from Supabase — not duplicated formulas.
  */
 
@@ -20,6 +22,56 @@ export function buildAssetPricingMap(assetTypePricing) {
     map.set(normalizePricingKey(p.product_code), p);
   }
   return map;
+}
+
+/** @param {Map<string, object>|null} nodesById */
+export function buildClassificationNodesById(classificationNodes) {
+  if (!Array.isArray(classificationNodes) || classificationNodes.length === 0) return null;
+  return new Map(classificationNodes.map((n) => [n.id, n]));
+}
+
+/**
+ * Walk from a bottle's assigned node up to the root; use the first ancestor that defines
+ * default_monthly_price and/or default_yearly_price (closest to the leaf wins).
+ * @param {string|null|undefined} classificationNodeId
+ * @param {Map<string, object>|null|undefined} nodesById
+ * @returns {{ monthly: number|null, yearly: number|null }|null}
+ */
+export function resolveClassificationHierarchyDefaults(classificationNodeId, nodesById) {
+  if (!classificationNodeId || !nodesById?.size) return null;
+  const chain = [];
+  let cur = nodesById.get(classificationNodeId);
+  const seen = new Set();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    chain.push(cur);
+    const pid = cur.parent_id;
+    cur = pid ? nodesById.get(pid) : null;
+  }
+  for (const n of chain) {
+    const m = parseFloat(n.default_monthly_price);
+    const y = parseFloat(n.default_yearly_price);
+    const hasM = Number.isFinite(m) && m > 0;
+    const hasY = Number.isFinite(y) && y > 0;
+    if (hasM || hasY) {
+      return {
+        monthly: hasM ? m : null,
+        yearly: hasY ? y : (hasM ? m * 12 : null),
+      };
+    }
+  }
+  return null;
+}
+
+/** First bottle wins per normalized product_code (same rule as single-classification-per-code). */
+export function buildProductCodeClassificationMapFromBottles(bottles) {
+  const m = new Map();
+  for (const b of bottles || []) {
+    const pc = normalizePricingKey(b?.product_code);
+    if (!pc || !b?.classification_node_id) continue;
+    if (!m.has(pc)) m.set(pc, b.classification_node_id);
+  }
+  return m;
 }
 
 /** Flatten customer_pricing rows into override-shaped entries (incl. per-SKU JSON). */
@@ -251,6 +303,10 @@ export function resolveEffectiveUnitPrice({
   assetPricingMap,
   defaultMonthly = null,
   defaultYearly = null,
+  /** Bottle's classification node; if absent, asset_type_pricing.classification_node_id for this SKU is used */
+  bottleClassificationNodeId = null,
+  /** Map node id → node row (must include parent_id, default_monthly_price, default_yearly_price when set) */
+  classificationNodesById = null,
 }) {
   const productCode = normalizePricingKey(item?.product_code || item?.description);
   const period = String(row?.billing_period || 'monthly').toLowerCase();
@@ -280,7 +336,40 @@ export function resolveEffectiveUnitPrice({
     return parseFloat(override.custom_monthly_price) || 0;
   }
 
-  if (basePricing && Number.isFinite(basePrice)) {
+  const clsMap = classificationNodesById instanceof Map && classificationNodesById.size > 0
+    ? classificationNodesById
+    : null;
+  const skuLinkedNodeId =
+    basePricing?.classification_node_id != null && String(basePricing.classification_node_id).trim()
+      ? basePricing.classification_node_id
+      : null;
+  const classificationNodeForTreeDefaults =
+    bottleClassificationNodeId || skuLinkedNodeId || null;
+  const clsRates = classificationNodeForTreeDefaults && clsMap
+    ? resolveClassificationHierarchyDefaults(classificationNodeForTreeDefaults, clsMap)
+    : null;
+  if (clsRates) {
+    let clsPrice =
+      period === 'yearly'
+        ? (Number.isFinite(parseFloat(clsRates.yearly)) && parseFloat(clsRates.yearly) > 0
+          ? parseFloat(clsRates.yearly)
+          : null)
+        : (Number.isFinite(parseFloat(clsRates.monthly)) && parseFloat(clsRates.monthly) > 0
+          ? parseFloat(clsRates.monthly)
+          : null);
+    if (period === 'yearly' && clsPrice == null && Number.isFinite(parseFloat(clsRates.monthly)) && parseFloat(clsRates.monthly) > 0) {
+      clsPrice = parseFloat(clsRates.monthly) * 12;
+    }
+    if (Number.isFinite(clsPrice) && clsPrice > 0) {
+      const discount = parseFloat(override?.discount_percent) || 0;
+      if (discount > 0) {
+        return Math.max(0, Math.round(clsPrice * (1 - discount / 100) * 100) / 100);
+      }
+      return clsPrice;
+    }
+  }
+
+  if (basePricing && Number.isFinite(basePrice) && basePrice > 0) {
     const discount = parseFloat(override?.discount_percent) || 0;
     if (discount > 0) {
       return Math.max(0, Math.round(basePrice * (1 - discount / 100) * 100) / 100);
@@ -308,6 +397,8 @@ export function resolveMonthlyDisplayUnit({
   assetPricingMap,
   defaultMonthly = null,
   customer = null,
+  bottleClassificationNodeId = null,
+  classificationNodesById = null,
 }) {
   return resolveEffectiveUnitPrice({
     row: {
@@ -319,6 +410,8 @@ export function resolveMonthlyDisplayUnit({
     customerOverrideMap,
     assetPricingMap,
     defaultMonthly,
+    bottleClassificationNodeId,
+    classificationNodesById,
   });
 }
 
@@ -352,7 +445,9 @@ export function defaultUnitRatesFromAssetPricingTable(assetTypePricingRows) {
  * @param {Array<{ productCode: string, count: number }>} [billingData.precomputedGroups] - Skip re-scanning all bottles/rentals when already computed (e.g. QB CSV batch export).
  */
 export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, billingData = {}) {
-  const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly } = ctx;
+  const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly, classificationNodes } = ctx;
+  const classificationNodesById = buildClassificationNodesById(classificationNodes);
+  const productCodeToClassification = buildProductCodeClassificationMapFromBottles(billingData.bottles || []);
   const cust =
     customerRecord || { CustomerListID: sub.customer_id, id: sub.customer_id, billing_mode: 'rental' };
   const contract = findActiveLeaseContract(
@@ -402,6 +497,8 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
   let sum = 0;
   for (const { productCode, count } of groups) {
     if (count <= 0) continue;
+    const pcKey = normalizePricingKey(productCode);
+    const bottleCls = pcKey ? productCodeToClassification.get(pcKey) : null;
     const unit = resolveEffectiveUnitPrice({
       row: rowForPricing,
       item: { product_code: productCode },
@@ -409,6 +506,8 @@ export function computeSubscriptionBillingCycleTotal(sub, customerRecord, ctx, b
       assetPricingMap,
       defaultMonthly,
       defaultYearly,
+      bottleClassificationNodeId: bottleCls || null,
+      classificationNodesById,
     });
     sum += unit * count;
   }
