@@ -35,7 +35,7 @@
 
 /* Focus indicators */
 .focus-visible {
-  outline: 2px solid #1976d2 !important;
+  outline: 2px solid var(--primary-color, #40B5AD) !important;
   outline-offset: 2px !important;
 }
 
@@ -139,12 +139,12 @@
 }
 
 .MuiTableRow-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: -2px;
 }
 
 .MuiTableCell-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: -2px;
 }
 
@@ -154,11 +154,11 @@
 }
 
 .MuiFormControl-root .MuiInputLabel-root.Mui-focused {
-  color: #1976d2;
+  color: var(--primary-color, #40B5AD);
 }
 
 .MuiFormControl-root .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
-  border-color: #1976d2;
+  border-color: var(--primary-color, #40B5AD);
   border-width: 2px;
 }
 
@@ -179,7 +179,7 @@
 }
 
 .MuiButton-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -193,7 +193,7 @@
 }
 
 .MuiIconButton-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -246,7 +246,7 @@
 }
 
 .MuiChip-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -258,7 +258,7 @@
 }
 
 .MuiTab-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -283,7 +283,7 @@
 }
 
 .MuiAccordionSummary-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -302,7 +302,7 @@
 }
 
 .MuiCard-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -325,7 +325,7 @@
 }
 
 .MuiListItem-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: -2px;
 }
 
@@ -335,7 +335,7 @@
 }
 
 .MuiListItemButton-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -351,7 +351,7 @@
 }
 
 .MuiMenuItem-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: -2px;
 }
 
@@ -361,7 +361,7 @@
 }
 
 .MuiSelect-select:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -371,7 +371,7 @@
 }
 
 .MuiCheckbox-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -381,7 +381,7 @@
 }
 
 .MuiRadio-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -391,7 +391,7 @@
 }
 
 .MuiSwitch-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -401,7 +401,7 @@
 }
 
 .MuiSlider-thumb:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -412,7 +412,7 @@
 }
 
 .MuiCircularProgress-root {
-  color: #1976d2;
+  color: var(--primary-color, #40B5AD);
 }
 
 /* Skeleton accessibility */
@@ -525,11 +525,11 @@
 /* Link accessibility */
 .MuiLink-root {
   text-decoration: underline;
-  color: #1976d2;
+  color: var(--primary-color, #40B5AD);
 }
 
 .MuiLink-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -556,7 +556,7 @@
 }
 
 .MuiStepLabel-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -606,7 +606,7 @@
 }
 
 .MuiBottomNavigationAction-root:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 
@@ -623,7 +623,7 @@
 }
 
 .MuiSpeedDial-fab:focus {
-  outline: 2px solid #1976d2;
+  outline: 2px solid var(--primary-color, #40B5AD);
   outline-offset: 2px;
 }
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef, useImperative
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { createSubscription, generateInvoice } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
@@ -29,10 +29,13 @@ import {
 } from '../utils/rentalInvoiceAssets';
 import {
   buildAssetPricingMap,
+  buildClassificationNodesById,
   buildCustomerOverrideMap,
+  buildProductCodeClassificationMapFromBottles,
   collectNormalizedCustomerKeysForPricingRow,
   findAllProductsOverrideMultiKey,
   findBestSpecificOverrideMultiKey,
+  normalizePricingKey,
   resolveDisplayUnitFromMaps,
   defaultUnitRatesFromAssetPricingTable,
   computeSubscriptionBillingCycleTotal,
@@ -408,8 +411,8 @@ const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchFie
 export default function Subscriptions() {
   const { organization, user, profile } = useAuth();
   const ctx = useSubscriptions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
   const navigate = useNavigate();
 
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -764,15 +767,42 @@ export default function Subscriptions() {
     [ctx.customerPricingOverrides, ctx.legacyPricingOverrides, organization?.id, ctx.customers, localRatesVersion]
   );
 
-  const resolveDisplayUnitPrice = useCallback((pricingRow, item) =>
-    resolveDisplayUnitFromMaps({
-      row: pricingRow,
-      item,
+  const classificationNodesById = useMemo(
+    () => buildClassificationNodesById(ctx.classificationNodes || []),
+    [ctx.classificationNodes]
+  );
+
+  const productCodeToBottleClassification = useMemo(
+    () => buildProductCodeClassificationMapFromBottles(ctx.bottles || []),
+    [ctx.bottles]
+  );
+
+  const resolveDisplayUnitPrice = useCallback(
+    (pricingRow, item) => {
+      const pc = normalizePricingKey(item?.product_code || item?.description);
+      const bottleCls = pc ? productCodeToBottleClassification.get(pc) : null;
+      return resolveDisplayUnitFromMaps({
+        row: pricingRow,
+        item,
+        customerOverrideMap,
+        assetPricingMap,
+        defaultMonthly: defaultUnitRateByPeriod.monthly,
+        defaultYearly: defaultUnitRateByPeriod.yearly,
+        bottleClassificationNodeId: bottleCls || null,
+        classificationNodesById:
+          classificationNodesById instanceof Map && classificationNodesById.size > 0
+            ? classificationNodesById
+            : null,
+      });
+    },
+    [
       customerOverrideMap,
       assetPricingMap,
-      defaultMonthly: defaultUnitRateByPeriod.monthly,
-      defaultYearly: defaultUnitRateByPeriod.yearly,
-    }), [customerOverrideMap, assetPricingMap, defaultUnitRateByPeriod]);
+      defaultUnitRateByPeriod,
+      productCodeToBottleClassification,
+      classificationNodesById,
+    ]
+  );
 
   const leaseCoveredCountByCustomerKey = useMemo(() => {
     const map = new Map();
@@ -852,6 +882,7 @@ export default function Subscriptions() {
       assetPricingMap,
       defaultMonthly: defaultUnitRateByPeriod.monthly,
       defaultYearly: defaultUnitRateByPeriod.yearly,
+      classificationNodes: ctx.classificationNodes || [],
     };
 
     return ctx.subscriptions.map((sub) => {
@@ -981,6 +1012,7 @@ export default function Subscriptions() {
     ctx.leaseContracts,
     ctx.leaseContractItems,
     ctx.customers,
+    ctx.classificationNodes,
     customerResolvers,
     matchCustomerRecordBySubscriptionId,
     customerOverrideMap,
@@ -1434,6 +1466,8 @@ export default function Subscriptions() {
             productCode
           );
           if (specificOverride) usedSpecificProductOverride = true;
+          const pcKey = normalizePricingKey(productCode);
+          const bottleCls = pcKey ? productCodeToBottleClassification.get(pcKey) : null;
           const unit = resolveDisplayUnitFromMaps({
             row: rowForPricing,
             item: { product_code: productCode },
@@ -1441,6 +1475,11 @@ export default function Subscriptions() {
             assetPricingMap,
             defaultMonthly: defaultUnitRateByPeriod.monthly,
             defaultYearly: defaultUnitRateByPeriod.yearly,
+            bottleClassificationNodeId: bottleCls || null,
+            classificationNodesById:
+              classificationNodesById instanceof Map && classificationNodesById.size > 0
+                ? classificationNodesById
+                : null,
           });
           return sum + unit * qty;
         }, 0);
@@ -1516,6 +1555,8 @@ export default function Subscriptions() {
     organization?.id,
     customerResolvers,
     leaseCoveredCountByCustomerKey,
+    classificationNodesById,
+    productCodeToBottleClassification,
   ]);
 
   /** Stable key so invoice-status fetch does not re-run when `allRows` gets a new array reference but same customers/subs. */
@@ -1896,6 +1937,7 @@ export default function Subscriptions() {
       assetPricingMap,
       defaultMonthly: defaultUnitRateByPeriod.monthly,
       defaultYearly: defaultUnitRateByPeriod.yearly,
+      classificationNodes: ctx.classificationNodes || [],
     };
 
     const base =
@@ -2047,6 +2089,7 @@ export default function Subscriptions() {
     assetPricingMap,
     ctx.bottles,
     ctx.customers,
+    ctx.classificationNodes,
     ctx.leaseContractItems,
     ctx.leaseContracts,
     ctx.rentals,

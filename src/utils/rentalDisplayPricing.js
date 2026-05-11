@@ -3,6 +3,8 @@
  */
 export {
   normalizePricingKey,
+  buildClassificationNodesById,
+  buildProductCodeClassificationMapFromBottles,
   buildAssetPricingMap,
   flattenCustomerPricingRowsToLegacyOverrides,
   buildCustomerOverrideMap,

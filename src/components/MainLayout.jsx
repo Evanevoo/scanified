@@ -15,8 +15,8 @@ import Typography from '@mui/material/Typography';
 import SettingsIcon from '@mui/icons-material/SettingsOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutOutlined';
 import NotificationsIcon from '@mui/icons-material/Notifications';
-import { useTheme as useMuiTheme } from '@mui/material/styles';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { usePermissions } from '../context/PermissionsContext';
 import GlobalImportProgress from './GlobalImportProgress';
 import ImportNotification from './ImportNotification';
@@ -37,10 +37,11 @@ const collapsedWidth = 72;
 
 export default function MainLayout({ children }) {
   const { profile, organization } = useAuth();
-  const { organizationColors } = useTheme();
+  const { organizationColors, accent } = useTheme();
   const { isAdmin, isManager } = usePermissions();
   const muiTheme = useMuiTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const isDarkShell = muiTheme.palette.mode === 'dark';
+  const primaryColor = resolveAccentToHex(accent);
   const rolePillLabel =
     profile?.role === 'owner'
       ? 'Owner'
@@ -295,9 +296,11 @@ export default function MainLayout({ children }) {
       height: '100vh',
       width: '100vw',
       position: 'relative',
-      background: muiTheme.palette?.background?.default
-        ? `linear-gradient(145deg, ${muiTheme.palette.background.default} 0%, #f4f2ff 45%, #faf8ff 100%)`
-        : 'linear-gradient(145deg, #f0f2f7 0%, #f4f2ff 38%, #faf8ff 72%, #fff5f8 100%)',
+      background: isDarkShell
+        ? `linear-gradient(145deg, ${muiTheme.palette.background.default} 0%, ${alpha(muiTheme.palette.background.paper, 0.95)} 48%, ${muiTheme.palette.background.default} 100%)`
+        : muiTheme.palette?.background?.default
+          ? `linear-gradient(145deg, ${muiTheme.palette.background.default} 0%, #f4f2ff 45%, #faf8ff 100%)`
+          : 'linear-gradient(145deg, #f0f2f7 0%, #f4f2ff 38%, #faf8ff 72%, #fff5f8 100%)',
       overflow: 'hidden',
       // Tablet-specific optimizations
       '@media (min-width: 768px) and (max-width: 1024px)': {
@@ -340,11 +343,11 @@ export default function MainLayout({ children }) {
         elevation={0}
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          bgcolor: 'rgba(255,255,255,0.68)',
+          bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.88) : 'rgba(255,255,255,0.68)',
           backdropFilter: 'blur(14px)',
           color: 'text.primary',
-          boxShadow: '0 8px 24px rgba(99,102,241,0.08)',
-          borderBottom: '1px solid rgba(255,255,255,0.8)',
+          boxShadow: isDarkShell ? '0 8px 28px rgba(0,0,0,0.45)' : '0 8px 24px rgba(99,102,241,0.08)',
+          borderBottom: isDarkShell ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.8)',
           minHeight: 64,
         }}
       >
@@ -401,9 +404,9 @@ export default function MainLayout({ children }) {
                     fontSize: '0.62rem',
                     height: 26,
                     borderRadius: 999,
-                    bgcolor: 'rgba(139, 123, 168, 0.14)',
-                    color: '#57496f',
-                    border: '1px solid rgba(139, 123, 168, 0.32)',
+                    bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(139, 123, 168, 0.14)',
+                    color: isDarkShell ? 'text.secondary' : '#57496f',
+                    border: isDarkShell ? `1px solid ${alpha('#fff', 0.14)}` : '1px solid rgba(139, 123, 168, 0.32)',
                   }}
                 />
               )}
@@ -446,12 +449,16 @@ export default function MainLayout({ children }) {
                       minHeight: 40,
                       borderRadius: 999,
                       borderBottom: 'none',
-                      backgroundColor: active ? 'rgba(255,255,255,0.95)' : 'transparent',
-                      boxShadow: active ? '0 8px 18px rgba(99,102,241,0.12)' : 'none',
+                      backgroundColor: active
+                        ? (isDarkShell ? alpha('#fff', 0.12) : 'rgba(255,255,255,0.95)')
+                        : 'transparent',
+                      boxShadow: active
+                        ? (isDarkShell ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 18px rgba(99,102,241,0.12)')
+                        : 'none',
                       transition: 'all 0.2s',
                       '&:hover': {
                         color: primaryColor,
-                        bgcolor: 'rgba(255,255,255,0.9)',
+                        bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.9)',
                       },
                     }}
                   >
@@ -497,12 +504,12 @@ export default function MainLayout({ children }) {
                     overflow: 'auto',
                     zIndex: 1300,
                     borderRadius: 3,
-                    border: '1px solid rgba(255,255,255,0.78)',
-                    bgcolor: 'rgba(255,255,255,0.76)',
+                    border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.78)',
+                    bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.97) : 'rgba(255,255,255,0.76)',
                     backdropFilter: 'blur(14px)',
-                    boxShadow: '0 16px 34px rgba(99,102,241,0.15)',
+                    boxShadow: isDarkShell ? '0 16px 40px rgba(0,0,0,0.5)' : '0 16px 34px rgba(99,102,241,0.15)',
                   }}
-                  elevation={muiTheme.palette.mode === 'dark' ? 8 : 3}
+                  elevation={isDarkShell ? 8 : 3}
                 >
                   <List dense>
                     {suggestions.map((suggestion, index) => (
@@ -564,10 +571,10 @@ export default function MainLayout({ children }) {
                 ? nameParts.map((n) => n[0]).join('').slice(0, 2).toUpperCase()
                 : '?'}
             </Avatar>
-            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }} aria-label="Notifications">
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)', border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' } }} aria-label="Notifications">
               <NotificationsIcon />
             </IconButton>
-            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
+            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)', border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
             <Button
@@ -582,9 +589,9 @@ export default function MainLayout({ children }) {
                 minHeight: 40,
                 py: 0.5,
                 borderRadius: 999,
-                bgcolor: 'rgba(255,255,255,0.72)',
-                border: '1px solid rgba(255,255,255,0.8)',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' },
+                bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)',
+                border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)',
+                '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' },
               }}
             >
               {logoutLoading ? 'Signing out...' : 'Sign out'}
@@ -618,13 +625,17 @@ export default function MainLayout({ children }) {
         <Box sx={{
           flex: 1,
           width: '100%',
-          bgcolor: 'rgba(255,255,255,0.38)',
+          bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.55) : 'rgba(255,255,255,0.38)',
           p: { xs: 2, sm: 2.5, md: 3 },
           borderRadius: '24px',
-          border: '1px solid rgba(255,255,255,0.85)',
-          boxShadow: '0 20px 50px rgba(99,102,241,0.11), inset 0 1px 0 rgba(255,255,255,0.9)',
+          border: isDarkShell ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.85)',
+          boxShadow: isDarkShell
+            ? '0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)'
+            : '0 20px 50px rgba(99,102,241,0.11), inset 0 1px 0 rgba(255,255,255,0.9)',
           backdropFilter: 'blur(16px)',
-          backgroundImage: 'linear-gradient(165deg, rgba(255,255,255,0.72) 0%, rgba(252,251,255,0.45) 45%, rgba(255,250,252,0.35) 100%)',
+          backgroundImage: isDarkShell
+            ? `linear-gradient(165deg, ${alpha(muiTheme.palette.background.paper, 0.85)} 0%, ${alpha(muiTheme.palette.background.default, 0.9)} 50%, ${alpha(muiTheme.palette.background.paper, 0.75)} 100%)`
+            : 'linear-gradient(165deg, rgba(255,255,255,0.72) 0%, rgba(252,251,255,0.45) 45%, rgba(255,250,252,0.35) 100%)',
           minHeight: 'calc(100vh - 64px)',
           overflow: 'auto',
         }}>

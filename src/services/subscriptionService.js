@@ -8,7 +8,9 @@ import {
 } from '../utils/subscriptionUtils';
 import {
   buildAssetPricingMap,
+  buildClassificationNodesById,
   buildCustomerOverrideMap,
+  buildProductCodeClassificationMapFromBottles,
   flattenCustomerPricingRowsToLegacyOverrides,
   resolveEffectiveUnitPrice,
   defaultUnitRatesFromAssetPricingTable,
@@ -44,6 +46,7 @@ async function loadPricingMaps(organizationId) {
     { data: overrideRows, error: oErr },
     { data: legacyRows, error: lErr },
     { data: customerRows, error: cErr },
+    clsFirst,
   ] =
     await Promise.all([
       supabase
@@ -58,11 +61,29 @@ async function loadPricingMaps(organizationId) {
         .eq('is_active', true),
       supabase.from('customer_pricing').select('*').eq('organization_id', organizationId),
       supabase.from('customers').select('id, CustomerListID').eq('organization_id', organizationId),
+      supabase
+        .from('asset_classification_nodes')
+        .select('id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
+        .eq('organization_id', organizationId)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
     ]);
   if (aErr) throw aErr;
   if (oErr) throw oErr;
   if (lErr) throw lErr;
   if (cErr) throw cErr;
+  let classificationNodes = clsFirst.data || [];
+  if (clsFirst.error?.code === '42703') {
+    const { data: cls2, error: e2 } = await supabase
+      .from('asset_classification_nodes')
+      .select('id, parent_id, name, sort_order')
+      .eq('organization_id', organizationId)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true });
+    if (!e2) classificationNodes = cls2 || [];
+  } else if (clsFirst.error && clsFirst.error.code !== '42P01') {
+    throw clsFirst.error;
+  }
   const legacyFlat = flattenCustomerPricingRowsToLegacyOverrides(legacyRows || []);
   const customerOverrideMap = buildCustomerOverrideMap({
     legacyPricingOverrides: legacyFlat,
@@ -74,12 +95,15 @@ async function loadPricingMaps(organizationId) {
   const { monthly: defaultMonthly, yearly: defaultYearly } = defaultUnitRatesFromAssetPricingTable(
     assetRows || []
   );
+  const classificationNodesById = buildClassificationNodesById(classificationNodes);
   return {
     customerOverrideMap,
     assetPricingMap,
     defaultMonthly,
     defaultYearly,
     assetTypePricingRows: assetRows || [],
+    classificationNodes,
+    classificationNodesById,
   };
 }
 
@@ -217,6 +241,7 @@ export async function generateInvoice(organizationId, subscriptionId) {
     defaultMonthly,
     defaultYearly,
     assetTypePricingRows,
+    classificationNodesById,
   } = await loadPricingMaps(organizationId);
 
   const { data: orgCustomers, error: custErr } = await supabase
@@ -293,8 +318,12 @@ export async function generateInvoice(organizationId, subscriptionId) {
       customerRow,
       { allCustomers: orgCustomers || [] }
     );
+    const pcClass = buildProductCodeClassificationMapFromBottles(bottleRows || []);
+
     for (const { productCode, count } of groups) {
       if (count <= 0) continue;
+      const pcKey = normalizePricingKey(productCode);
+      const bottleCls = pcKey ? pcClass.get(pcKey) : null;
       const unit = resolveEffectiveUnitPrice({
         row: rowForPricing,
         item: { product_code: productCode },
@@ -302,6 +331,8 @@ export async function generateInvoice(organizationId, subscriptionId) {
         assetPricingMap,
         defaultMonthly,
         defaultYearly,
+        bottleClassificationNodeId: bottleCls || null,
+        classificationNodesById,
       });
       const amount = Math.round(unit * count * 100) / 100;
       const pricingRow = assetPricingMap.get(normalizePricingKey(productCode));
@@ -403,8 +434,8 @@ export async function recordPayment(invoiceId, organizationId, amount, method, r
   return payment;
 }
 
-export async function getEffectivePrice(organizationId, customerId, productCode, billingPeriod) {
-  const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly } =
+export async function getEffectivePrice(organizationId, customerId, productCode, billingPeriod, options = {}) {
+  const { customerOverrideMap, assetPricingMap, defaultMonthly, defaultYearly, classificationNodesById } =
     await loadPricingMaps(organizationId);
   const customer = { CustomerListID: customerId, id: customerId };
   const row = { billing_period: billingPeriod, customer_id: customerId, customer };
@@ -416,6 +447,8 @@ export async function getEffectivePrice(organizationId, customerId, productCode,
     assetPricingMap,
     defaultMonthly,
     defaultYearly,
+    bottleClassificationNodeId: options.bottleClassificationNodeId || null,
+    classificationNodesById,
   });
 }
 

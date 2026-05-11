@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import {
   modifySubscription, cancelSubscription, renewSubscription,
   generateInvoice, getEffectivePrice,
@@ -33,8 +33,8 @@ export default function SubscriptionDetail() {
   const navigate = useNavigate();
   const { organization } = useAuth();
   const ctx = useSubscriptions();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { accent } = useTheme();
+  const primaryColor = resolveAccentToHex(accent);
 
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [newItem, setNewItem] = useState({ product_code: '', quantity: 1, unit_price: '' });

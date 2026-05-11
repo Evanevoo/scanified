@@ -123,6 +123,13 @@ export interface Bottle extends OrganizationEntity {
   maintenance_history?: MaintenanceRecord[];
 }
 
+/** One node in the org’s hierarchical asset / product taxonomy (e.g. INDUSTRIAL → ARGON → BAR125). */
+export interface AssetClassificationNode extends OrganizationEntity {
+  parent_id: string | null;
+  name: string;
+  sort_order: number;
+}
+
 export interface AssetType extends OrganizationEntity {
   name: string;
   description?: string;

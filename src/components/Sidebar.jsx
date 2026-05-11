@@ -4,7 +4,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
-import { useTheme } from '../context/ThemeContext';
+import { alpha, useTheme as useMuiTheme } from '@mui/material/styles';
+import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
 import { PageSearchInput } from './ui/search-input-with-icon';
 import {
@@ -25,9 +26,9 @@ import {
   Inventory as PackageIcon, Calculate as CalculatorIcon, Psychology as BrainIcon,
   ChevronLeft, ChevronRight, Menu as MenuIcon, QrCode as QrCodeIcon, Notifications as NotificationsIcon,
   Assignment as AssignmentIcon,
-  Category as RentalCategoryIcon,
   Link as ProductMapIcon,
-  PriceChange as PriceChangeIcon
+  PriceChange as PriceChangeIcon,
+  AccountTree as AccountTreeIcon,
 } from '@mui/icons-material';
 import { getPrimaryPathsForRole, getDefaultFullMenuExpanded } from '../nav/appNavConfig';
 
@@ -56,8 +57,10 @@ function getDefaultSectionsForRole(role) {
 
 const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
   const { profile, organization } = useAuth();
-  const { organizationColors } = useTheme();
-  const primaryColor = organizationColors?.primary || '#40B5AD';
+  const { organizationColors, accent } = useTheme();
+  const muiTheme = useMuiTheme();
+  const isDarkNav = muiTheme.palette.mode === 'dark';
+  const primaryColor = resolveAccentToHex(accent);
 
   const { can, isOrgAdmin } = usePermissions();
   
@@ -274,6 +277,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       icon: <Inventory />,
       items: [
         { title: 'Bottle Management', subtitle: 'Bottles and assignments', path: '/bottle-management', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Asset Classifications', subtitle: 'TrackAbout-style product tree', path: '/inventory/asset-classifications', icon: <AccountTreeIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Classification tree rates', subtitle: 'Branch & SKU default pricing', path: '/inventory/asset-classifications/pricing', icon: <CalculatorIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Ownership Management', subtitle: 'Who owns which assets', path: '/ownership-management', icon: <BusinessIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Assets', subtitle: 'Full list and filters', path: '/assets', icon: <Inventory />, roles: ['admin', 'user', 'manager'] },
         { title: 'Where bottles are', subtitle: 'By warehouse or customer', path: '/bottle-locations', icon: <PlaceIcon />, roles: ['admin', 'user', 'manager'] },
@@ -286,7 +291,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       title: 'Pricing',
       icon: <PriceChangeIcon />,
       items: [
-        { title: 'Asset Type Pricing', subtitle: 'Default rates per product', path: '/pricing/asset-types', icon: <RentalCategoryIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Customer Pricing', subtitle: 'Overrides & discounts', path: '/pricing/customers', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Tax Regions', subtitle: 'Location tax rates', path: '/pricing/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
       ]
@@ -442,7 +446,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                   height: 40,
                   width: 40,
                   borderRadius: 6,
-                  background: `linear-gradient(135deg, ${organizationColors?.primary || '#40B5AD'} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
+                  background: `linear-gradient(135deg, ${primaryColor} 0%, ${organizationColors?.secondary || '#48C9B0'} 100%)`,
                   border: 1,
                   borderColor: 'divider',
                   display: 'flex',
@@ -524,7 +528,13 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
               <IconButton
                 size="small"
                 onClick={onToggleCollapse}
-                sx={{ color: 'text.secondary', borderRadius: 2, bgcolor: 'rgba(255,255,255,0.72)', border: '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: 'rgba(255,255,255,0.92)' } }}
+                sx={{
+                  color: 'text.secondary',
+                  borderRadius: 2,
+                  bgcolor: isDarkNav ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)',
+                  border: isDarkNav ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)',
+                  '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' },
+                }}
               >
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
               </IconButton>
@@ -576,9 +586,17 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                       py: 1,
                       px: 1.5,
                       borderRadius: 999,
-                      backgroundColor: active ? `${primaryColor}1f` : 'rgba(255,255,255,0.55)',
+                      backgroundColor: active
+                        ? `${primaryColor}1f`
+                        : isDarkNav
+                          ? alpha('#fff', 0.06)
+                          : 'rgba(255,255,255,0.55)',
                       color: active ? primaryColor : 'text.primary',
-                      border: active ? `1px solid ${primaryColor}55` : '1px solid rgba(255,255,255,0.82)',
+                      border: active
+                        ? `1px solid ${primaryColor}55`
+                        : isDarkNav
+                          ? `1px solid ${alpha('#fff', 0.1)}`
+                          : '1px solid rgba(255,255,255,0.82)',
                       boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
                     }}
                   >
@@ -648,7 +666,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         py: 1,
                         minHeight: 32,
                         borderRadius: 999,
-                        '&:hover': { bgcolor: 'rgba(255,255,255,0.76)' },
+                        '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.76)' },
                       }}
                     >
                       <Typography 
@@ -691,13 +709,25 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                           py: 1.1,
                           px: 1.5,
                           borderRadius: 999,
-                          backgroundColor: active ? `${primaryColor}1f` : 'rgba(255,255,255,0.55)',
+                          backgroundColor: active
+                            ? `${primaryColor}1f`
+                            : isDarkNav
+                              ? alpha('#fff', 0.06)
+                              : 'rgba(255,255,255,0.55)',
                           color: active ? primaryColor : 'text.primary',
-                          border: active ? `1px solid ${primaryColor}55` : '1px solid rgba(255,255,255,0.82)',
+                          border: active
+                            ? `1px solid ${primaryColor}55`
+                            : isDarkNav
+                              ? `1px solid ${alpha('#fff', 0.1)}`
+                              : '1px solid rgba(255,255,255,0.82)',
                           boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
                           transition: 'background-color 0.18s, color 0.18s, box-shadow 0.18s',
                           '&:hover': {
-                            backgroundColor: active ? `${primaryColor}2a` : 'rgba(255,255,255,0.78)',
+                            backgroundColor: active
+                              ? `${primaryColor}2a`
+                              : isDarkNav
+                                ? alpha('#fff', 0.1)
+                                : 'rgba(255,255,255,0.78)',
                           },
                           '&.Mui-selected': {
                             backgroundColor: `${primaryColor}1f`,
@@ -768,8 +798,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         {!isCollapsed && profile && (
           <Box sx={{ 
             p: 2,
-            borderTop: '1px solid rgba(255,255,255,0.78)',
-            bgcolor: 'rgba(255,255,255,0.72)',
+            borderTop: isDarkNav ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.78)',
+            bgcolor: isDarkNav ? alpha('#fff', 0.06) : 'rgba(255,255,255,0.72)',
             mt: 'auto'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>

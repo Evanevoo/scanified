@@ -4403,82 +4403,164 @@ export default function ImportApprovals() {
         </Grid>
       </Grid>
 
-      {/* Enhanced Filters and Controls */}
+      {/* Enhanced Filters and Controls — one shared row height (44px = search h-11) so all borders align */}
       <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-        <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-          <PageSearchInput
-            placeholder="Search Records"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onClear={() => setSearch('')}
-            className="min-w-[300px]"
-          />
-          <TextField
-            select
-            size="small"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            inputProps={{ 'aria-label': 'Verification status filter' }}
-            sx={{ minWidth: 120 }}
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          alignItems={{ xs: 'stretch', md: 'flex-start' }}
+          spacing={2}
+          useFlexGap
+        >
+          <Box
+            sx={{
+              flex: '1 1 280px',
+              minWidth: 0,
+              maxWidth: { md: 440 },
+              height: { md: 44 },
+              display: { md: 'flex' },
+              alignItems: { md: 'center' },
+            }}
           >
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="pending">Pending</MenuItem>
-            <MenuItem value="verified">Verified</MenuItem>
-            <MenuItem value="exception">Exceptions</MenuItem>
-            <MenuItem value="investigation">Investigating</MenuItem>
-            <MenuItem value="in_progress">Processing</MenuItem>
-            <MenuItem value="scanned_only">Scanned Only</MenuItem>
-          </TextField>
-          <TextField
-            select
-            size="small"
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            inputProps={{ 'aria-label': 'Location filter' }}
-            sx={{ minWidth: 120 }}
+            <PageSearchInput
+              placeholder="Search Records"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onClear={() => setSearch('')}
+              className="min-w-[300px] !h-11 !min-h-[44px] max-h-[44px] shrink-0"
+            />
+          </Box>
+          <Stack
+            direction="row"
+            alignItems="flex-start"
+            spacing={1.5}
+            flexWrap="wrap"
+            useFlexGap
+            sx={{
+              rowGap: 1,
+              flexShrink: 0,
+              minHeight: { md: 44 },
+              '& > *': { alignSelf: 'flex-start' },
+            }}
           >
-            {getUniqueLocations().map((location) => (
-              <MenuItem key={location} value={location}>
-                {location}
-              </MenuItem>
-            ))}
-          </TextField>
-          <ButtonGroup size="small">
-            <Button
-              variant={viewMode === 'list' ? 'contained' : 'outlined'}
-              onClick={() => setViewMode('list')}
+            <TextField
+              select
+              size="small"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              inputProps={{ 'aria-label': 'Verification status filter' }}
+              sx={{
+                minWidth: 120,
+                m: 0,
+                '& .MuiOutlinedInput-root': {
+                  height: 44,
+                  minHeight: 44,
+                  maxHeight: 44,
+                  alignItems: 'center',
+                  boxSizing: 'border-box',
+                },
+                '& .MuiSelect-select': {
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: '0 !important',
+                  py: 0,
+                  px: 1.25,
+                  lineHeight: 1.25,
+                  boxSizing: 'border-box',
+                },
+              }}
             >
-              List
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="pending">Pending</MenuItem>
+              <MenuItem value="verified">Verified</MenuItem>
+              <MenuItem value="exception">Exceptions</MenuItem>
+              <MenuItem value="investigation">Investigating</MenuItem>
+              <MenuItem value="in_progress">Processing</MenuItem>
+              <MenuItem value="scanned_only">Scanned Only</MenuItem>
+            </TextField>
+            <TextField
+              select
+              size="small"
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+              inputProps={{ 'aria-label': 'Location filter' }}
+              sx={{
+                minWidth: 120,
+                m: 0,
+                '& .MuiOutlinedInput-root': {
+                  height: 44,
+                  minHeight: 44,
+                  maxHeight: 44,
+                  alignItems: 'center',
+                  boxSizing: 'border-box',
+                },
+                '& .MuiSelect-select': {
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: '0 !important',
+                  py: 0,
+                  px: 1.25,
+                  lineHeight: 1.25,
+                  boxSizing: 'border-box',
+                },
+              }}
+            >
+              {getUniqueLocations().map((location) => (
+                <MenuItem key={location} value={location}>
+                  {location}
+                </MenuItem>
+              ))}
+            </TextField>
+            <ButtonGroup
+              size="small"
+              sx={{
+                height: 44,
+                '& .MuiButton-root': {
+                  height: 44,
+                  minHeight: 44,
+                  maxHeight: 44,
+                  boxSizing: 'border-box',
+                  py: 0,
+                },
+              }}
+            >
+              <Button
+                variant={viewMode === 'list' ? 'contained' : 'outlined'}
+                onClick={() => setViewMode('list')}
+              >
+                List
+              </Button>
+              <Button
+                variant={viewMode === 'grid' ? 'contained' : 'outlined'}
+                onClick={() => setViewMode('grid')}
+              >
+                Grid
+              </Button>
+              <Button
+                variant={viewMode === 'timeline' ? 'contained' : 'outlined'}
+                onClick={() => setViewMode('timeline')}
+              >
+                Timeline
+              </Button>
+            </ButtonGroup>
+            <Button
+              size="small"
+              startIcon={<FilterListIcon />}
+              onClick={() => setFilterDialog({ open: true })}
+              sx={{ height: 44, minHeight: 44, maxHeight: 44, boxSizing: 'border-box', textTransform: 'none', py: 0 }}
+            >
+              Advanced Filters
             </Button>
             <Button
-              variant={viewMode === 'grid' ? 'contained' : 'outlined'}
-              onClick={() => setViewMode('grid')}
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={() => setRestoreRejectedDialog({ open: true, orderNumber: '', loading: false })}
+              sx={{ height: 44, minHeight: 44, maxHeight: 44, boxSizing: 'border-box', textTransform: 'none', py: 0 }}
             >
-              Grid
+              Restore rejected scans
             </Button>
-            <Button
-              variant={viewMode === 'timeline' ? 'contained' : 'outlined'}
-              onClick={() => setViewMode('timeline')}
-            >
-              Timeline
-            </Button>
-          </ButtonGroup>
-          <Button
-            size="small"
-            startIcon={<FilterListIcon />}
-            onClick={() => setFilterDialog({ open: true })}
-          >
-            Advanced Filters
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            color="error"
-            onClick={() => setRestoreRejectedDialog({ open: true, orderNumber: '', loading: false })}
-          >
-            Restore rejected scans
-          </Button>
-        </Box>
+          </Stack>
+        </Stack>
       </Paper>
 
       {/* Import Records Header */}

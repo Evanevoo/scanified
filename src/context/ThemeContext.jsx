@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, GlobalStyles } from '@mui/material';
 import { themes, modernTheme } from '../theme/themes';
@@ -8,6 +8,78 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 
 const ThemeContext = createContext();
+
+/** Tailwind-style keys or legacy keys → hex (Scanified defaults where names overlap). */
+const ACCENT_KEY_TO_HEX = {
+  'blue-600': '#40B5AD',
+  'emerald-500': '#48C9B0',
+  'purple-600': '#8B7BA8',
+  'rose-500': '#f43f5e',
+  'amber-500': '#f59e42',
+  'teal-500': '#40B5AD',
+  'cyan-500': '#5FCDC5',
+  'green-500': '#48C9B0',
+  'orange-500': '#f97316',
+  'red-500': '#ef4444',
+  'pink-500': '#ec4899',
+  'indigo-500': '#6366f1',
+  'lime-500': '#84cc16',
+  'violet-600': '#8B7BA8',
+  'slate-500': '#64748b',
+  'sky-500': '#5FCDC5',
+};
+
+function hexToRgb(hex) {
+  let h = String(hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6) return null;
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n)) return null;
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function rgbToHex({ r, g, b }) {
+  const q = (v) =>
+    Math.max(0, Math.min(255, Math.round(v)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${q(r)}${q(g)}${q(b)}`;
+}
+
+function mixHex(a, b, t) {
+  const A = hexToRgb(a);
+  const B = hexToRgb(b);
+  if (!A || !B) return typeof a === 'string' && a.startsWith('#') ? a : '#40B5AD';
+  return rgbToHex({
+    r: A.r + (B.r - A.r) * t,
+    g: A.g + (B.g - A.g) * t,
+    b: A.b + (B.b - A.b) * t,
+  });
+}
+
+function relativeLuminance(hex) {
+  const o = hexToRgb(hex);
+  if (!o) return 0;
+  const srgb = [o.r, o.g, o.b].map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+}
+
+function contrastTextFor(hex) {
+  return relativeLuminance(hex) > 0.45 ? '#1F2937' : '#ffffff';
+}
+
+export function resolveAccentToHex(raw) {
+  if (!raw || typeof raw !== 'string') return '#40B5AD';
+  const t = raw.trim();
+  if (t.startsWith('#')) {
+    if (t.length === 4 || t.length === 7) return t.length === 4 ? `#${t[1]}${t[1]}${t[2]}${t[2]}${t[3]}${t[3]}` : t;
+    return '#40B5AD';
+  }
+  return ACCENT_KEY_TO_HEX[t] || '#40B5AD';
+}
 
 export const useTheme = () => {
   const context = useContext(ThemeContext);
@@ -36,8 +108,12 @@ export const useTheme = () => {
 const globalStylesStatic = {
   '*': {
     boxSizing: 'border-box',
-    transition: 'background-color 0.2s ease-out, color 0.2s ease-out, border-color 0.2s ease-out',
   },
+  'body, .MuiPaper-root, .MuiCard-root, .MuiButton-root, .MuiChip-root, .MuiTextField-root, .MuiOutlinedInput-root':
+    {
+      transition:
+        'background-color 0.2s ease-out, color 0.2s ease-out, border-color 0.2s ease-out, box-shadow 0.2s ease-out',
+    },
   '.MuiTab-root': {
     transition: 'none !important',
     transform: 'none !important',
@@ -80,13 +156,7 @@ const globalStylesStatic = {
     WebkitFontSmoothing: 'antialiased',
     MozOsxFontSmoothing: 'grayscale',
   },
-  a: {
-    textDecoration: 'none',
-    color: 'inherit',
-    '&:hover': {
-      textDecoration: 'underline',
-    },
-  },
+  /* Anchor default color is set in getGlobalStylesForTheme so it follows palette.primary (accent). */
   '@keyframes pulse': {
     '0%': { opacity: 1 },
     '50%': { opacity: 0.5 },
@@ -132,6 +202,7 @@ const globalStylesStatic = {
 const getGlobalStylesForTheme = (theme) => {
   const isDark = theme.palette.mode === 'dark';
   const primary = theme.palette.primary.main;
+  const primaryDark = theme.palette.primary.dark;
   return {
     ...globalStylesStatic,
     body: {
@@ -141,7 +212,18 @@ const getGlobalStylesForTheme = (theme) => {
             background: brandColors.background.gradient,
             backgroundAttachment: 'fixed',
           }
-        : {}),
+        : {
+            backgroundColor: theme.palette.background.default,
+            color: theme.palette.text.primary,
+          }),
+    },
+    a: {
+      textDecoration: 'none',
+      color: primary,
+      '&:hover': {
+        textDecoration: 'underline',
+        color: primaryDark,
+      },
     },
     '::-webkit-scrollbar': {
       width: '8px',
@@ -163,7 +245,9 @@ const getGlobalStylesForTheme = (theme) => {
       outlineOffset: '2px',
     },
     '::selection': {
-      backgroundColor: isDark ? 'rgba(95, 205, 197, 0.35)' : 'rgba(64, 181, 173, 0.25)',
+      backgroundColor: isDark
+        ? `color-mix(in srgb, ${primary} 38%, transparent)`
+        : `color-mix(in srgb, ${primary} 26%, transparent)`,
       color: 'inherit',
     },
   };
@@ -197,104 +281,88 @@ export const ThemeProvider = ({ children }) => {
     return savedMode || (savedDarkMode ? 'dark' : 'light');
   });
   
-  const [accent, setAccent] = useState('#40B5AD'); // Scanified primary teal
+  const [accent, setAccent] = useState('#40B5AD'); // Scanified primary teal (per-user UI accent)
   const [organizationColors, setOrganizationColors] = useState({
     primary: '#40B5AD',
-    secondary: '#48C9B0'
+    secondary: '#48C9B0',
   });
 
-  // Initialize CSS variables on mount
+  // Load per-user appearance from profile (accent + light/dark). Org brand colors stay separate.
   useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.style.setProperty('--primary-color', '#40B5AD');
-      document.documentElement.style.setProperty('--secondary-color', '#48C9B0');
-    }
-  }, []);
-
-  // Load user-specific accent color and organization colors when user changes
-  useEffect(() => {
-    const loadUserAccentColor = async () => {
-      if (user?.id) {
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('theme_accent')
-            .eq('id', user.id)
-            .single();
-
-          if (!error && data?.theme_accent) {
-            // Ensure the accent is a hex color
-            let hexAccent = data.theme_accent;
-            if (!hexAccent.startsWith('#')) {
-              // If it's a color key like 'blue-600', convert it to hex
-              const colorMap = {
-                'blue-600': '#40B5AD',
-                'emerald-500': '#48C9B0',
-                'purple-600': '#8B7BA8',
-                'rose-500': '#f43f5e',
-                'amber-500': '#f59e42',
-                'teal-500': '#40B5AD',
-                'cyan-500': '#5FCDC5',
-                'green-500': '#48C9B0',
-                'orange-500': '#f97316',
-                'red-500': '#ef4444',
-                'pink-500': '#ec4899',
-                'indigo-500': '#6366f1',
-                'lime-500': '#84cc16',
-                'violet-600': '#8B7BA8',
-                'slate-500': '#64748b',
-                'sky-500': '#5FCDC5',
-              };
-              hexAccent = colorMap[hexAccent] || '#40B5AD';
-            }
-            setAccent(hexAccent);
-          } else {
-            // Set default accent if no user-specific color is found
-            setAccent('#40B5AD'); // Scanified primary teal
-          }
-        } catch (error) {
-          logger.error('Error loading user accent color:', error);
-          setAccent('#40B5AD'); // Scanified primary teal
+    const loadUserAppearance = async () => {
+      if (!user?.id) {
+        setAccent('#40B5AD');
+        const savedDark = localStorage.getItem('darkMode') === 'true';
+        setIsDarkMode(savedDark);
+        setMode(savedDark ? 'dark' : 'light');
+        if (typeof document !== 'undefined') {
+          const html = document.documentElement;
+          if (savedDark) html.classList.add('dark');
+          else html.classList.remove('dark');
         }
-      } else {
-        // Set default accent when no user is logged in
-        setAccent('#40B5AD'); // Scanified primary teal
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('theme_accent, theme_mode')
+          .eq('id', user.id)
+          .single();
+
+        if (error) {
+          logger.error('Error loading user appearance:', error);
+          setAccent('#40B5AD');
+          return;
+        }
+
+        if (data?.theme_accent) {
+          setAccent(resolveAccentToHex(data.theme_accent));
+        } else {
+          setAccent('#40B5AD');
+        }
+
+        if (data?.theme_mode === 'dark' || data?.theme_mode === 'light') {
+          const dark = data.theme_mode === 'dark';
+          setMode(data.theme_mode);
+          setIsDarkMode(dark);
+          if (typeof document !== 'undefined') {
+            const html = document.documentElement;
+            if (dark) html.classList.add('dark');
+            else html.classList.remove('dark');
+          }
+        }
+      } catch (err) {
+        logger.error('Error loading user appearance:', err);
+        setAccent('#40B5AD');
       }
     };
 
-    loadUserAccentColor();
+    loadUserAppearance();
   }, [user?.id]);
 
-  // Load organization colors when organization changes
+  // Organization brand colors (e.g. invoices, org setup) — not the same as each user's UI accent.
   useEffect(() => {
     if (organization) {
-      const primary = organization.primary_color || '#40B5AD';
-      const secondary = organization.secondary_color || '#48C9B0';
       setOrganizationColors({
-        primary,
-        secondary
+        primary: organization.primary_color || '#40B5AD',
+        secondary: organization.secondary_color || '#48C9B0',
       });
-      
-      // Set CSS variables for dynamic theming
-      if (typeof document !== 'undefined') {
-        document.documentElement.style.setProperty('--primary-color', primary);
-        document.documentElement.style.setProperty('--secondary-color', secondary);
-      }
     } else {
-      const defaultPrimary = '#40B5AD';
-      const defaultSecondary = '#48C9B0';
       setOrganizationColors({
-        primary: defaultPrimary,
-        secondary: defaultSecondary
+        primary: '#40B5AD',
+        secondary: '#48C9B0',
       });
-      
-      // Set CSS variables for dynamic theming
-      if (typeof document !== 'undefined') {
-        document.documentElement.style.setProperty('--primary-color', defaultPrimary);
-        document.documentElement.style.setProperty('--secondary-color', defaultSecondary);
-      }
     }
   }, [organization]);
+
+  // Tailwind / marketing tokens follow the signed-in user's accent, not org-wide branding.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const primary = resolveAccentToHex(accent);
+    const secondary = organizationColors.secondary || '#48C9B0';
+    document.documentElement.style.setProperty('--primary-color', primary);
+    document.documentElement.style.setProperty('--secondary-color', secondary);
+  }, [accent, organizationColors.secondary]);
 
   useEffect(() => {
     localStorage.setItem('theme', currentTheme);
@@ -340,114 +408,114 @@ export const ThemeProvider = ({ children }) => {
     }
   };
 
-  // Wrapper function to ensure accent is always stored as hex
-  const setAccentColor = (newAccent) => {
-    let hexAccent = newAccent;
-    if (!hexAccent.startsWith('#')) {
-      // If it's a color key like 'blue-600', convert it to hex
-      const colorMap = {
-        'blue-600': '#2563eb',
-        'emerald-500': '#10b981',
-        'purple-600': '#7c3aed',
-        'rose-500': '#f43f5e',
-        'amber-500': '#f59e42',
-        'teal-500': '#14b8a6',
-        'cyan-500': '#06b6d4',
-        'green-500': '#22c55e',
-        'orange-500': '#f97316',
-        'red-500': '#ef4444',
-        'pink-500': '#ec4899',
-        'indigo-500': '#6366f1',
-        'lime-500': '#84cc16',
-        'violet-600': '#a21caf',
-        'slate-500': '#64748b',
-        'sky-500': '#0ea5e9',
-      };
-      hexAccent = colorMap[hexAccent] || '#40B5AD'; // Scanified primary teal
-    }
-    setAccent(hexAccent);
-  };
+  const setAccentColor = useCallback((newAccent) => {
+    setAccent(resolveAccentToHex(newAccent));
+  }, []);
 
-  const getTheme = () => {
+  /** Merge accent into headings, links, and tabs so palette.primary (user accent) is visible in typography. */
+  const mergeAccentAwareComponents = useCallback((base) => {
+    const c = base?.components || {};
+    const typo = c.MuiTypography || {};
+    const typoSo = typeof typo.styleOverrides === 'object' && typo.styleOverrides ? typo.styleOverrides : {};
+    return {
+      ...c,
+      MuiTypography: {
+        ...typo,
+        styleOverrides: {
+          ...typoSo,
+          h4: ({ theme }) => ({ color: theme.palette.primary.main }),
+          h5: ({ theme }) => ({ color: theme.palette.primary.main }),
+          h6: ({ theme }) => ({ color: theme.palette.primary.main }),
+        },
+      },
+      MuiLink: {
+        ...c.MuiLink,
+        defaultProps: {
+          ...(c.MuiLink?.defaultProps || {}),
+          color: 'primary',
+          underline: 'hover',
+        },
+      },
+      MuiTabs: {
+        ...c.MuiTabs,
+        defaultProps: {
+          ...(c.MuiTabs?.defaultProps || {}),
+          textColor: 'primary',
+          indicatorColor: 'primary',
+        },
+      },
+    };
+  }, []);
+
+  const muiTheme = useMemo(() => {
     const baseTheme = themes[currentTheme] || modernTheme;
-    
-    // Ensure accent is always a hex color
-    let hexAccent = accent;
-    if (!hexAccent.startsWith('#')) {
-      // If it's a color key like 'blue-600', convert it to hex
-      const colorMap = {
-        'blue-600': '#40B5AD', // Scanified primary teal
-        'emerald-500': '#48C9B0', // Scanified secondary turquoise
-        'purple-600': '#8B7BA8', // Scanified purple accent
-        'rose-500': '#f43f5e',
-        'amber-500': '#f59e42',
-        'teal-500': '#40B5AD', // Scanified primary teal
-        'cyan-500': '#5FCDC5', // Scanified light teal
-        'green-500': '#48C9B0', // Scanified secondary turquoise
-        'orange-500': '#f97316',
-        'red-500': '#ef4444',
-        'pink-500': '#ec4899',
-        'indigo-500': '#6366f1',
-        'lime-500': '#84cc16',
-        'violet-600': '#8B7BA8', // Scanified purple accent
-        'slate-500': '#64748b',
-        'sky-500': '#5FCDC5', // Scanified light teal
-      };
-      hexAccent = colorMap[hexAccent] || '#40B5AD'; // Scanified primary teal
-    }
-    
-    // Apply dark mode — MUI-style layered surfaces (softer than pure black / pure white)
+    const hexAccent = resolveAccentToHex(accent);
+    const primaryMain = isDarkMode ? mixHex(hexAccent, '#ffffff', 0.12) : hexAccent;
+    const orgSecondary = organizationColors.secondary || '#48C9B0';
+
+    const primaryPalette = {
+      ...baseTheme.palette.primary,
+      main: primaryMain,
+      light: mixHex(primaryMain, '#ffffff', 0.32),
+      dark: mixHex(primaryMain, '#000000', 0.22),
+      contrastText: contrastTextFor(primaryMain),
+    };
+
+    const secondaryPalette = {
+      ...baseTheme.palette.secondary,
+      main: orgSecondary,
+      light: mixHex(orgSecondary, '#ffffff', 0.28),
+      dark: mixHex(orgSecondary, '#000000', 0.2),
+      contrastText: contrastTextFor(orgSecondary),
+    };
+
     if (isDarkMode) {
       return createTheme({
         ...baseTheme,
         palette: {
           ...baseTheme.palette,
           mode: 'dark',
-          primary: {
-            ...baseTheme.palette.primary,
-            main: organizationColors.primary,
-          },
-          secondary: {
-            ...baseTheme.palette.secondary,
-            main: organizationColors.secondary,
-          },
+          primary: primaryPalette,
+          secondary: secondaryPalette,
           background: {
-            default: '#121212',
-            paper: '#1e1e1e',
+            default: '#0f1419',
+            paper: '#1a2332',
           },
           text: {
-            primary: 'rgba(255, 255, 255, 0.87)',
-            secondary: 'rgba(255, 255, 255, 0.6)',
+            primary: 'rgba(255, 255, 255, 0.9)',
+            secondary: 'rgba(226, 232, 240, 0.72)',
             disabled: 'rgba(255, 255, 255, 0.38)',
           },
-          divider: 'rgba(255, 255, 255, 0.12)',
+          divider: 'rgba(148, 163, 184, 0.16)',
           action: {
             active: 'rgba(255, 255, 255, 0.56)',
             hover: 'rgba(255, 255, 255, 0.08)',
-            selected: 'rgba(255, 255, 255, 0.16)',
+            selected: 'rgba(95, 205, 197, 0.16)',
             disabled: 'rgba(255, 255, 255, 0.3)',
             disabledBackground: 'rgba(255, 255, 255, 0.12)',
           },
+          info: {
+            ...baseTheme.palette.info,
+            main: mixHex(primaryMain, '#93c5fd', 0.35),
+          },
         },
+        components: mergeAccentAwareComponents(baseTheme),
       });
     }
-    
-    // Apply accent color to light theme
+
     return createTheme({
       ...baseTheme,
       palette: {
         ...baseTheme.palette,
-        primary: {
-          ...baseTheme.palette.primary,
-          main: organizationColors.primary,
-        },
-        secondary: {
-          ...baseTheme.palette.secondary,
-          main: organizationColors.secondary,
-        },
+        mode: 'light',
+        primary: primaryPalette,
+        secondary: secondaryPalette,
       },
+      components: mergeAccentAwareComponents(baseTheme),
     });
-  };
+  }, [currentTheme, isDarkMode, accent, organizationColors.secondary, mergeAccentAwareComponents]);
+
+  const getTheme = useCallback(() => muiTheme, [muiTheme]);
 
   const contextValue = {
     currentTheme,
@@ -465,7 +533,7 @@ export const ThemeProvider = ({ children }) => {
 
   return (
     <ThemeContext.Provider value={contextValue}>
-      <MuiThemeProvider theme={getTheme()}>
+      <MuiThemeProvider theme={muiTheme}>
         <CssBaseline />
         <GlobalStyles styles={(theme) => getGlobalStylesForTheme(theme)} />
         {children}
