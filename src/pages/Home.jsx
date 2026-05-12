@@ -40,7 +40,6 @@ import { commonStyles, brandColors } from '../styles/theme';
 
 const glassSurface = {
   ...commonStyles.card,
-  borderRadius: 24,
 };
 
 const QUICK_ACTION_PALETTE = {
@@ -232,7 +231,7 @@ export default function Home() {
   if (loading) {
     return (
       <Box sx={{ p: 4 }}>
-        <LinearProgress sx={{ borderRadius: 999, height: 6 }} />
+        <LinearProgress sx={{ borderRadius: '4px', height: 6 }} />
         <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
           Loading dashboard…
         </Typography>
@@ -242,7 +241,7 @@ export default function Home() {
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, backgroundColor: 'transparent', minHeight: '100%' }}>
-      <Card elevation={0} sx={{ ...glassSurface, p: { xs: 2.5, sm: 3 }, mb: 3 }}>
+      <Card elevation={0} sx={{ ...glassSurface, borderRadius: 0, p: { xs: 2.5, sm: 3 }, mb: 3 }}>
         <Grid container spacing={3} alignItems="center">
           <Grid item xs={12} md={7}>
             <Stack direction="row" spacing={2.5} alignItems="center">
@@ -282,7 +281,7 @@ export default function Home() {
           <Grid item xs={12} md={5}>
             <Box
               sx={{
-                borderRadius: 22,
+                borderRadius: 0,
                 p: 2.5,
                 background: 'linear-gradient(160deg, rgba(255,255,255,0.95) 0%, rgba(244,242,255,0.85) 100%)',
                 border: '1px solid rgba(255,255,255,0.9)',
@@ -331,7 +330,7 @@ export default function Home() {
             <IconButton
               onClick={() => subCtx.refresh()}
               sx={{
-                borderRadius: 3,
+                borderRadius: 0,
                 width: 44,
                 height: 44,
                 border: '1px solid rgba(15, 23, 42, 0.08)',
@@ -347,7 +346,7 @@ export default function Home() {
             startIcon={<AddIcon />}
             onClick={() => navigate('/customers')}
             sx={{
-              borderRadius: 999,
+              borderRadius: 0,
               px: 2.75,
               py: 1.25,
               textTransform: 'none',
@@ -372,6 +371,7 @@ export default function Home() {
             onClick={() => navigate('/inventory')}
             sx={{
               ...glassSurface,
+              borderRadius: 0,
               height: '100%',
               cursor: 'pointer',
               p: 2.5,
@@ -397,7 +397,7 @@ export default function Home() {
                 sx={{
                   width: 48,
                   height: 48,
-                  borderRadius: 16,
+                  borderRadius: 0,
                   bgcolor: `${primaryColor}18`,
                   color: primaryColor,
                   display: 'flex',
@@ -420,7 +420,7 @@ export default function Home() {
           <Card
             elevation={0}
             sx={{
-              borderRadius: 24,
+              borderRadius: 0,
               minHeight: 200,
               p: 2.75,
               cursor: 'pointer',
@@ -453,7 +453,7 @@ export default function Home() {
                 startIcon={<Inventory />}
                 sx={{
                   alignSelf: 'flex-start',
-                  borderRadius: 999,
+                  borderRadius: 0,
                   textTransform: 'none',
                   fontWeight: 800,
                   px: 2.5,
@@ -478,6 +478,7 @@ export default function Home() {
               elevation={0}
               sx={{
                 ...glassSurface,
+                borderRadius: 0,
                 height: '100%',
                 cursor: 'pointer',
               }}
@@ -496,7 +497,7 @@ export default function Home() {
                       bgcolor: card.color || primaryColor,
                       width: 40,
                       height: 40,
-                      borderRadius: 14,
+                      borderRadius: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -520,7 +521,7 @@ export default function Home() {
         <Grid item xs={12} md={5}>
           <Card
             elevation={0}
-            sx={{ ...glassSurface, p: 2.5, cursor: 'pointer', height: '100%' }}
+            sx={{ ...glassSurface, borderRadius: 0, p: 2.5, cursor: 'pointer', height: '100%' }}
             onClick={() => navigate('/import-approvals')}
           >
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
@@ -543,7 +544,7 @@ export default function Home() {
           </Card>
         </Grid>
         <Grid item xs={12} md={7}>
-          <Card elevation={0} sx={{ ...glassSurface, p: { xs: 2.25, sm: 2.75 } }}>
+          <Card elevation={0} sx={{ ...glassSurface, borderRadius: 0, p: { xs: 2.25, sm: 2.75 } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
               <Box>
                 <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: '-0.01em' }}>
@@ -557,7 +558,7 @@ export default function Home() {
                 label={`${quickActions.length} shortcut${quickActions.length === 1 ? '' : 's'}`}
                 size="small"
                 sx={{
-                  borderRadius: 999,
+                  borderRadius: 0,
                   fontWeight: 700,
                   bgcolor: 'rgba(99,102,241,0.10)',
                   color: '#4338CA',
@@ -590,7 +591,7 @@ export default function Home() {
                         gap: 1.5,
                         px: 1.75,
                         py: 1.5,
-                        borderRadius: 18,
+                        borderRadius: 0,
                         cursor: 'pointer',
                         userSelect: 'none',
                         background: `linear-gradient(140deg, rgba(255,255,255,0.92) 0%, ${palette.base}10 100%)`,
@@ -618,7 +619,7 @@ export default function Home() {
                           flexShrink: 0,
                           width: 40,
                           height: 40,
-                          borderRadius: 14,
+                          borderRadius: 0,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',

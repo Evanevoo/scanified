@@ -1,6 +1,14 @@
 import logger from './logger';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const CUSTOMER_ROW_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const UUID_RE = CUSTOMER_ROW_UUID_RE;
+
+/** True if value looks like `customers.id` (Postgres uuid), not CustomerListID / numeric import PK. */
+export function isCustomerRowUuid(value) {
+  return UUID_RE.test(String(value || '').trim());
+}
 
 // Simple per-session cache so repeated assignments don't hammer the DB.
 const memo = new Map();
@@ -28,7 +36,7 @@ export function clearResolveCustomerListIdMemo() {
 
 /**
  * Resolve any customer hint (CustomerListID, customers.id UUID, or display name)
- * to `{ customerListId, name }` for a given organization.
+ * to `{ id, customerListId, name }` for a given organization (`id` = `customers.id` for RPCs that require uuid).
  *
  * Returns null when we cannot confidently resolve so callers can decide what to do.
  */
@@ -41,9 +49,18 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
   if (!raw) return null;
 
   const save = (row) => {
-    const out = row?.CustomerListID
-      ? { customerListId: row.CustomerListID, name: row.name || raw }
-      : null;
+    if (!row?.id && (row?.CustomerListID == null || String(row.CustomerListID).trim() === '')) {
+      memo.set(key, null);
+      return null;
+    }
+    const listRaw = row?.CustomerListID;
+    const customerListId =
+      listRaw != null && String(listRaw).trim() !== '' ? String(listRaw).trim() : null;
+    const out = {
+      id: row.id ?? null,
+      customerListId,
+      name: row.name || raw,
+    };
     memo.set(key, out);
     return out;
   };
@@ -52,7 +69,7 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
     if (UUID_RE.test(raw)) {
       const { data } = await supabase
         .from('customers')
-        .select('CustomerListID, name')
+        .select('id, CustomerListID, name')
         .eq('organization_id', organizationId)
         .eq('id', raw)
         .maybeSingle();
@@ -62,7 +79,7 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
     {
       const { data } = await supabase
         .from('customers')
-        .select('CustomerListID, name')
+        .select('id, CustomerListID, name')
         .eq('organization_id', organizationId)
         .eq('CustomerListID', raw)
         .maybeSingle();
@@ -72,7 +89,7 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
     {
       const { data } = await supabase
         .from('customers')
-        .select('CustomerListID, name')
+        .select('id, CustomerListID, name')
         .eq('organization_id', organizationId)
         .eq('name', raw)
         .maybeSingle();
@@ -82,7 +99,7 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
     {
       const { data } = await supabase
         .from('customers')
-        .select('CustomerListID, name')
+        .select('id, CustomerListID, name')
         .eq('organization_id', organizationId)
         .ilike('name', raw)
         .limit(1);

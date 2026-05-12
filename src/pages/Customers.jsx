@@ -425,7 +425,11 @@ function Customers({ profile }) {
     setPage(1); // Reset to first page when sorting
   };
 
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (!name) return;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -1191,9 +1195,10 @@ function Customers({ profile }) {
                 <InputLabel>Type</InputLabel>
                 <Select
                   label="Type"
-                  name="customer_type"
                   value={form.customer_type}
-                  onChange={handleChange}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, customer_type: e.target.value }))
+                  }
                 >
                   <MenuItem value="CUSTOMER">CUSTOMER</MenuItem>
                   <MenuItem value="BRANCH">BRANCH (under parent)</MenuItem>
@@ -1204,9 +1209,14 @@ function Customers({ profile }) {
                 options={parentOptions}
                 filterOptions={filterParentCustomerOptions}
                 getOptionLabel={(opt) => (opt && (opt.name || opt.CustomerListID || '')) || ''}
-                value={parentOptions.find(o => o.id === form.parent_customer_id) || null}
+                value={
+                  parentOptions.find(
+                    (o) => String(o?.id ?? '') === String(form.parent_customer_id ?? '')
+                  ) || null
+                }
                 onChange={(_, v) => {
-                  const pid = v?.id ?? null;
+                  const pid =
+                    v?.id != null && String(v.id).trim() !== '' ? String(v.id).trim() : null;
                   setForm((prev) => ({
                     ...prev,
                     parent_customer_id: pid,
@@ -1220,7 +1230,9 @@ function Customers({ profile }) {
                 renderInput={(params) => (
                   <TextField {...params} label="Under (parent customer)" placeholder="Search name or customer ID…" margin="normal" fullWidth />
                 )}
-                isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+                isOptionEqualToValue={(a, b) =>
+                  String(a?.id ?? '') === String(b?.id ?? '')
+                }
                 autoHighlight
                 openOnFocus
                 selectOnFocus

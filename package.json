@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "expo:mobile": "npm --prefix gas-cylinder-mobile run start",
     "dev:netlify": "netlify dev --offline",
     "build": "vite build",
     "lint": "eslint netlify --ext js --report-unused-disable-directives --max-warnings 0",

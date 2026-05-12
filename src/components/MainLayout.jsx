@@ -357,7 +357,7 @@ export default function MainLayout({ children }) {
               sx={{
                 height: 40,
                 width: 40,
-                borderRadius: 2,
+                borderRadius: '8px',
                 background: organization?.logo_url ? 'transparent' : primaryColor,
                 display: 'flex',
                 alignItems: 'center',
@@ -403,7 +403,7 @@ export default function MainLayout({ children }) {
                     letterSpacing: '0.06em',
                     fontSize: '0.62rem',
                     height: 26,
-                    borderRadius: 999,
+                    borderRadius: '8px',
                     bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(139, 123, 168, 0.14)',
                     color: isDarkShell ? 'text.secondary' : '#57496f',
                     border: isDarkShell ? `1px solid ${alpha('#fff', 0.14)}` : '1px solid rgba(139, 123, 168, 0.32)',
@@ -447,7 +447,7 @@ export default function MainLayout({ children }) {
                       px: 2,
                       py: 0,
                       minHeight: 40,
-                      borderRadius: 999,
+                      borderRadius: '8px',
                       borderBottom: 'none',
                       backgroundColor: active
                         ? (isDarkShell ? alpha('#fff', 0.12) : 'rgba(255,255,255,0.95)')
@@ -503,7 +503,7 @@ export default function MainLayout({ children }) {
                     maxHeight: 400,
                     overflow: 'auto',
                     zIndex: 1300,
-                    borderRadius: 3,
+                    borderRadius: '12px',
                     border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.78)',
                     bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.97) : 'rgba(255,255,255,0.76)',
                     backdropFilter: 'blur(14px)',
@@ -588,7 +588,7 @@ export default function MainLayout({ children }) {
                 color: 'text.primary',
                 minHeight: 40,
                 py: 0.5,
-                borderRadius: 999,
+                borderRadius: '8px',
                 bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)',
                 border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)',
                 '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' },
@@ -627,7 +627,7 @@ export default function MainLayout({ children }) {
           width: '100%',
           bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.55) : 'rgba(255,255,255,0.38)',
           p: { xs: 2, sm: 2.5, md: 3 },
-          borderRadius: '24px',
+          borderRadius: 0,
           border: isDarkShell ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.85)',
           boxShadow: isDarkShell
             ? '0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)'

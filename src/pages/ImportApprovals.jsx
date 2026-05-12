@@ -3139,7 +3139,7 @@ export default function ImportApprovals() {
             const { data: bottleRow } = await supabase
               .from('bottles')
               .select(
-                'id, barcode_number, product_code, category, rental_class_id, rental_class_key, description, type, location'
+                'id, barcode_number, product_code, category, description, type, location'
               )
               .eq('barcode_number', scan.cylinder_barcode)
               .eq('organization_id', organization.id)
@@ -3410,7 +3410,7 @@ export default function ImportApprovals() {
             const { data: bottleRow } = await supabase
               .from('bottles')
               .select(
-                'id, barcode_number, product_code, category, rental_class_id, rental_class_key, description, type, location'
+                'id, barcode_number, product_code, category, description, type, location'
               )
               .eq('barcode_number', scan.cylinder_barcode)
               .eq('organization_id', organization.id)
@@ -7510,6 +7510,8 @@ return (
     } catch (error) {
       logger.error('Error assigning bottles to customer:', error);
       setError('Failed to assign bottles: ' + error.message);
+      // Propagate so approve/verify callers do not mark the order done while bottles were never assigned.
+      throw error;
     }
   }
 

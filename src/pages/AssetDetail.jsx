@@ -107,6 +107,66 @@ const modeIndicatesDeliveryForStatus = (record) => {
   return mode === 'SHIP' || mode === 'DELIVERY' || mode === 'OUT' || record?.history_type === 'rental_start';
 };
 
+const timelineSortMs = (record) => {
+  const t = new Date(record?.created_at ?? 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+};
+
+/** Rows that are not scan/rental/audit workflow — skip when inferring current assignment/status from history. */
+const isSyntheticTimelineNoise = (record) => {
+  if (!record) return true;
+  if (record.history_type === 'record_update' || record.history_type === 'creation') return true;
+  if (record.id === 'bottle_last_updated' || record.id === 'bottle_created') return true;
+  return false;
+};
+
+/**
+ * Replay decisive events oldest → newest so a RETURN after a DELIVERY on the same day wins (newest-first list alone does not).
+ */
+const replayBottleStateFromTimeline = (timelineAsc) => {
+  let assignedCustomerId = '';
+  let customerName = '';
+  let status = '';
+
+  for (const record of timelineAsc) {
+    if (modeIndicatesFill(record)) {
+      assignedCustomerId = '';
+      customerName = '';
+      status = 'filled';
+      continue;
+    }
+    if (modeIndicatesReturn(record)) {
+      assignedCustomerId = '';
+      customerName = '';
+      status = 'empty';
+      continue;
+    }
+    const auditCust = auditBottleUpdateCustomerAssignment(record);
+    if (auditCust) {
+      assignedCustomerId = auditCust.assignedCustomerId;
+      customerName = auditCust.customerName;
+      const st = auditBottleUpdateDerivedDisplayStatus(record);
+      if (st) status = st;
+      continue;
+    }
+    const auditSt = auditBottleUpdateDerivedDisplayStatus(record);
+    if (auditSt != null) {
+      status = auditSt;
+      continue;
+    }
+    if (modeIndicatesDelivery(record)) {
+      const cid = String(record?.customer_id || record?.assigned_customer || '').trim();
+      const cname = String(record?.customer_name || '').trim();
+      if (cid || cname) {
+        assignedCustomerId = cid;
+        customerName = cname;
+        status = 'rented';
+      }
+    }
+  }
+  return { assignedCustomerId, customerName, status };
+};
+
 /**
  * Manual edits write audit_logs BOTTLE_UPDATE with field_changes; scan-only inference must not skip these,
  * otherwise an old RETURN row wins and the Status chip shows Empty despite empty→rented in the audit.
@@ -254,29 +314,43 @@ export default function AssetDetail() {
 
   const effectiveCustomerAssignment = React.useMemo(() => {
     const fallback = {
-      assignedCustomerId: String(asset?.assigned_customer || asset?.customer_id || '').trim(),
+      assignedCustomerId: String(
+        asset?.assigned_customer || asset?.customer_id || asset?.customer_uuid || ''
+      ).trim(),
       customerName: String(asset?.customer_name || '').trim(),
-      sourceAction: 'fallback'
+      sourceAction: 'fallback',
     };
     if (!movementHistory.length) return fallback;
 
-    // Movement history is sorted newest-first; first decisive movement wins.
-    for (const record of movementHistory) {
-      if (modeIndicatesReturn(record) || modeIndicatesFill(record)) {
-        return { assignedCustomerId: '', customerName: '', sourceAction: 'cleared_by_return_or_fill' };
-      }
-      const auditCust = auditBottleUpdateCustomerAssignment(record);
-      if (auditCust) return auditCust;
-      if (modeIndicatesDelivery(record)) {
-        const customerId = String(record?.customer_id || record?.assigned_customer || '').trim();
-        const customerName = String(record?.customer_name || '').trim();
-        if (customerId || customerName) {
-          return { assignedCustomerId: customerId, customerName, sourceAction: 'set_by_delivery' };
-        }
-      }
+    const timelineAsc = movementHistory
+      .filter((r) => !isSyntheticTimelineNoise(r))
+      .sort((a, b) => {
+        const d = timelineSortMs(a) - timelineSortMs(b);
+        if (d !== 0) return d;
+        return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+      });
+
+    const replayed = replayBottleStateFromTimeline(timelineAsc);
+    const sameAsDb =
+      String(replayed.assignedCustomerId || '') === String(fallback.assignedCustomerId || '') &&
+      String(replayed.customerName || '') === String(fallback.customerName || '');
+    if (sameAsDb) return fallback;
+
+    if (!replayed.assignedCustomerId && !replayed.customerName) {
+      return { assignedCustomerId: '', customerName: '', sourceAction: 'replay_timeline_cleared' };
     }
-    return fallback;
-  }, [movementHistory, asset?.assigned_customer, asset?.customer_id, asset?.customer_name]);
+    return {
+      assignedCustomerId: replayed.assignedCustomerId,
+      customerName: replayed.customerName,
+      sourceAction: 'replay_timeline_delivery_or_audit',
+    };
+  }, [
+    movementHistory,
+    asset?.assigned_customer,
+    asset?.customer_id,
+    asset?.customer_uuid,
+    asset?.customer_name,
+  ]);
 
   const effectiveAssignedCustomerId = effectiveCustomerAssignment.assignedCustomerId;
   const effectiveAssignedCustomerName = effectiveCustomerAssignment.customerName;
@@ -286,13 +360,17 @@ export default function AssetDetail() {
   const effectiveStatus = React.useMemo(() => {
     const fallback = normalizeStatus(asset?.status);
     if (!movementHistory.length) return fallback;
-    for (const record of movementHistory) {
-      if (modeIndicatesFill(record)) return 'filled';
-      if (modeIndicatesReturn(record)) return 'empty';
-      if (modeIndicatesDeliveryForStatus(record)) return 'rented';
-      const auditDisp = auditBottleUpdateDerivedDisplayStatus(record);
-      if (auditDisp != null) return auditDisp;
-    }
+
+    const timelineAsc = movementHistory
+      .filter((r) => !isSyntheticTimelineNoise(r))
+      .sort((a, b) => {
+        const d = timelineSortMs(a) - timelineSortMs(b);
+        if (d !== 0) return d;
+        return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+      });
+
+    const replayed = replayBottleStateFromTimeline(timelineAsc);
+    if (replayed.status) return normalizeStatus(replayed.status);
     return fallback;
   }, [movementHistory, asset?.status]);
 
@@ -1313,14 +1391,28 @@ export default function AssetDetail() {
                     action = 'Locate Full';
                   } else if (recordMode === 'CREATE' || record.action === 'Add New Asset' || record.history_type === 'creation') {
                     action = 'Add New Asset';
+                  } else if (record.history_type === 'record_update') {
+                    action = record.action || 'Asset record updated';
                   } else {
                     action = recordMode || record.action || 'Scan';
                   }
                   
                   // Determine resulting location (RNB still shows order customer — that is who the return was billed to on the order, not proof of an open rental row)
                   let resultingLocation = '';
-                  const custIdForDisplay = record.customer_id || record.assigned_customer || '';
-                  const custNameForDisplay = record.customer_name || '';
+                  const isSyntheticBottleStamp =
+                    record.history_type === 'record_update' &&
+                    (record.id === 'bottle_last_updated' || String(record?.action || '').includes('Asset record updated'));
+                  const custIdForDisplay =
+                    record.customer_id ||
+                    record.assigned_customer ||
+                    (isSyntheticBottleStamp
+                      ? asset?.customer_uuid || asset?.customer_id || asset?.assigned_customer
+                      : '') ||
+                    '';
+                  const custNameForDisplay =
+                    record.customer_name ||
+                    (isSyntheticBottleStamp ? asset?.customer_name : '') ||
+                    '';
                   if (custNameForDisplay || custIdForDisplay) {
                     const base = custNameForDisplay
                       ? `Customer: ${custNameForDisplay}${custIdForDisplay ? ` (${custIdForDisplay})` : ''}`

@@ -76,10 +76,7 @@ export async function getUnanimousShipScanCustomer(
   clearVerifyScanCustomerMemo();
 
   const scanByNorm = new Map();
-  (bottleScanRows || []).forEach((scan) => {
-    const modeUpper = (scan.mode || '').toString().toUpperCase();
-    if (modeUpper !== 'SHIP' && modeUpper !== 'DELIVERY') return;
-    const bc = scan.bottle_barcode;
+  const registerShipScan = (scan, bc) => {
     if (!bc) return;
     const norm = normalizeBarcode(bc);
     if (!norm) return;
@@ -92,6 +89,12 @@ export async function getUnanimousShipScanCustomer(
         customer_name: scan.customer_name,
       });
     }
+  };
+  (bottleScanRows || []).forEach((scan) => {
+    const modeUpper = (scan.mode || '').toString().toUpperCase();
+    if (modeUpper !== 'SHIP' && modeUpper !== 'DELIVERY') return;
+    registerShipScan(scan, scan.bottle_barcode);
+    registerShipScan(scan, scan.cylinder_barcode);
   });
 
   const resolutions = [];
