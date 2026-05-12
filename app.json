@@ -24,14 +24,6 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow Scanified to access your camera to scan asset barcodes and manage your organization's inventory with enterprise-grade precision."
-        }
-      ]
-    ]
+    }
   }
 } 
