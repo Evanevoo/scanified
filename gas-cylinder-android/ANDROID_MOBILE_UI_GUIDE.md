@@ -2,6 +2,8 @@
 
 This guide covers the mobile-optimized UI components for the React Native Android app.
 
+**Related:** For information architecture, navigation, color roles, typography scale, and per-screen design rules, see [`ANDROID_APP_DESIGN_SPEC.md`](./ANDROID_APP_DESIGN_SPEC.md). Token source of truth: `context/ThemeContext.tsx`.
+
 ## Overview
 
 The mobile UI system provides:
