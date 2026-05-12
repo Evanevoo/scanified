@@ -3,6 +3,7 @@ import {
   clearRentalsBottleLinksForBottleIds,
   clearAllRentalsBottleLinksForOrg,
 } from '../utils/bottleDeleteHelpers';
+import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 
 import React, { useState, useEffect, useMemo } from 'react';
 
@@ -741,17 +742,14 @@ const BottleManagement = () => {
                 else if (city.includes('PRINCE GEORGE') || city.includes('PRINCE_GEORGE')) location = 'PRINCE_GEORGE';
                 else if (city.includes('SASKATOON')) location = 'SASKATOON';
                 
-                customersToCreate.push({
-
-                  CustomerListID: customerId,
-
-                  name: customerName.trim(),
-
-                  location: location,
-
-                  organization_id: organization.id
-
-                });
+                customersToCreate.push(
+                  finalizeCustomerBranchParentFields({
+                    CustomerListID: customerId,
+                    name: customerName.trim(),
+                    location: location,
+                    organization_id: organization.id,
+                  })
+                );
 
               }
 
@@ -2085,15 +2083,13 @@ const BottleManagement = () => {
 
           // Create customers
 
-          const customersToCreate = missingCustomers.map(customer => ({
-
-            CustomerListID: customer.CustomerListID,
-
-            name: customer.name,
-
-            organization_id: organization.id
-
-          }));
+          const customersToCreate = missingCustomers.map((customer) =>
+            finalizeCustomerBranchParentFields({
+              CustomerListID: customer.CustomerListID,
+              name: customer.name,
+              organization_id: organization.id,
+            })
+          );
 
 
 

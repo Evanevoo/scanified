@@ -60,7 +60,7 @@ function mergedMovementToLogRows(asset, merged) {
     else if (ht === 'exception') typeLabel = row.action || 'EXCEPTION';
     else if (ht === 'audit') typeLabel = row.action || 'AUDIT';
     else if (ht === 'creation') typeLabel = 'Add New Asset';
-    else if (ht === 'record_update') typeLabel = 'UPDATE';
+    else if (ht === 'record_update') typeLabel = row.action || 'Asset record updated';
     else if (ht === 'cylinder_scan') typeLabel = mode || 'CYLINDER_SCAN';
     else if (ht === 'bottle_scan') typeLabel = mode || 'SCAN';
 

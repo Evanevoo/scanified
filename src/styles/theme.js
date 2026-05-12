@@ -27,7 +27,7 @@ export const brandColors = {
 export const commonStyles = {
   // Cards
   card: {
-    borderRadius: 18,
+    borderRadius: 12,
     background: 'rgba(255, 255, 255, 0.74)',
     backdropFilter: 'blur(14px)',
     border: '1px solid rgba(255, 255, 255, 0.75)',
@@ -42,7 +42,7 @@ export const commonStyles = {
 
   // Buttons
   primaryButton: {
-    borderRadius: 999,
+    borderRadius: 8,
     textTransform: 'none',
     fontWeight: 700,
     padding: '10px 22px',
@@ -62,7 +62,7 @@ export const commonStyles = {
   },
 
   secondaryButton: {
-    borderRadius: 999,
+    borderRadius: 8,
     textTransform: 'none',
     fontWeight: 600,
     padding: '10px 20px',
@@ -88,7 +88,7 @@ export const commonStyles = {
   
   // Tables
   tableContainer: {
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
     border: '1px solid rgba(255,255,255,0.82)',
     boxShadow: '0 10px 28px rgba(123, 97, 255, 0.08), 0 3px 10px rgba(15, 23, 42, 0.05)',
@@ -108,7 +108,7 @@ export const commonStyles = {
     padding: 24,
     background: 'rgba(255, 255, 255, 0.74)',
     backdropFilter: 'blur(14px)',
-    borderRadius: 18,
+    borderRadius: 12,
     border: '1px solid rgba(255, 255, 255, 0.75)',
     boxShadow: '0 10px 28px rgba(123, 97, 255, 0.08), 0 3px 10px rgba(15, 23, 42, 0.05)'
   },
@@ -247,7 +247,7 @@ export const theme = createTheme({
   },
   
   shape: {
-    borderRadius: 18
+    borderRadius: 8
   },
   
   components: {
@@ -257,7 +257,7 @@ export const theme = createTheme({
       },
       styleOverrides: {
         root: ({ ownerState }) => ({
-          borderRadius: ownerState.variant === 'text' ? 12 : 999,
+          borderRadius: 8,
           textTransform: 'none',
           fontWeight: 700,
           letterSpacing: '0.01em',
@@ -332,7 +332,7 @@ export const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 18,
+          borderRadius: 12,
           background: 'rgba(255, 255, 255, 0.74)',
           backdropFilter: 'blur(14px)',
           border: '1px solid rgba(255, 255, 255, 0.75)',
@@ -345,7 +345,7 @@ export const theme = createTheme({
     MuiPaper: {
       styleOverrides: {
         root: {
-          borderRadius: 18,
+          borderRadius: 12,
           backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(248,248,255,0.9) 100%)',
           border: '1px solid rgba(255, 255, 255, 0.85)',
           boxShadow: '0 12px 30px rgba(99, 102, 241, 0.08), 0 3px 10px rgba(15, 23, 42, 0.05)'
@@ -368,7 +368,7 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiOutlinedInput-root': {
-            borderRadius: 14,
+            borderRadius: 8,
             backgroundColor: 'rgba(255, 255, 255, 0.75)',
             backdropFilter: 'blur(8px)'
           }
@@ -379,7 +379,7 @@ export const theme = createTheme({
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 8,
           fontWeight: 600
         }
       }
@@ -388,7 +388,7 @@ export const theme = createTheme({
     MuiTableContainer: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
+          borderRadius: 12,
           overflow: 'hidden',
           border: '1px solid rgba(255,255,255,0.8)',
           boxShadow: '0 10px 24px rgba(99, 102, 241, 0.08)'
@@ -426,7 +426,7 @@ export const theme = createTheme({
     MuiDialog: {
       styleOverrides: {
         paper: {
-          borderRadius: 22,
+          borderRadius: 12,
           backgroundImage: 'linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(248,246,255,0.96) 100%)',
           border: '1px solid rgba(255, 255, 255, 0.88)',
           boxShadow: '0 28px 72px rgba(99, 102, 241, 0.2)',
@@ -449,7 +449,7 @@ export const theme = createTheme({
     MuiPopover: {
       styleOverrides: {
         paper: {
-          borderRadius: 16,
+          borderRadius: 12,
           background: 'rgba(255,255,255,0.94)',
           backdropFilter: 'blur(14px)',
           border: '1px solid rgba(255,255,255,0.85)',
@@ -461,7 +461,7 @@ export const theme = createTheme({
     MuiMenu: {
       styleOverrides: {
         paper: {
-          borderRadius: 16,
+          borderRadius: 12,
           marginTop: 8,
           backdropFilter: 'blur(14px)'
         }
@@ -471,7 +471,7 @@ export const theme = createTheme({
     MuiAccordion: {
       styleOverrides: {
         root: {
-          borderRadius: '18px !important',
+          borderRadius: '12px !important',
           '&:before': { display: 'none' },
           background: 'rgba(255, 255, 255, 0.72)',
           backdropFilter: 'blur(12px)',
@@ -485,7 +485,7 @@ export const theme = createTheme({
     MuiAccordionSummary: {
       styleOverrides: {
         root: {
-          borderRadius: 18
+          borderRadius: 12
         }
       }
     },
@@ -496,7 +496,7 @@ export const theme = createTheme({
           textTransform: 'none',
           fontWeight: 600,
           minHeight: 44,
-          borderRadius: 999
+          borderRadius: 8
         }
       }
     },
@@ -504,7 +504,7 @@ export const theme = createTheme({
     MuiAlert: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
+          borderRadius: 12,
           backdropFilter: 'blur(8px)'
         },
         standardInfo: {
@@ -529,12 +529,12 @@ export const theme = createTheme({
     MuiLinearProgress: {
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 4,
           height: 6,
           backgroundColor: 'rgba(99, 102, 241, 0.12)'
         },
         bar: {
-          borderRadius: 999
+          borderRadius: 4
         }
       }
     },
@@ -550,7 +550,7 @@ export const theme = createTheme({
     MuiSnackbarContent: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
+          borderRadius: 12,
           boxShadow: '0 14px 36px rgba(15, 23, 42, 0.15)',
           backdropFilter: 'blur(12px)'
         }
@@ -596,7 +596,7 @@ export const globalStyles = {
   },
   '::-webkit-scrollbar-thumb': {
     background: 'linear-gradient(180deg, #d8dcf7 0%, #bab7ec 100%)',
-    borderRadius: 999,
+    borderRadius: 4,
   },
   '::-webkit-scrollbar-thumb:hover': {
     background: 'linear-gradient(180deg, #c7ccef 0%, #aaa6e6 100%)',

@@ -455,8 +455,8 @@ export async function fetchMergedAssetMovementHistory(supabase, {
       history_type: 'record_update',
       barcode_number: barcodeNumber,
       created_at: sourceAsset.updated_at,
-      action: 'Asset Record Updated',
-      mode: 'UPDATE',
+      // Not a scan workflow — omit `mode` so UIs use `action` (otherwise "UPDATE" masks the real meaning).
+      action: 'Asset record updated',
       location: sourceAsset.location,
       // bottles.location is often branch (e.g. SASKATOON) even when assigned_customer is set — include assignment so UI does not show “In-House” incorrectly.
       customer_name: sourceAsset.customer_name || null,

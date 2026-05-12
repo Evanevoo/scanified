@@ -32,9 +32,11 @@ export function finalizeCustomerBranchParentFields(row) {
     row.parent_customer_id != null && String(row.parent_customer_id).trim() !== ''
       ? String(row.parent_customer_id).trim()
       : null;
+  const customer_type = resolveCustomerTypeForParentConstraint(row.customer_type, parent);
+  // Redundant guard: Postgres `check_branch_has_parent` requires parent ⇔ BRANCH in lockstep.
   return {
     ...row,
     parent_customer_id: parent,
-    customer_type: resolveCustomerTypeForParentConstraint(row.customer_type, parent),
+    customer_type: parent ? 'BRANCH' : customer_type,
   };
 }

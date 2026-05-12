@@ -11,6 +11,7 @@ import { reconcileShippedBottleAssignments } from '../services/reconcileShippedB
 import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
+import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { coerceImportedRowPkForRpc } from '../utils/coerceImportedRowPk';
@@ -83,7 +84,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const [assignBottleSaving, setAssignBottleSaving] = useState(false);
   const [assignBottleError, setAssignBottleError] = useState('');
   const [refreshScannedBottlesTrigger, setRefreshScannedBottlesTrigger] = useState(0);
-  
+  const [retryMissingAssignmentLoading, setRetryMissingAssignmentLoading] = useState(false);
+
   // Asset Options state
   const [selectedAssets, setSelectedAssets] = useState(new Set()); // Track selected barcodes
   const [switchModeDialog, setSwitchModeDialog] = useState({ open: false });
@@ -218,6 +220,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       
       let data = null;
       let err = null;
+      let resolvedImportTable = 'imported_invoices';
       // Try imported_invoices first
       let res = await supabase
         .from('imported_invoices')
@@ -233,12 +236,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .single();
         data = res2.data;
         err = res2.error;
+        if (data) resolvedImportTable = 'imported_sales_receipts';
       } else {
         data = res.data;
         err = res.error;
       }
       if (err && !data) setError(err.message);
-      setImportRecord(data);
+      setImportRecord(data ? { ...data, _resolvedImportTable: resolvedImportTable } : null);
       setLoading(false);
     }
     fetchImport();
@@ -679,7 +683,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (deliveredBarcodes.size > 0) {
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, status')
             .in('barcode_number', Array.from(deliveredBarcodes))
             .eq('organization_id', organization.id);
           
@@ -696,7 +700,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (returnedBarcodes.size > 0) {
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer')
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, status')
             .in('barcode_number', Array.from(returnedBarcodes))
             .eq('organization_id', organization.id);
           
@@ -820,6 +824,104 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   // Prefer URL param (?order=71969) so "scan to 71969" works; else use record's saved order (e.g. S47782)
   const effectiveOrderNumber = filterInvoiceNumber || (importRecord && getOrderNumber(parseDataField(importRecord.data)));
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending':
+        return 'warning';
+      case 'approved':
+        return 'success';
+      case 'verified':
+        return 'success';
+      case 'rejected':
+        return 'error';
+      case 'investigation':
+        return 'info';
+      default:
+        return 'default';
+    }
+  };
+
+  /**
+   * Import row `status` can stay `pending` while bottles are already rented/assigned (verify, RPC, or edits elsewhere).
+   * Surface a derived label so the workspace matches inventory and verified_order_numbers.
+   */
+  const importVerificationUiState = useMemo(() => {
+    const raw = String(importRecord?.status || 'pending').toLowerCase();
+    const idata = parseDataField(importRecord?.data || {});
+    const trimOrder = (n) => (n != null && n !== '' ? String(n).trim() : '');
+    const normOrd = (n) => {
+      if (n == null || n === '') return '';
+      const s = String(n).trim();
+      if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+      return s;
+    };
+    const cur = trimOrder(effectiveOrderNumber || getOrderNumber(idata) || '') || '';
+    const vor = Array.isArray(idata?.verified_order_numbers) ? idata.verified_order_numbers : [];
+    const inVerified = !!(cur && vor.some((v) => normOrd(v) === normOrd(cur)));
+
+    const hasAssignedShipBottles = (scannedBottles || []).some((b) => {
+      const ac = String(b.assigned_customer || '').trim();
+      const cn = String(b.customer_name || '').trim();
+      const st = String(b.status || '').toLowerCase();
+      return !!(ac || cn || st === 'rented');
+    });
+
+    const showAssignmentSyncHint =
+      hasAssignedShipBottles && raw === 'pending' && !inVerified && raw !== 'rejected';
+
+    if (raw === 'approved') {
+      return {
+        label: 'Approved',
+        helper: 'This import record is fully approved.',
+        chip: 'Approved',
+        chipColor: 'success',
+        showAssignmentSyncHint: false,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
+    if (raw === 'verified') {
+      return {
+        label: 'Verified',
+        helper: 'This import record is marked verified.',
+        chip: 'Verified',
+        chipColor: 'success',
+        showAssignmentSyncHint: false,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
+    if (inVerified) {
+      return {
+        label: 'Verified (this order)',
+        helper:
+          'This order is listed in verified_order_numbers. The file row can stay pending until every order on the same import is verified.',
+        chip: 'Verified (order)',
+        chipColor: 'success',
+        showAssignmentSyncHint: false,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
+    if (hasAssignedShipBottles) {
+      return {
+        label: 'Pending — assets on customer',
+        helper:
+          'Delivery scans for this order match bottles that are already assigned or rented (they appear on the customer). The import row is still pending — use Verify This Record to sync metadata, or Unverify if this is wrong.',
+        chip: 'Pending · assigned',
+        chipColor: 'warning',
+        showAssignmentSyncHint,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
+    const cap = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Pending';
+    return {
+      label: cap,
+      helper: 'Current verification state for this import record',
+      chip: importRecord?.status || 'pending',
+      chipColor: getStatusColor(raw) === 'warning' ? 'warning' : 'default',
+      showAssignmentSyncHint: false,
+      rawRowStatus: importRecord?.status || 'pending',
+    };
+  }, [importRecord, effectiveOrderNumber, scannedBottles]);
+
   // Helper function to get customer info from data
   const getCustomerInfo = (data) => {
     if (!data) return 'Unknown';
@@ -885,9 +987,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     if (!importRecord) return '';
     const data = parseDataField(importRecord.data);
     const raw = String(getCustomerInfo(data) || '').trim();
-    if (!raw || raw.toLowerCase() === 'unknown') return '';
-    return raw;
-  }, [importRecord]);
+    if (raw && raw.toLowerCase() !== 'unknown') return raw;
+    const urlName = String(filterCustomerName || '').trim();
+    if (urlName) return urlName;
+    return '';
+  }, [importRecord, filterCustomerName]);
 
   /** SHIP scans tied to this order whose bottle row has no renter — verification may not have run or assignment was cleared later. */
   const deliveredBottlesMissingDbAssignment = useMemo(() => {
@@ -919,6 +1023,102 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       return true;
     });
   }, [scannedBottles, importRecord]);
+
+  /** SHIP-delivered bottles on file with no customer on `bottles` — e.g. list Approve ran but assignment failed silently (now throws) or RPC skipped. */
+  const handleRetryMissingDeliveredAssignment = async () => {
+    if (!organization?.id || !importRecord || deliveredBottlesMissingDbAssignment.length === 0) return;
+    const pdata = parseDataField(importRecord.data);
+    let customerName = String(getCustomerInfo(pdata) || '').trim();
+    if (!customerName || customerName.toLowerCase() === 'unknown') {
+      customerName = String(filterCustomerName || '').trim();
+    }
+    if (!customerName) {
+      setActionMessage('Retry failed: no customer name on this import or URL (?customer=).');
+      setTimeout(() => setActionMessage(''), 6000);
+      return;
+    }
+    const orderNum =
+      effectiveOrderNumber ||
+      pdata.order_number ||
+      pdata.invoice_number ||
+      pdata.reference_number ||
+      null;
+    if (!orderNum) {
+      setActionMessage('Retry failed: could not determine order number.');
+      setTimeout(() => setActionMessage(''), 6000);
+      return;
+    }
+    let customerId = getCustomerId(pdata) || null;
+    try {
+      const resolved =
+        (customerId && (await resolveCustomerListId(supabase, organization.id, customerId))) ||
+        (await resolveCustomerListId(supabase, organization.id, customerName));
+      if (resolved?.customerListId) {
+        customerId = resolved.customerListId;
+      } else if (resolved?.id) {
+        // Import JSON may carry a non-customer UUID; always prefer resolved customers.id for the service.
+        customerId = resolved.id;
+      }
+    } catch (e) {
+      logger.warn('Retry assignment: resolve customer', e);
+    }
+    const shipBarcodes = deliveredBottlesMissingDbAssignment
+      .map((b) => String(b.barcode_number || '').trim())
+      .filter(Boolean);
+    if (shipBarcodes.length === 0) return;
+
+    const importTable =
+      importRecord._resolvedImportTable === 'imported_sales_receipts'
+        ? 'imported_sales_receipts'
+        : 'imported_invoices';
+
+    setRetryMissingAssignmentLoading(true);
+    try {
+      const originalId = getOriginalId(invoiceNumber);
+      const recordId = originalId ? coerceImportedRowPkForRpc(originalId) : null;
+      const result = await bottleAssignmentService.assignBottles({
+        organizationId: organization.id,
+        customerId: customerId || customerName,
+        customerName: customerName && customerName !== 'Unknown' ? customerName : 'Customer',
+        shipBarcodes,
+        returnBarcodes: [],
+        importRecordId: recordId,
+        importTable,
+        orderNumber: String(orderNum).trim(),
+      });
+      if (!result.success) {
+        setActionMessage(`Retry failed: ${result.error || 'Unknown error'}`);
+        setTimeout(() => setActionMessage(''), 8000);
+        return;
+      }
+      const dateRowForReconcile = (pdata?.rows || pdata?.line_items || []).find(
+        (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
+      );
+      const effectiveDateForReconcile =
+        dateRowForReconcile?.date ||
+        dateRowForReconcile?.Date ||
+        dateRowForReconcile?.invoice_date ||
+        dateRowForReconcile?.InvoiceDate ||
+        null;
+      await reconcileShippedBottleAssignments(supabase, {
+        organizationId: organization.id,
+        shipBarcodes,
+        customerId: customerId || customerName,
+        customerName: customerName && customerName !== 'Unknown' ? customerName : 'Customer',
+        orderNumber: String(orderNum).trim(),
+        effectiveDate: effectiveDateForReconcile,
+      });
+      setActionMessage(`Retried assignment for ${shipBarcodes.length} barcode(s). Refreshing list…`);
+      setRefreshScannedBottlesTrigger((t) => t + 1);
+      setTimeout(() => setActionMessage(''), 6000);
+    } catch (e) {
+      logger.error('handleRetryMissingDeliveredAssignment', e);
+      setActionMessage(`Retry failed: ${e?.message || e}`);
+      setTimeout(() => setActionMessage(''), 8000);
+    } finally {
+      setRetryMissingAssignmentLoading(false);
+    }
+  };
 
   // Assign bottles to customers after verification (similar to ImportApprovals.jsx)
   const assignBottlesToCustomer = async (record) => {
@@ -1022,14 +1222,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
       // Process RETURN barcodes first: unassign bottle, close rental, ensure scan in bottle_scans for movement history
       for (const barcode of returnedBarcodes) {
-        const { data: bottles, error: bottleError } = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('barcode_number', barcode)
-          .eq('organization_id', organization?.id)
-          .limit(1);
-        if (bottleError || !bottles?.length) continue;
-        const bottle = bottles[0];
+        const bottle = await findBottleRowByScanIdentifier(supabase, organization?.id, barcode);
+        if (!bottle) continue;
+        const canonicalBc = String(bottle.barcode_number || '').trim();
 
         const updateData = {
           assigned_customer: null,
@@ -1047,11 +1242,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           .eq('organization_id', organization?.id);
         if (updateError) {
           logger.error('Error unassigning bottle on return:', updateError);
-          assignmentWarnings.push(`Failed to unassign bottle ${barcode}`);
+          assignmentWarnings.push(`Failed to unassign bottle ${canonicalBc || barcode}`);
           continue;
         }
-        logger.log(`✅ Returned bottle ${barcode} (unassigned)`);
-        assignmentSuccesses.push(`Bottle ${barcode} returned`);
+        logger.log(`✅ Returned bottle ${canonicalBc || barcode} (unassigned)`);
+        assignmentSuccesses.push(`Bottle ${canonicalBc || barcode} returned`);
 
         // Close open rental so movement history shows RETURN
         await supabase
@@ -1060,7 +1255,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             rental_end_date: new Date().toISOString().split('T')[0],
             updated_at: new Date().toISOString()
           })
-          .eq('bottle_barcode', barcode)
+          .eq('bottle_barcode', canonicalBc || barcode)
           .is('rental_end_date', null)
           .eq('organization_id', organization?.id);
 
@@ -1068,7 +1263,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         const { data: existingBottleScan } = await supabase
           .from('bottle_scans')
           .select('id')
-          .eq('bottle_barcode', barcode)
+          .eq('bottle_barcode', canonicalBc || barcode)
           .eq('order_number', orderNumTrimmed)
           .eq('organization_id', organization?.id)
           .limit(1);
@@ -1077,7 +1272,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             .from('bottle_scans')
             .insert({
               organization_id: organization?.id,
-              bottle_barcode: barcode,
+              bottle_barcode: canonicalBc || barcode,
               order_number: orderNumTrimmed,
               customer_name: newCustomerName || null,
               customer_id: newCustomerId || null,
@@ -1095,20 +1290,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         if (processedShipped.has(barcode)) continue;
         processedShipped.add(barcode);
 
-        const { data: bottles, error: bottleError } = await supabase
-          .from('bottles')
-          .select('*')
-          .eq('barcode_number', barcode)
-          .eq('organization_id', organization?.id)
-          .limit(1);
+        const bottle = await findBottleRowByScanIdentifier(supabase, organization?.id, barcode);
 
-        if (bottleError) {
-          logger.error('Error finding bottle:', bottleError);
-          continue;
-        }
-
-        if (bottles && bottles.length > 0) {
-          const bottle = bottles[0];
+        if (bottle) {
           if (bottle.product_code) scannedProductCodes.add(bottle.product_code);
           const currentCustomerName = bottle.assigned_customer || bottle.customer_name;
           const isAtHome = !currentCustomerName || currentCustomerName === '' || currentCustomerName === null;
@@ -1397,7 +1581,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           if (orderVariants.length > 0) {
             const resBs = await supabase
               .from('bottle_scans')
-              .select('bottle_barcode, mode, created_at, timestamp, customer_id, customer_name')
+              .select('bottle_barcode, cylinder_barcode, mode, created_at, timestamp, customer_id, customer_name')
               .in('order_number', orderVariants)
               .eq('organization_id', organization.id);
             bottleScanRows = resBs.data || [];
@@ -1423,10 +1607,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             };
 
             (bottleScanRows || []).forEach((scan) => {
-              const barcode = scan.bottle_barcode;
               const isDeliveredScan = isDelivered(scan.mode, null);
               const time = new Date(scan.timestamp || scan.created_at || 0).getTime();
-              addScan(barcode, isDeliveredScan, time);
+              addScan(scan.bottle_barcode, isDeliveredScan, time);
+              addScan(scan.cylinder_barcode, isDeliveredScan, time);
             });
 
             barcodeToLatest.forEach((info, norm) => {
@@ -1461,10 +1645,38 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           // 3. Fallback: rows with qty_in (return) but no barcode — add return barcodes from scan data by product match
           const barcodeToProductForReturn = new Map();
           if (bottleScanRows?.length && organization?.id) {
-            const barcodes = [...new Set(bottleScanRows.map((s) => s.bottle_barcode).filter(Boolean))];
+            const barcodes = [
+              ...new Set(
+                bottleScanRows.flatMap((s) => [s.bottle_barcode, s.cylinder_barcode].filter(Boolean))
+              ),
+            ];
             if (barcodes.length > 0) {
-              const { data: bottlesForReturn } = await supabase.from('bottles').select('barcode_number, product_code').eq('organization_id', organization.id).in('barcode_number', barcodes);
-              (bottlesForReturn || []).forEach((b) => barcodeToProductForReturn.set(String(b.barcode_number).trim(), (b.product_code || '').trim()));
+              const { data: bottlesForReturn } = await supabase
+                .from('bottles')
+                .select('barcode_number, serial_number, product_code')
+                .eq('organization_id', organization.id)
+                .in('barcode_number', barcodes);
+              (bottlesForReturn || []).forEach((b) =>
+                barcodeToProductForReturn.set(String(b.barcode_number).trim(), (b.product_code || '').trim())
+              );
+              const unmatched = barcodes.filter((id) => !barcodeToProductForReturn.has(String(id).trim()));
+              if (unmatched.length > 0) {
+                const { data: bySerial } = await supabase
+                  .from('bottles')
+                  .select('barcode_number, serial_number, product_code')
+                  .eq('organization_id', organization.id)
+                  .in('serial_number', unmatched);
+                (bySerial || []).forEach((b) => {
+                  const sn = String(b.serial_number || '').trim();
+                  const pc = (b.product_code || '').trim();
+                  unmatched.forEach((id) => {
+                    if (sn && sn === String(id).trim()) {
+                      barcodeToProductForReturn.set(String(id).trim(), pc);
+                      barcodeToProductForReturn.set(String(b.barcode_number).trim(), pc);
+                    }
+                  });
+                });
+              }
             }
           }
           rows.forEach((row) => {
@@ -1481,8 +1693,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             });
             (bottleScanRows || []).forEach((s) => {
               if (s.mode !== 'RETURN' && s.mode !== 'PICKUP') return;
-              const prod = barcodeToProductForReturn.get(String(s.bottle_barcode || '').trim());
-              if (prod === productCode && s.bottle_barcode) returnBarcodes.push(String(s.bottle_barcode).trim());
+              const raw = s.bottle_barcode || s.cylinder_barcode;
+              const prod =
+                barcodeToProductForReturn.get(String(s.bottle_barcode || '').trim()) ||
+                barcodeToProductForReturn.get(String(s.cylinder_barcode || '').trim());
+              if (prod === productCode && raw) returnBarcodes.push(String(raw).trim());
             });
           });
 
@@ -1496,6 +1711,23 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           // Dedupe (rows can add same barcode multiple times when qty_in/qty_out > 1)
           let shipBarcodesUnique = [...new Set(shipBarcodes)];
           const returnBarcodesUnique = [...new Set(returnBarcodes)];
+
+          // Latest scan per normalized barcode on this order (used for RNB guard and post-verify reconcile).
+          const latestOrderScanModeByBarcode = new Map();
+          (bottleScanRows || []).forEach((scan) => {
+            const mode = String(scan?.mode || '').toUpperCase();
+            const time = new Date(scan?.timestamp || scan?.created_at || 0).getTime();
+            const apply = (raw) => {
+              const norm = normalizeBarcode(raw);
+              if (!norm) return;
+              const existing = latestOrderScanModeByBarcode.get(norm);
+              if (!existing || time >= existing.time) {
+                latestOrderScanModeByBarcode.set(norm, { mode, time });
+              }
+            };
+            apply(scan?.bottle_barcode);
+            apply(scan?.cylinder_barcode);
+          });
 
           const scanCustomerUnanimous = await getUnanimousShipScanCustomer(
             supabase,
@@ -1532,53 +1764,92 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             }
           }
 
+          const custIdStr = String(customerId || '').trim();
+          const custNameStr = String(customerName || '').trim();
+          const custNameLower = custNameStr.toLowerCase();
+
           // Net-balance guard + RNB: if a return bottle is NOT actually assigned to this customer,
           // count it as "Return not on balance" (like DNS) and remove one ship of same product so net stays correct.
           let returnsNotOnBalance = [];
           if (returnBarcodesUnique.length > 0) {
             // Date/event-aware guard: if this order's latest scan for a barcode is RETURN/PICKUP,
             // treat it as physically back in warehouse and do not flag it as RNB.
-            const latestOrderScanModeByBarcode = new Map();
-            (bottleScanRows || []).forEach((scan) => {
-              const rawBarcode = scan?.bottle_barcode;
-              const norm = normalizeBarcode(rawBarcode);
-              if (!norm) return;
-              const mode = String(scan?.mode || '').toUpperCase();
-              const time = new Date(scan?.timestamp || scan?.created_at || 0).getTime();
-              const existing = latestOrderScanModeByBarcode.get(norm);
-              if (!existing || time >= existing.time) {
-                latestOrderScanModeByBarcode.set(norm, { mode, time });
-              }
-            });
             const allBarcodes = [...new Set([...shipBarcodesUnique, ...returnBarcodesUnique])];
             const { data: bottleRows } = await supabase
               .from('bottles')
-              .select('barcode_number, product_code, assigned_customer, customer_name')
+              .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
               .eq('organization_id', organization.id)
               .in('barcode_number', allBarcodes);
             const bottleMap = new Map();
-            (bottleRows || []).forEach(b => bottleMap.set(String(b.barcode_number).trim(), b));
+            (bottleRows || []).forEach((b) => bottleMap.set(String(b.barcode_number).trim(), b));
             if (bottleRows && bottleRows.length < allBarcodes.length) {
-              const missing = allBarcodes.filter(bc => !bottleMap.has(bc));
+              const missing = allBarcodes.filter((bc) => !bottleMap.has(String(bc).trim()));
               if (missing.length > 0) {
                 const { data: extra } = await supabase
                   .from('bottles')
-                  .select('barcode_number, product_code, assigned_customer, customer_name')
+                  .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
                   .eq('organization_id', organization.id);
-                (extra || []).forEach(b => {
+                (extra || []).forEach((b) => {
                   const norm = normalizeBarcode(b.barcode_number);
-                  missing.forEach(bc => {
-                    if (normalizeBarcode(bc) === norm && !bottleMap.has(bc)) {
-                      bottleMap.set(bc, b);
+                  missing.forEach((bc) => {
+                    if (normalizeBarcode(bc) === norm && !bottleMap.has(String(bc).trim())) {
+                      bottleMap.set(String(bc).trim(), b);
                     }
                   });
                 });
               }
             }
+            const stillUnmapped = allBarcodes.filter((bc) => {
+              const t = String(bc).trim();
+              return t && !bottleMap.has(t);
+            });
+            if (stillUnmapped.length > 0) {
+              const { data: serialRows } = await supabase
+                .from('bottles')
+                .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
+                .eq('organization_id', organization.id)
+                .in('serial_number', stillUnmapped.map((x) => String(x).trim()));
+              (serialRows || []).forEach((b) => {
+                const sn = String(b.serial_number || '').trim();
+                stillUnmapped.forEach((raw) => {
+                  if (sn && sn === String(raw).trim()) {
+                    bottleMap.set(String(raw).trim(), b);
+                  }
+                });
+                bottleMap.set(String(b.barcode_number).trim(), b);
+              });
+            }
 
-            const custIdStr = String(customerId || '').trim();
-            const custNameStr = String(customerName || '').trim();
-            const custNameLower = custNameStr.toLowerCase();
+            const getBottleFromBalanceMap = (rawBc) => {
+              const t = String(rawBc || '').trim();
+              if (!t) return null;
+              if (bottleMap.has(t)) return bottleMap.get(t);
+              const n = normalizeBarcode(t);
+              for (const [k, v] of bottleMap.entries()) {
+                if (normalizeBarcode(String(k)) === n) return v;
+              }
+              return null;
+            };
+
+            // Invoice may carry customers.id (uuid) while bottles.assigned_customer is CustomerListID — resolve so RNB detection matches reality.
+            let resolvedCustomerForReturnBalance = null;
+            try {
+              resolvedCustomerForReturnBalance =
+                (custIdStr && (await resolveCustomerListId(supabase, organization.id, custIdStr))) ||
+                (custNameStr && (await resolveCustomerListId(supabase, organization.id, custNameStr))) ||
+                null;
+            } catch (e) {
+              logger.warn('Verify: resolve customer for return balance', e);
+            }
+            const balanceListIdLower = resolvedCustomerForReturnBalance?.customerListId
+              ? String(resolvedCustomerForReturnBalance.customerListId).trim().toLowerCase()
+              : '';
+            const balanceRowIdLower = resolvedCustomerForReturnBalance?.id
+              ? String(resolvedCustomerForReturnBalance.id).trim().toLowerCase()
+              : '';
+            const balanceResolvedNameLower = resolvedCustomerForReturnBalance?.name
+              ? String(resolvedCustomerForReturnBalance.name).trim().toLowerCase()
+              : '';
 
             for (const retBc of returnBarcodesUnique) {
               const retNorm = normalizeBarcode(retBc);
@@ -1586,14 +1857,21 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               if (latestScan && (latestScan.mode === 'RETURN' || latestScan.mode === 'PICKUP')) {
                 continue;
               }
-              const bottle = bottleMap.get(retBc);
+              const bottle = getBottleFromBalanceMap(retBc);
               if (!bottle) continue;
               const assignedTo = String(bottle.assigned_customer || '').trim();
               const assignedName = String(bottle.customer_name || '').trim();
               const assignedToLower = assignedTo.toLowerCase();
               const assignedNameLower = assignedName.toLowerCase();
-              const idMatch = custIdStr && (assignedTo === custIdStr || assignedToLower === custIdStr.toLowerCase());
-              const nameMatch = custNameLower && (assignedToLower === custNameLower || assignedNameLower === custNameLower);
+              const idMatch =
+                (custIdStr && (assignedTo === custIdStr || assignedToLower === custIdStr.toLowerCase())) ||
+                (balanceListIdLower && assignedToLower === balanceListIdLower) ||
+                (balanceRowIdLower && assignedToLower === balanceRowIdLower);
+              const nameMatch =
+                (custNameLower &&
+                  (assignedToLower === custNameLower || assignedNameLower === custNameLower)) ||
+                (balanceResolvedNameLower &&
+                  (assignedNameLower === balanceResolvedNameLower || assignedToLower === balanceResolvedNameLower));
               const onBalance = idMatch || nameMatch;
               if (!onBalance) {
                 returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
@@ -1612,6 +1890,27 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
           // Use the transactional RPC — assignment + status update in one transaction
           try {
+            let importTableForRpc = 'imported_invoices';
+            if (!isScannedOnly && recordId && organization?.id) {
+              const { data: invProbe } = await supabase
+                .from('imported_invoices')
+                .select('id')
+                .eq('id', recordId)
+                .eq('organization_id', organization.id)
+                .maybeSingle();
+              if (invProbe) {
+                importTableForRpc = 'imported_invoices';
+              } else {
+                const { data: srProbe } = await supabase
+                  .from('imported_sales_receipts')
+                  .select('id')
+                  .eq('id', recordId)
+                  .eq('organization_id', organization.id)
+                  .maybeSingle();
+                if (srProbe) importTableForRpc = 'imported_sales_receipts';
+              }
+            }
+
             const result = await bottleAssignmentService.assignBottles({
               organizationId: organization?.id,
               customerId,
@@ -1619,7 +1918,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               shipBarcodes: shipBarcodesUnique,
               returnBarcodes: returnBarcodesOnBalance,
               importRecordId: (!isScannedOnly && recordId) ? recordId : null,
-              importTable: 'imported_invoices',
+              importTable: importTableForRpc,
               orderNumber: orderNum || null,
             });
 
@@ -1651,6 +1950,75 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
             }
 
+            // Any return barcode still tied to this order customer after RPC: clear assignment + close rentals.
+            // Use returnBarcodesUnique (not only returnBarcodesOnBalance) so barcodes misclassified as RNB due to
+            // map key drift are still unassigned when they truly match this customer (see getBottleFromBalanceMap).
+            if (returnBarcodesUnique.length > 0 && organization?.id) {
+              let resPostVerify = null;
+              try {
+                resPostVerify =
+                  (custIdStr && (await resolveCustomerListId(supabase, organization.id, custIdStr))) ||
+                  (custNameStr && (await resolveCustomerListId(supabase, organization.id, custNameStr))) ||
+                  null;
+              } catch (_) {
+                /* ignore */
+              }
+              const listPostL = resPostVerify?.customerListId
+                ? String(resPostVerify.customerListId).trim().toLowerCase()
+                : '';
+              const rowPostL = resPostVerify?.id ? String(resPostVerify.id).trim().toLowerCase() : '';
+              const nameSetPost = new Set(
+                [custNameStr, resPostVerify?.name]
+                  .filter(Boolean)
+                  .map((n) => String(n).trim().toLowerCase())
+              );
+
+              for (const rawBc of returnBarcodesUnique) {
+                const bc = String(rawBc || '').trim();
+                if (!bc) continue;
+                const bs = await findBottleRowByScanIdentifier(supabase, organization.id, bc);
+                if (!bs) continue;
+                const ac = String(bs.assigned_customer || '').trim().toLowerCase();
+                const cn = String(bs.customer_name || '').trim().toLowerCase();
+                const stillOnThisCustomer =
+                  (custIdStr && ac === custIdStr.toLowerCase()) ||
+                  (listPostL && ac === listPostL) ||
+                  (rowPostL && ac === rowPostL) ||
+                  (cn && nameSetPost.has(cn)) ||
+                  (ac && nameSetPost.has(ac));
+                if (!stillOnThisCustomer) continue;
+
+                const canonicalBc = String(bs.barcode_number || '').trim();
+                const { error: upe } = await supabase
+                  .from('bottles')
+                  .update({
+                    assigned_customer: null,
+                    customer_name: null,
+                    status: 'empty',
+                    location: 'In House',
+                    rental_start_date: null,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', bs.id)
+                  .eq('organization_id', organization.id);
+                if (upe) {
+                  logger.warn('Post-verify return unassign failed', bc, upe.message);
+                  continue;
+                }
+                if (canonicalBc) {
+                  await supabase
+                    .from('rentals')
+                    .update({
+                      rental_end_date: new Date().toISOString().split('T')[0],
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq('bottle_barcode', canonicalBc)
+                    .eq('organization_id', organization.id)
+                    .is('rental_end_date', null);
+                }
+              }
+            }
+
             const dateRowForReconcile = (importData?.rows || importData?.line_items || []).find(
               (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
             );
@@ -1661,9 +2029,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               dateRowForReconcile?.InvoiceDate ||
               null;
 
+            // Do not run SHIP reconcile for return-latest barcodes: post-verify unassign clears assignment,
+            // and reconcile would otherwise treat "unassigned" as missed SHIP and reassign to the verify customer.
+            const shipBarcodesForReconcile = shipBarcodesUnique.filter((bc) => {
+              const n = normalizeBarcode(bc);
+              if (!n) return true;
+              if (normalizedReturnSet.has(n)) return false;
+              const latest = latestOrderScanModeByBarcode.get(n);
+              if (latest && (latest.mode === 'RETURN' || latest.mode === 'PICKUP')) return false;
+              return true;
+            });
+
             const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
               organizationId: organization?.id,
-              shipBarcodes: shipBarcodesUnique,
+              shipBarcodes: shipBarcodesForReconcile,
               customerId,
               customerName,
               orderNumber: orderNum || null,
@@ -1902,13 +2281,76 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             if (dnsCreated > 0) {
               setActionMessage((m) => (m || '') + ` ${dnsCreated} DNS bottle(s) added.`);
             }
+
+            // Match ImportApprovals per-order persistence: list uses verified_order_numbers + getRecordVerificationStatus
+            if (!isScannedOnly && recordId && organization?.id) {
+              const normOrder = (n) =>
+                n != null && n !== ''
+                  ? String(n).trim().replace(/^0+/, '') || String(n).trim()
+                  : '';
+              const { data: rowFresh, error: fetchPersistErr } = await supabase
+                .from(importTableForRpc)
+                .select('id, data, status')
+                .eq('id', recordId)
+                .eq('organization_id', organization.id)
+                .maybeSingle();
+              if (fetchPersistErr) {
+                logger.warn('Verify: could not re-fetch import row for verified_order_numbers:', fetchPersistErr);
+              } else if (rowFresh) {
+                const existingData =
+                  typeof rowFresh.data === 'string'
+                    ? JSON.parse(rowFresh.data || '{}')
+                    : (rowFresh.data || {});
+                const verifiedOrderNumbers = Array.isArray(existingData.verified_order_numbers)
+                  ? [...existingData.verified_order_numbers]
+                  : [];
+                const orderCanon = String(orderNum || '').trim();
+                const orderNorm = normOrder(orderCanon);
+                if (orderNorm && !verifiedOrderNumbers.some((n) => normOrder(n) === orderNorm)) {
+                  verifiedOrderNumbers.push(orderCanon);
+                }
+                const rows = existingData.rows || existingData.line_items || [];
+                const distinctOrderNumbers = [
+                  ...new Set(
+                    rows
+                      .map((r) =>
+                        r.reference_number ||
+                        r.order_number ||
+                        r.invoice_number ||
+                        r.sales_receipt_number
+                      )
+                      .filter(Boolean)
+                  ),
+                ];
+                const allOrdersVerified =
+                  distinctOrderNumbers.length > 0 &&
+                  distinctOrderNumbers.every((on) =>
+                    verifiedOrderNumbers.some((v) => normOrder(v) === normOrder(on))
+                  );
+                const newData = { ...existingData, verified_order_numbers: verifiedOrderNumbers };
+                const updatePayload = allOrdersVerified
+                  ? { data: newData, status: 'approved', approved_at: new Date().toISOString() }
+                  : { data: newData };
+                const { data: updatedRow, error: verifyPersistErr } = await supabase
+                  .from(importTableForRpc)
+                  .update(updatePayload)
+                  .eq('id', recordId)
+                  .select()
+                  .maybeSingle();
+                if (verifyPersistErr) {
+                  logger.warn('Verify: persist verified_order_numbers failed:', verifyPersistErr);
+                } else if (updatedRow) {
+                  setImportRecord(updatedRow);
+                }
+              }
+            }
           } catch (assignError) {
             logger.error('Error during verification:', assignError);
             setActionMessage(`Verification failed: ${assignError.message}`);
             return;
           }
 
-          setTimeout(() => navigate('/import-approvals'), 2000);
+          setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 2000);
           break;
         }
         case 'Unverify This Record': {
@@ -1931,11 +2373,30 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             ? coerceImportedRowPkForRpc(importRecord.id)
             : recordId;
 
+          let unverifyTable = 'imported_invoices';
+          if (importRecordIdForRpc && organization?.id) {
+            const { data: invProbe } = await supabase
+              .from('imported_invoices')
+              .select('id')
+              .eq('id', importRecordIdForRpc)
+              .eq('organization_id', organization.id)
+              .maybeSingle();
+            if (!invProbe) {
+              const { data: srProbe } = await supabase
+                .from('imported_sales_receipts')
+                .select('id')
+                .eq('id', importRecordIdForRpc)
+                .eq('organization_id', organization.id)
+                .maybeSingle();
+              if (srProbe) unverifyTable = 'imported_sales_receipts';
+            }
+          }
+
           // Use the transactional RPC to reverse bottle assignments + delete DNS records
           try {
             const unverifyResult = await bottleAssignmentService.unverifyOrder({
               importRecordId: importRecordIdForRpc,
-              importTable: 'imported_invoices',
+              importTable: unverifyTable,
               organizationId: organization?.id,
               orderNumber: orderNumForUnverify || null,
             });
@@ -1950,40 +2411,74 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             logger.warn('Unverify RPC not available, falling back to status-only update:', rpcErr);
           }
 
-          // Also update the import record data (verified_order_numbers tracking)
+          // Align verified_order_numbers + row status with Order Verification / Supabase fetch filters
           const { data: existingRow, error: fetchErr } = await supabase
-            .from('imported_invoices')
-            .select('id, data, status')
+            .from(unverifyTable)
+            .select('id, data, status, approved_at, verified_at, auto_approved')
             .eq('id', importRecordIdForRpc)
             .single();
           if (fetchErr || !existingRow) {
             setActionMessage(`Failed to load record: ${fetchErr?.message || 'not found'}`);
             return;
           }
-          const existingData = typeof existingRow.data === 'string' ? JSON.parse(existingRow.data || '{}') : (existingRow.data || {});
-          const verifiedOrderNumbers = Array.isArray(existingData.verified_order_numbers) ? [...existingData.verified_order_numbers] : [];
-          const currentOrder = effectiveOrderNumber || existingData.order_number || existingData.reference_number;
-          const trimOrder = (n) => (n == null || n === '') ? '' : String(n).trim();
-          const currentOrderTrimmed = currentOrder ? trimOrder(currentOrder) : '';
-          const newVerified = currentOrderTrimmed
-            ? verifiedOrderNumbers.filter(v => trimOrder(v) !== currentOrderTrimmed)
-            : verifiedOrderNumbers;
+          const existingData =
+            typeof existingRow.data === 'string' ? JSON.parse(existingRow.data || '{}') : (existingRow.data || {});
+          const normOrder = (n) =>
+            n != null && n !== ''
+              ? String(n).trim().replace(/^0+/, '') || String(n).trim()
+              : '';
+          const verifiedOrderNumbers = Array.isArray(existingData.verified_order_numbers)
+            ? [...existingData.verified_order_numbers]
+            : [];
+          const currentOrder =
+            effectiveOrderNumber ||
+            existingData.order_number ||
+            existingData.reference_number ||
+            existingData.invoice_number;
+          const orderNorm = normOrder(currentOrder);
+          /** Any normalized order # that belongs to THIS split card (so we strip verified_order_numbers even when top-level order # differs). */
+          const stripNorms = new Set(
+            [
+              orderNorm,
+              normOrder(effectiveOrderNumber),
+              normOrder(String(orderNumForUnverify || '').trim()),
+              ...(existingData.rows || existingData.line_items || []).flatMap((r) => {
+                const o = r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number;
+                const x = normOrder(o);
+                return x ? [x] : [];
+              }),
+            ].filter(Boolean)
+          );
+          const newVerified = verifiedOrderNumbers.filter((v) => !stripNorms.has(normOrder(v)));
           const newData = { ...existingData, verified_order_numbers: newVerified };
-          const allOrdersVerified = newVerified.length === 0;
-          const updatePayload = allOrdersVerified
-            ? { data: newData, status: 'pending', approved_at: null }
-            : { data: newData };
-          const { error: updateErr } = await supabase
-            .from('imported_invoices')
+          // Unverify always reopens the import row for Order Verification. Previously, if verified_order_numbers
+          // did not change (order # mismatch), we only sent { data } and left status approved/verified — the row
+          // disappeared from the list while RPC still unassigned bottles.
+          const reopenBase = {
+            data: newData,
+            status: 'pending',
+            approved_at: null,
+            verified_at: null,
+            verified_by: null,
+          };
+          const updatePayload =
+            unverifyTable === 'imported_invoices'
+              ? { ...reopenBase, auto_approved: false }
+              : reopenBase;
+
+          const { data: updatedRow, error: updateErr } = await supabase
+            .from(unverifyTable)
             .update(updatePayload)
-            .eq('id', importRecordIdForRpc);
+            .eq('id', importRecordIdForRpc)
+            .select()
+            .maybeSingle();
           if (updateErr) {
             setActionMessage(`Error unverifying record: ${updateErr.message}`);
             return;
           }
-          // bottle_scans has no status/verified_at; unverify state is on import record only
           setActionMessage('Record unverified. Bottle assignments have been reversed.');
-          setImportRecord({ ...existingRow, data: newData, status: allOrdersVerified ? 'pending' : existingRow.status });
+          if (updatedRow) setImportRecord(updatedRow);
+          else setImportRecord({ ...existingRow, ...updatePayload, data: newData });
           setTimeout(() => navigate('/import-approvals', { state: { refetch: true } }), 1500);
           break;
         }
@@ -3151,16 +3646,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     return info;
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending': return 'warning';
-      case 'approved': return 'success';
-      case 'rejected': return 'error';
-      case 'investigation': return 'info';
-      default: return 'default';
-    }
-  };
-
   // Get display name for uploaded by (importRecord is non-null past guard above)
   const getUploadedByDisplay = () => {
     if (!importRecord) return '—';
@@ -3176,13 +3661,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const detailMetrics = [
     {
       label: 'Status',
-      value: importRecord.status || 'pending',
-      helper: 'Current verification state for this import record',
+      value: importVerificationUiState.label,
+      helper: importVerificationUiState.helper,
     },
     {
       label: 'Delivered assets',
       value: scannedBottles.length + unassignedDeliveredBarcodes.length,
-      helper: 'Scanned and unassigned delivered assets on this order',
+      helper:
+        'Count of delivery (SHIP) scans for this order with a matching asset row, plus barcodes scanned that are not yet in the assets table. Assigned or rented bottles still count here.',
     },
     {
       label: 'Returned assets',
@@ -3225,7 +3711,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 <Stack direction="row" spacing={1} sx={{ mb: 1.25, flexWrap: 'wrap' }}>
                   <Chip label="Operations" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
                   <Chip label="Verification detail" size="small" variant="outlined" sx={{ borderRadius: 999 }} />
-                  <Chip label={importRecord.status || 'pending'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+                  <Chip
+                    label={importVerificationUiState.chip}
+                    color={importVerificationUiState.chipColor}
+                    size="small"
+                    variant={importVerificationUiState.chipColor === 'default' ? 'outlined' : 'filled'}
+                    sx={{ borderRadius: 999, fontWeight: 700 }}
+                  />
                 </Stack>
                 <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
                   {effectiveOrderNumber ? `Order ${effectiveOrderNumber}` : 'Verification detail'}
@@ -3279,6 +3771,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           </Alert>
         )}
 
+        {importVerificationUiState.showAssignmentSyncHint && (
+          <Alert severity="info" sx={{ mx: 3, mb: 3, borderRadius: 2.5 }}>
+            <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+              Inventory is ahead of this import row
+            </Typography>
+            <Typography variant="body2">
+              Database status for the import file is still <strong>{importVerificationUiState.rawRowStatus}</strong>, but
+              bottles from this order&apos;s delivery scans are already assigned or rented (customer list is correct). Run{' '}
+              <strong>Verify This Record</strong> below to align <code>verified_order_numbers</code> and status, unless you
+              intend to roll back — then use <strong>Unverify</strong>.
+            </Typography>
+          </Alert>
+        )}
+
         <Box p={3}>
           <Grid container spacing={3} alignItems="flex-start">
             {/* Left: Delivery Info and Tables */}
@@ -3303,17 +3809,23 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6} md={3}>
                     <Typography variant="subtitle2" color="text.secondary">Status</Typography>
-                    <Chip 
-                      label={importRecord.status} 
-                      color="default"
+                    <Chip
+                      label={importVerificationUiState.label}
+                      color={importVerificationUiState.chipColor}
                       size="small"
-                      sx={{ 
-                        border: '2px solid #333',
+                      sx={{
                         fontWeight: 600,
-                        bgcolor: 'white',
-                        color: 'black'
+                        ...(importVerificationUiState.chipColor === 'default'
+                          ? { border: '2px solid #333', bgcolor: 'white', color: 'black' }
+                          : {}),
                       }}
                     />
+                    {String(importVerificationUiState.label).toLowerCase() !==
+                      String(importRecord.status || 'pending').toLowerCase() && (
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                        Import row in database: {importRecord.status || 'pending'}
+                      </Typography>
+                    )}
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
                     <Typography variant="subtitle2" color="text.secondary">Uploaded By</Typography>
@@ -3377,10 +3889,21 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     {deliveredBottlesMissingDbAssignment.length} barcode(s) are listed under Delivered Assets but{' '}
                     <strong>customer_name</strong> and <strong>assigned_customer</strong> are empty on the bottle row.
-                    Movement history can still show Delivery / Return / Fill from rentals, scans, or audits elsewhere —
-                    it is merged from several sources, not only Trackabout scans for this order.
-                    Use Verify (or asset correction) to persist the order customer ({importOrderCustomerDisplay}) on these assets if they should be rented out.
+                    If you already approved this order on the main Import Approvals list, the import row may be updated while bottle assignment did not run or failed—use{' '}
+                    <strong>Retry assigning bottles</strong> below to push this order&apos;s customer ({importOrderCustomerDisplay}) to these barcodes again.
+                    Movement history can still show Delivery / Return / Fill from rentals, scans, or audits elsewhere; it is merged from several sources, not only Trackabout scans for this order.
+                    You can also use <strong>Verify This Record</strong> when SHP, RTN, and TRK match (or correct assets first).
                   </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleRetryMissingDeliveredAssignment}
+                      disabled={retryMissingAssignmentLoading}
+                    >
+                      {retryMissingAssignmentLoading ? 'Assigning…' : 'Retry assigning bottles'}
+                    </Button>
+                  </Stack>
                   <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
                     {deliveredBottlesMissingDbAssignment.slice(0, 12).map((b) => (
                       <li key={b.barcode_number || b.id}>

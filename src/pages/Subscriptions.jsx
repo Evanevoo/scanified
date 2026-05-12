@@ -73,7 +73,6 @@ import {
   IoMailOutline,
   IoArchiveOutline,
   IoAddCircleOutline,
-  IoEyeOutline,
   IoCreateOutline,
   IoPersonCircleOutline,
   IoRefreshOutline,
@@ -4178,10 +4177,6 @@ export default function Subscriptions() {
                         const billableAmount = parseFloat(sub.totalPerCycle) || 0;
                         const canBill = billableAmount > 0;
                         const canEditRates = Boolean(sub.customer_id);
-                        const canOpenProfile = Boolean(String(sub.customer_id || '').trim());
-                        /** Eye = subscription detail only; virtual/legacy rows have no `/rentals/:id` — use Customer for profile. */
-                        const canOpenView =
-                          !sub.isVirtual && Boolean(String(sub.id || '').trim());
                         const rowActionItems = [
                           {
                             id: 'pdf',
@@ -4227,15 +4222,6 @@ export default function Subscriptions() {
                             gradientFrom: '#a955ff',
                             gradientTo: '#ea51ff',
                             disabled: !canEditRates,
-                          },
-                          {
-                            id: 'view',
-                            title: 'View',
-                            action: 'view',
-                            icon: <IoEyeOutline />,
-                            gradientFrom: '#40B5AD',
-                            gradientTo: '#2E9B94',
-                            disabled: !canOpenView,
                           },
                         ];
 
@@ -4296,16 +4282,6 @@ export default function Subscriptions() {
                                       },
                                     });
                                     break;
-                                  case 'view': {
-                                    if (sub.isVirtual || !sub.id) {
-                                      setActionError(
-                                        'This row has no subscription record — open Customer for the profile.'
-                                      );
-                                      return;
-                                    }
-                                    navigate(`/rentals/${sub.id}`);
-                                    break;
-                                  }
                                   default:
                                     break;
                                 }

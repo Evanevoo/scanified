@@ -416,6 +416,15 @@ export default function CustomerDetail() {
   const [warehouseConfirmDialogOpen, setWarehouseConfirmDialogOpen] = useState(false);
   const [parentCustomer, setParentCustomer] = useState(null); // { id, name, CustomerListID } when this customer is under a parent
   const [childCustomers, setChildCustomers] = useState([]);   // customers where parent_customer_id = this customer's id
+  /** Branches under this customer + parent row when this customer is a branch — same keys as bottle/rental merge on initial load. */
+  const getSubsidiaryRowsForMerge = useCallback(() => {
+    const rows = [...(childCustomers || [])];
+    const seen = new Set(rows.map((r) => r?.id).filter(Boolean));
+    if (parentCustomer?.id && !seen.has(parentCustomer.id)) {
+      rows.push(parentCustomer);
+    }
+    return rows;
+  }, [childCustomers, parentCustomer]);
   const [parentOptions, setParentOptions] = useState([]);     // for edit form "Under parent" selector
   const [customerDetailTab, setCustomerDetailTab] = useState(0); // 0 = Customer Info, 1 = Rental
   const [customerPricing, setCustomerPricing] = useState(null); // customer-specific pricing for this customer
@@ -477,162 +486,184 @@ export default function CustomerDetail() {
    *   - bottles.customer_name    = display name
    * Merge every match so no assignments disappear.
    */
-  const fetchMergedBottlesForCustomer = useCallback(async (orgId, customerName, customerListId, customerPkId = null) => {
-    const listId = (customerListId || id || '').toString().trim();
-    const pkTrim = String(customerPkId || '').trim();
-    const pkQueries =
-      pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)
-        ? [
-            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', pkTrim),
-            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', pkTrim),
-          ]
-        : [];
-    const listIdLooksUuid = listId && CUSTOMER_PK_UUID_RE.test(listId);
-    const idRuns = await Promise.all([
-      listId
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
-        : Promise.resolve({ data: [], error: null }),
-      listId && listIdLooksUuid
-        ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', listId)
-        : Promise.resolve({ data: [], error: null }),
-      ...pkQueries,
-    ]);
+  const fetchMergedBottlesForCustomer = useCallback(
+    async (orgId, customerName, customerListId, customerPkId = null, subsidiaryCustomerRows = []) => {
+      const map = new Map();
 
-    const map = new Map();
-    idRuns.forEach(({ data, error }) => {
-      if (error) return;
-      (data || []).forEach((b) => {
-        if (b?.id) map.set(b.id, b);
-      });
-    });
+      const mergeOneAccount = async (nameRaw, listIdRaw, pkRaw) => {
+        const listId = (listIdRaw || id || '').toString().trim();
+        const pkTrim = String(pkRaw || '').trim();
+        const pkQueries =
+          pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)
+            ? [
+                supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', pkTrim),
+                supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', pkTrim),
+              ]
+            : [];
+        const listIdLooksUuid = listId && CUSTOMER_PK_UUID_RE.test(listId);
+        const idRuns = await Promise.all([
+          listId
+            ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', listId)
+            : Promise.resolve({ data: [], error: null }),
+          listId && listIdLooksUuid
+            ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', listId)
+            : Promise.resolve({ data: [], error: null }),
+          ...pkQueries,
+        ]);
 
-    // Legacy name-keyed rows: merge even when listId already matched bottles, so mixed assignments
-    // (84 on CustomerListID + 1 only on display name) still show the full 85.
-    if (customerName) {
-      const nameTrim = String(customerName).trim();
-      const nameLooksUuid = nameTrim && CUSTOMER_PK_UUID_RE.test(nameTrim);
-      const legacyRuns = await Promise.all([
-        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', customerName),
-        nameLooksUuid
-          ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', nameTrim)
-          : Promise.resolve({ data: [], error: null }),
-        supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', customerName),
-      ]);
-      legacyRuns.forEach(({ data, error }) => {
-        if (error) return;
-        (data || []).forEach((b) => {
-          if (b?.id) map.set(b.id, b);
+        idRuns.forEach(({ data, error }) => {
+          if (error) return;
+          (data || []).forEach((b) => {
+            if (b?.id) map.set(b.id, b);
+          });
         });
-      });
-    }
 
-    return Array.from(map.values());
-  }, [id]);
+        if (nameRaw) {
+          const nameTrim = String(nameRaw).trim();
+          const nameLooksUuid = nameTrim && CUSTOMER_PK_UUID_RE.test(nameTrim);
+          const legacyRuns = await Promise.all([
+            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('assigned_customer', nameRaw),
+            nameLooksUuid
+              ? supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_uuid', nameTrim)
+              : Promise.resolve({ data: [], error: null }),
+            supabase.from('bottles').select('*').eq('organization_id', orgId).eq('customer_name', nameRaw),
+          ]);
+          legacyRuns.forEach(({ data, error }) => {
+            if (error) return;
+            (data || []).forEach((b) => {
+              if (b?.id) map.set(b.id, b);
+            });
+          });
+        }
+      };
+
+      await mergeOneAccount(customerName, customerListId, customerPkId);
+      for (const row of subsidiaryCustomerRows || []) {
+        if (!row) continue;
+        await mergeOneAccount(row.name, row.CustomerListID, row.id);
+      }
+
+      return Array.from(map.values());
+    },
+    [id]
+  );
 
   /** Open rentals: CustomerListID match, merged with legacy rows keyed by display name (same customer can have both). */
-  const fetchMergedOpenRentalsForCustomer = useCallback(async (orgId, customerName, customerListId, customerPkId = null) => {
-    const nameTrim = String(customerName || '').trim();
-    const listId = String(customerListId || id || '').trim();
-    const pkTrim = String(customerPkId || '').trim();
+  const fetchMergedOpenRentalsForCustomer = useCallback(
+    async (orgId, customerName, customerListId, customerPkId = null, subsidiaryCustomerRows = []) => {
+      const seen = new Set();
+      const merged = [];
+      const push = (rows) => {
+        (rows || []).forEach((r) => {
+          if (r?.id && !seen.has(r.id)) {
+            seen.add(r.id);
+            merged.push(r);
+          }
+        });
+      };
 
-    let rentalById = [];
-    if (listId) {
-      const { data, error: rentalError } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', listId)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      if (rentalError) throw rentalError;
-      rentalById = data || [];
-    }
+      const mergeOneAccount = async (nameRaw, listIdRaw, pkRaw) => {
+        const nameTrim = String(nameRaw || '').trim();
+        const listId = String(listIdRaw || id || '').trim();
+        const pkTrim = String(pkRaw || '').trim();
 
-    let rentalByPk = [];
-    if (pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)) {
-      const { data, error: pkErr } = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', pkTrim)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      if (pkErr) throw pkErr;
-      rentalByPk = data || [];
-    }
+        let rentalById = [];
+        if (listId) {
+          const { data, error: rentalError } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_id', listId)
+            .eq('organization_id', orgId)
+            .is('rental_end_date', null);
+          if (rentalError) throw rentalError;
+          rentalById = data || [];
+        }
 
-    let rentalByName = [];
-    let rentalByNameAsId = [];
-    let rentalByNameError = null;
-    let rentalByNameAsIdError = null;
-    if (nameTrim) {
-      const byNameResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_name', nameTrim)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      const byNameAsIdResp = await supabase
-        .from('rentals')
-        .select('*')
-        .eq('customer_id', nameTrim)
-        .eq('organization_id', orgId)
-        .is('rental_end_date', null);
-      rentalByName = byNameResp.data || [];
-      rentalByNameAsId = byNameAsIdResp.data || [];
-      rentalByNameError = byNameResp.error;
-      rentalByNameAsIdError = byNameAsIdResp.error;
-    }
+        let rentalByPk = [];
+        if (pkTrim && CUSTOMER_PK_UUID_RE.test(pkTrim)) {
+          const { data, error: pkErr } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_id', pkTrim)
+            .eq('organization_id', orgId)
+            .is('rental_end_date', null);
+          if (pkErr) throw pkErr;
+          rentalByPk = data || [];
+        }
 
-    const seen = new Set();
-    const merged = [];
-    const push = (rows) => {
-      (rows || []).forEach((r) => {
-        if (r?.id && !seen.has(r.id)) {
-          seen.add(r.id);
-          merged.push(r);
+        let rentalByName = [];
+        let rentalByNameAsId = [];
+        let rentalByNameError = null;
+        let rentalByNameAsIdError = null;
+        if (nameTrim) {
+          const byNameResp = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_name', nameTrim)
+            .eq('organization_id', orgId)
+            .is('rental_end_date', null);
+          const byNameAsIdResp = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('customer_id', nameTrim)
+            .eq('organization_id', orgId)
+            .is('rental_end_date', null);
+          rentalByName = byNameResp.data || [];
+          rentalByNameAsId = byNameAsIdResp.data || [];
+          rentalByNameError = byNameResp.error;
+          rentalByNameAsIdError = byNameAsIdResp.error;
+        }
+
+        push(rentalById);
+        push(rentalByPk);
+        if (!rentalByNameError) push(rentalByName);
+        if (!rentalByNameAsIdError) push(rentalByNameAsId);
+      };
+
+      await mergeOneAccount(customerName, customerListId, customerPkId);
+      for (const row of subsidiaryCustomerRows || []) {
+        if (!row) continue;
+        await mergeOneAccount(row.name, row.CustomerListID, row.id);
+      }
+
+      // Final safety dedupe by business key so one active row is shown per bottle/DNS key.
+      // Keep the most recent row when duplicates exist.
+      const byKey = new Map();
+      const dedupeKey = (r) => {
+        if (r?.is_dns === true) {
+          // Keep distinct DNS rows by id; rentalById/byName merge already removes true duplicates by id.
+          return `dns_row:${String(r?.id || '').trim() || `${r?.dns_product_code || r?.product_code || ''}:${String(r?.bottle_barcode || '').trim().toUpperCase()}:${r?.customer_id || ''}:${r?.rental_start_date || ''}:${r?.created_at || ''}`}`;
+        }
+        if (r?.bottle_id) return `bottle_id:${r.bottle_id}`;
+        if (r?.bottle_barcode) return `barcode:${String(r.bottle_barcode).trim().toUpperCase()}`;
+        return `row:${r?.id || Math.random().toString(36).slice(2)}`;
+      };
+      const rank = (r) => {
+        const start = Date.parse(r?.rental_start_date || '') || 0;
+        const updated = Date.parse(r?.updated_at || '') || 0;
+        const created = Date.parse(r?.created_at || '') || 0;
+        return [start, updated, created];
+      };
+      const isNewer = (next, cur) => {
+        const [ns, nu, nc] = rank(next);
+        const [cs, cu, cc] = rank(cur);
+        if (ns !== cs) return ns > cs;
+        if (nu !== cu) return nu > cu;
+        return nc >= cc;
+      };
+
+      merged.forEach((row) => {
+        const key = dedupeKey(row);
+        const existing = byKey.get(key);
+        if (!existing || isNewer(row, existing)) {
+          byKey.set(key, row);
         }
       });
-    };
-    push(rentalById);
-    push(rentalByPk);
-    if (!rentalByNameError) push(rentalByName);
-    if (!rentalByNameAsIdError) push(rentalByNameAsId);
 
-    // Final safety dedupe by business key so one active row is shown per bottle/DNS key.
-    // Keep the most recent row when duplicates exist.
-    const byKey = new Map();
-    const dedupeKey = (r) => {
-      if (r?.is_dns === true) {
-        // Keep distinct DNS rows by id; rentalById/byName merge already removes true duplicates by id.
-        return `dns_row:${String(r?.id || '').trim() || `${r?.dns_product_code || r?.product_code || ''}:${String(r?.bottle_barcode || '').trim().toUpperCase()}:${r?.customer_id || ''}:${r?.rental_start_date || ''}:${r?.created_at || ''}`}`;
-      }
-      if (r?.bottle_id) return `bottle_id:${r.bottle_id}`;
-      if (r?.bottle_barcode) return `barcode:${String(r.bottle_barcode).trim().toUpperCase()}`;
-      return `row:${r?.id || Math.random().toString(36).slice(2)}`;
-    };
-    const rank = (r) => {
-      const start = Date.parse(r?.rental_start_date || '') || 0;
-      const updated = Date.parse(r?.updated_at || '') || 0;
-      const created = Date.parse(r?.created_at || '') || 0;
-      return [start, updated, created];
-    };
-    const isNewer = (next, cur) => {
-      const [ns, nu, nc] = rank(next);
-      const [cs, cu, cc] = rank(cur);
-      if (ns !== cs) return ns > cs;
-      if (nu !== cu) return nu > cu;
-      return nc >= cc;
-    };
-
-    merged.forEach((row) => {
-      const key = dedupeKey(row);
-      const existing = byKey.get(key);
-      if (!existing || isNewer(row, existing)) {
-        byKey.set(key, row);
-      }
-    });
-
-    return Array.from(byKey.values());
-  }, [id]);
+      return Array.from(byKey.values());
+    },
+    [id]
+  );
 
   // DNS = approved invoice without a scanned bottle.
   // RNB = return scanned on this customer's order but no matching open rental/assignment for them when approved (order customer ≠ “on rent” for that bottle).
@@ -724,7 +755,8 @@ export default function CustomerDetail() {
         customer.organization_id,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNB resolved. It will no longer show on this customer.', severity: 'success' });
@@ -752,7 +784,8 @@ export default function CustomerDetail() {
         customer.organization_id,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'RNS resolved. It will no longer reduce this customer\'s total.', severity: 'success' });
@@ -780,7 +813,8 @@ export default function CustomerDetail() {
         customer.organization_id,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       setTransferMessage({ open: true, message: 'DNS cleared. It will no longer show on this customer.', severity: 'success' });
@@ -875,7 +909,8 @@ export default function CustomerDetail() {
         orgId,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       setAddManualDnsOpen(false);
@@ -969,7 +1004,8 @@ export default function CustomerDetail() {
         customer.organization_id,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       setTransferMessage({
@@ -1028,37 +1064,63 @@ export default function CustomerDetail() {
         setCustomer(customerData);
         setEditForm({ ...customerData, billing_mode: customerData.billing_mode || 'rental' });
 
-        // Parent: customer under another (e.g. Stevenson Industrial Regina under Stevenson Industrial)
+        // Parent: customer under another (e.g. branch under head office)
+        let parentRow = null;
         if (customerData.parent_customer_id) {
-          const { data: parentRow } = await supabase.from('customers').select('id, name, CustomerListID').eq('id', customerData.parent_customer_id).single();
-          setParentCustomer(parentRow || null);
+          const { data: pr } = await supabase
+            .from('customers')
+            .select('id, name, CustomerListID')
+            .eq('id', customerData.parent_customer_id)
+            .maybeSingle();
+          parentRow = pr || null;
+          setParentCustomer(parentRow);
         } else {
           setParentCustomer(null);
         }
-        // Children: locations/departments under this customer (e.g. Stevenson Industrial Regina, Saskatoon under Stevenson Industrial)
+        // Children: locations/departments under this customer
+        let childrenRows = [];
         if (customerData.id) {
-          const { data: children } = await supabase.from('customers').select('id, name, CustomerListID').eq('parent_customer_id', customerData.id).order('name');
-          setChildCustomers(children || []);
+          const { data: children } = await supabase
+            .from('customers')
+            .select('id, name, CustomerListID')
+            .eq('parent_customer_id', customerData.id)
+            .order('name');
+          childrenRows = children || [];
+          setChildCustomers(childrenRows);
         } else {
           setChildCustomers([]);
         }
-        
+
+        // Also merge bottles/rentals keyed under linked customer rows (branch list IDs / parent account).
+        const subsidiaryCustomerRows = [];
+        const seenSubId = new Set();
+        const pushSubsidiary = (row) => {
+          if (!row?.id || seenSubId.has(row.id)) return;
+          if (String(row.id) === String(customerData.id)) return;
+          seenSubId.add(row.id);
+          subsidiaryCustomerRows.push(row);
+        };
+        childrenRows.forEach(pushSubsidiary);
+        if (parentRow) pushSubsidiary(parentRow);
+
         const orgId = customerData.organization_id;
         const customerAssetsData = await fetchMergedBottlesForCustomer(
           orgId,
           customerData.name,
           customerData.CustomerListID,
-          customerData.id
+          customerData.id,
+          subsidiaryCustomerRows
         );
         setCustomerAssets(customerAssetsData);
-        
+
         setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
-        
+
         const merged = await fetchMergedOpenRentalsForCustomer(
           orgId,
           customerData.name,
           customerData.CustomerListID,
-          customerData.id
+          customerData.id,
+          subsidiaryCustomerRows
         );
         // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
         const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
@@ -1070,15 +1132,20 @@ export default function CustomerDetail() {
           const hasByBarcode = barcode && barcodesWithRental.has(barcode);
           return !hasById && !hasByBarcode;
         });
+        let openRentalsFinal = merged?.length ?? 0;
+        let backfilledRentalsInserted = 0;
         if (bottlesWithoutRental.length > 0) {
           const pricingCtx = await fetchOrgRentalPricingContext(supabase, customerData.organization_id);
           for (const bottle of bottlesWithoutRental) {
             const barcode = bottle.barcode_number || bottle.barcode;
-            const rental_amount = monthlyRateForNewRental(customerData.CustomerListID, bottle, pricingCtx);
+            const rentCustomerId = String(bottle.assigned_customer || '').trim() || customerData.CustomerListID;
+            const rentCustomerName = String(bottle.customer_name || '').trim() || customerData.name;
+            const pricingKey = rentCustomerId || customerData.CustomerListID;
+            const rental_amount = monthlyRateForNewRental(pricingKey, bottle, pricingCtx);
             await supabase.from('rentals').insert({
               organization_id: customerData.organization_id,
-              customer_id: customerData.CustomerListID,
-              customer_name: customerData.name,
+              customer_id: rentCustomerId,
+              customer_name: rentCustomerName,
               bottle_id: bottle.id,
               bottle_barcode: barcode,
               rental_start_date: inferRentalStartDateFromBottle(bottle),
@@ -1091,12 +1158,15 @@ export default function CustomerDetail() {
               is_dns: false,
             });
           }
+          backfilledRentalsInserted = bottlesWithoutRental.length;
           const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
             customerData.CustomerListID,
-            customerData.id
+            customerData.id,
+            subsidiaryCustomerRows
           );
+          openRentalsFinal = mergedAfterBackfill?.length ?? 0;
           setLocationAssets(mergedAfterBackfill);
         } else {
           setLocationAssets(merged);
@@ -1683,7 +1753,8 @@ export default function CustomerDetail() {
         organization.id,
         customer.name,
         listId,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setCustomerAssets(freshBottles);
       setTransferMessage({
@@ -1745,7 +1816,8 @@ export default function CustomerDetail() {
         customer.organization_id,
         customer.name,
         customer.CustomerListID,
-        customer.id
+        customer.id,
+        getSubsidiaryRowsForMerge()
       );
       setLocationAssets(merged);
       if (closed > 0 && typeof subscriptionCtx?.refresh === 'function') {
@@ -1945,7 +2017,8 @@ export default function CustomerDetail() {
           orgId,
           customer?.name,
           customer?.CustomerListID,
-          customer?.id
+          customer?.id,
+          getSubsidiaryRowsForMerge()
         );
         setCustomerAssets(customerAssetsData || []);
         setBottleSummary(summarizeBottlesByType(customerAssetsData || []));
@@ -2137,7 +2210,9 @@ export default function CustomerDetail() {
   };
 
   const handleEditChange = (e) => {
-    setEditForm({ ...editForm, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (!name) return;
+    setEditForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleOpenRentalSettings = () => {
@@ -2904,14 +2979,17 @@ export default function CustomerDetail() {
                 value={
                   !editForm.parent_customer_id
                     ? null
-                    : parentOptions.find((o) => o.id === editForm.parent_customer_id) ??
+                    : parentOptions.find(
+                        (o) => String(o?.id ?? '') === String(editForm.parent_customer_id ?? '')
+                      ) ??
                       (parentCustomer?.id != null &&
                       String(parentCustomer.id) === String(editForm.parent_customer_id)
                         ? parentCustomer
                         : null)
                 }
                 onChange={(_, v) => {
-                  const pid = v?.id ?? null;
+                  const pid =
+                    v?.id != null && String(v.id).trim() !== '' ? String(v.id).trim() : null;
                   setEditForm((prev) => ({
                     ...prev,
                     parent_customer_id: pid,
@@ -2925,7 +3003,9 @@ export default function CustomerDetail() {
                 renderInput={(params) => (
                   <TextField {...params} size="small" label="Under (parent customer)" placeholder="Search name or customer ID…" sx={{ mb: 2, minWidth: 220 }} />
                 )}
-                isOptionEqualToValue={(a, b) => (a?.id ?? null) === (b?.id ?? null)}
+                isOptionEqualToValue={(a, b) =>
+                  String(a?.id ?? '') === String(b?.id ?? '')
+                }
                 autoHighlight
                 openOnFocus
                 selectOnFocus
@@ -3026,10 +3106,11 @@ export default function CustomerDetail() {
                 <InputLabel id="customer-payment-terms-label">Payment terms</InputLabel>
                 <Select
                   labelId="customer-payment-terms-label"
-                  name="payment_terms"
                   label="Payment terms"
                   value={editForm.payment_terms ?? ''}
-                  onChange={handleEditChange}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, payment_terms: e.target.value }))
+                  }
                 >
                   {CUSTOMER_PAYMENT_TERM_OPTIONS.map((opt) => (
                     <MenuItem key={opt.label + opt.value} value={opt.value}>{opt.label}</MenuItem>
@@ -3056,9 +3137,10 @@ export default function CustomerDetail() {
             {editing ? (
               <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
                 <Select
-                  name="customer_type"
                   value={editForm.customer_type || 'CUSTOMER'}
-                  onChange={handleEditChange}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, customer_type: e.target.value }))
+                  }
                 >
                   <MenuItem value="CUSTOMER">Customer</MenuItem>
                   <MenuItem value="BRANCH">Branch / location (under parent)</MenuItem>
@@ -3087,7 +3169,9 @@ export default function CustomerDetail() {
                 <Select
                   name="billing_mode"
                   value={editForm.billing_mode || 'rental'}
-                  onChange={(e) => setEditForm({ ...editForm, billing_mode: e.target.value })}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, billing_mode: e.target.value }))
+                  }
                 >
                   <MenuItem value="rental">Rental — bill from assigned bottles (live)</MenuItem>
                   <MenuItem value="lease">Lease — bill from yearly contract lines</MenuItem>
@@ -3112,9 +3196,10 @@ export default function CustomerDetail() {
             {editing ? (
               <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
                 <Select
-                  name="location"
                   value={editForm.location || 'SASKATOON'}
-                  onChange={handleEditChange}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, location: e.target.value }))
+                  }
                   label="Location"
                 >
                   <MenuItem value="SASKATOON">SASKATOON</MenuItem>
@@ -4138,7 +4223,8 @@ export default function CustomerDetail() {
                                     customer?.organization_id,
                                     customer?.name,
                                     customer?.CustomerListID || id,
-                                    customer?.id
+                                    customer?.id,
+                                    getSubsidiaryRowsForMerge()
                                   );
                                   setLocationAssets(merged);
                                 };

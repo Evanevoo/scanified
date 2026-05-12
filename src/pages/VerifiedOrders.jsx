@@ -76,87 +76,251 @@ export default function VerifiedOrders() {
       setLoading(true);
       logger.log('🔍 Fetching verified orders for organization:', organization.id);
 
-      // Fetch verified imported invoices (auto_approved column exists on this table)
-      const { data: invoices, error: invoiceError } = await supabase
-        .from('imported_invoices')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .in('status', ['verified', 'approved'])
-        .neq('auto_approved', true)
-        .order('approved_at', { ascending: false })
-        .order('verified_at', { ascending: false });
-
-      if (invoiceError) {
-        logger.error('Error fetching verified invoices:', invoiceError);
-        throw invoiceError;
-      }
-
-      // Fetch verified imported receipts (some DBs do not have auto_approved on this table)
-      const { data: receipts, error: receiptError } = await supabase
-        .from('imported_sales_receipts')
-        .select('*')
-        .eq('organization_id', organization.id)
-        .in('status', ['verified', 'approved'])
-        .order('approved_at', { ascending: false })
-        .order('verified_at', { ascending: false });
-
-      if (receiptError) {
-        logger.error('Error fetching verified receipts:', receiptError);
-        throw receiptError;
-      }
-
-      // Scanned orders: from bottle_scans only (no status column; verified state is from import record)
-      const { data: bottleScansList, error: bottleScanError } = await supabase
-        .from('bottle_scans')
-        .select('id, bottle_barcode, order_number, mode, organization_id, customer_name, customer_id, created_at')
-        .eq('organization_id', organization.id)
-        .not('order_number', 'is', null)
-        .order('created_at', { ascending: false });
-      const scansForGroup = (bottleScansList || []).map(s => ({
-        ...s,
-        barcode_number: s.bottle_barcode,
-        action: (s.mode || '').toString().toUpperCase() === 'SHIP' || (s.mode || '').toString().toUpperCase() === 'DELIVERY' ? 'out' : 'in'
-      }));
-
-      if (bottleScanError) {
-        logger.error('Error fetching bottle_scans for verified list:', bottleScanError);
-      }
-
-      // Scanned orders only count as "verified" if their order number is in verified_order_numbers on an import.
       const normalizeOrderNumForList = (num) => {
         if (num == null || num === '') return '';
         const s = String(num).trim();
         if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
         return s;
       };
-      const verifiedOrderNums = new Set();
-      [...(invoices || []), ...(receipts || [])].forEach(rec => {
+
+      const [
+        { data: invoices, error: invoiceError },
+        { data: receipts, error: receiptError },
+        { data: pendingInvoices, error: pendingInvErr },
+        { data: pendingReceipts, error: pendingRecErr },
+        { data: bottleScansList, error: bottleScanError },
+      ] = await Promise.all([
+        supabase
+          .from('imported_invoices')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .in('status', ['verified', 'approved'])
+          .order('approved_at', { ascending: false })
+          .order('verified_at', { ascending: false }),
+        supabase
+          .from('imported_sales_receipts')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .in('status', ['verified', 'approved'])
+          .order('approved_at', { ascending: false })
+          .order('verified_at', { ascending: false }),
+        supabase
+          .from('imported_invoices')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .in('status', ['pending', 'processing']),
+        supabase
+          .from('imported_sales_receipts')
+          .select('*')
+          .eq('organization_id', organization.id)
+          .in('status', ['pending', 'processing']),
+        supabase
+          .from('bottle_scans')
+          .select('id, bottle_barcode, order_number, mode, organization_id, customer_name, customer_id, created_at')
+          .eq('organization_id', organization.id)
+          .not('order_number', 'is', null)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (invoiceError) {
+        logger.error('Error fetching verified invoices:', invoiceError);
+        throw invoiceError;
+      }
+      if (receiptError) {
+        logger.error('Error fetching verified receipts:', receiptError);
+        throw receiptError;
+      }
+      if (pendingInvErr) logger.warn('Pending invoices fetch (partial verified):', pendingInvErr);
+      if (pendingRecErr) logger.warn('Pending receipts fetch (partial verified):', pendingRecErr);
+      if (bottleScanError) {
+        logger.error('Error fetching bottle_scans for verified list:', bottleScanError);
+      }
+
+      const scansForGroup = (bottleScansList || []).map((s) => ({
+        ...s,
+        barcode_number: s.bottle_barcode,
+        action:
+          (s.mode || '').toString().toUpperCase() === 'SHIP' ||
+          (s.mode || '').toString().toUpperCase() === 'DELIVERY'
+            ? 'out'
+            : 'in',
+      }));
+
+      /** Per-order verified rows still on pending/processing import files (multi-order verify). */
+      const partialVerifiedOrders = [];
+      const pushPartialFromImport = (rec, tableType) => {
         const data = parseDataField(rec.data);
-        (Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : []).forEach(n => {
-          const norm = normalizeOrderNumForList(n);
-          if (norm) verifiedOrderNums.add(norm);
-        });
-      });
-      const scannedOrders = groupScansByOrder(scansForGroup).filter(o =>
+        const vor = data?.verified_order_numbers;
+        if (!Array.isArray(vor) || vor.length === 0) return;
+        const rows = data.rows || data.line_items || [];
+        const topCust =
+          (data.customer_name || data.CustomerName || data.Customer || '').toString().trim() || '';
+        const topId =
+          (data.customer_id || data.CustomerListID || data.CustomerId || '').toString().trim() || '';
+
+        const seenVoNorm = new Set();
+        for (const vo of vor) {
+          const orderStr = String(vo ?? '').trim();
+          if (!orderStr) continue;
+          const voNorm = normalizeOrderNumForList(orderStr);
+          if (seenVoNorm.has(voNorm)) continue;
+          seenVoNorm.add(voNorm);
+          const matchingRows = rows.filter((r) => {
+            const ref =
+              r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number;
+            return ref && normalizeOrderNumForList(ref) === voNorm;
+          });
+          const first = matchingRows[0] || rows[0];
+          const custName = first
+            ? (
+                first.customer_name ||
+                first.customerName ||
+                first.Customer ||
+                first.CustomerName ||
+                ''
+              )
+                .toString()
+                .trim()
+            : topCust;
+          const custId = first
+            ? (
+                first.customer_id ||
+                first.CustomerListID ||
+                first.CustomerId ||
+                ''
+              )
+                .toString()
+                .trim()
+            : topId;
+          const rowSlice =
+            matchingRows.length > 0
+              ? matchingRows
+              : [
+                  {
+                    order_number: orderStr,
+                    reference_number: orderStr,
+                    customer_name: custName || topCust,
+                    customer_id: custId || topId,
+                    CustomerListID: custId || topId,
+                  },
+                ];
+          // Do not use import row `updated_at` for "verified" time — it reflects re-imports/edits, not Feb verify.
+          const fallbackTs =
+            rec.approved_at || rec.verified_at || rec.created_at || new Date().toISOString();
+          partialVerifiedOrders.push({
+            ...rec,
+            _listKey: `${rec.id}\t${voNorm}\t${tableType}`,
+            id: rec.id,
+            type: tableType,
+            displayType: tableType === 'invoice' ? 'Invoice' : 'Receipt',
+            icon: tableType === 'invoice' ? <InvoiceIcon /> : <ShippingIcon />,
+            order_number: orderStr,
+            status: 'verified',
+            approved_at: rec.approved_at || rec.verified_at || fallbackTs,
+            verified_at: rec.verified_at || rec.approved_at || fallbackTs,
+            created_at: rec.created_at,
+            data_parsed: {
+              ...data,
+              order_number: orderStr,
+              reference_number: orderStr,
+              customer_name: custName || topCust,
+              customer_id: custId || topId,
+              CustomerListID: custId || topId,
+              rows: rowSlice,
+            },
+            _partialVerifiedOnPendingFile: true,
+          });
+        }
+      };
+      (pendingInvoices || []).forEach((r) => pushPartialFromImport(r, 'invoice'));
+      (pendingReceipts || []).forEach((r) => pushPartialFromImport(r, 'receipt'));
+
+      const hydratePartialVerifiedEvidenceDates = async (partials, orgId) => {
+        if (!partials?.length || !orgId) return;
+        const variantSet = new Set();
+        for (const p of partials) {
+          const raw = String(p.order_number || '').trim();
+          if (!raw) continue;
+          variantSet.add(raw);
+          const n = normalizeOrderNumForList(raw);
+          if (n && n !== raw) variantSet.add(n);
+        }
+        const variantList = [...variantSet].filter(Boolean);
+        if (!variantList.length) return;
+
+        const minMsByNorm = new Map();
+        const recordMin = (orderKeyRaw, timeIso) => {
+          if (!orderKeyRaw || !timeIso) return;
+          const k = normalizeOrderNumForList(orderKeyRaw);
+          if (!k) return;
+          const t = new Date(timeIso).getTime();
+          if (!Number.isFinite(t) || t <= 0) return;
+          const prev = minMsByNorm.get(k);
+          if (prev == null || t < prev) minMsByNorm.set(k, t);
+        };
+
+        const chunk = 120;
+        for (let i = 0; i < variantList.length; i += chunk) {
+          const slice = variantList.slice(i, i + chunk);
+          const [{ data: btls }, { data: scans }] = await Promise.all([
+            supabase
+              .from('bottles')
+              .select('last_verified_order, updated_at')
+              .eq('organization_id', orgId)
+              .in('last_verified_order', slice),
+            supabase
+              .from('bottle_scans')
+              .select('order_number, created_at')
+              .eq('organization_id', orgId)
+              .in('order_number', slice),
+          ]);
+          (btls || []).forEach((b) => recordMin(b.last_verified_order, b.updated_at));
+          (scans || []).forEach((s) => recordMin(s.order_number, s.created_at));
+        }
+
+        for (const p of partials) {
+          const k = normalizeOrderNumForList(p.order_number);
+          const evidenceMs = k ? minMsByNorm.get(k) : null;
+          if (evidenceMs != null) {
+            const iso = new Date(evidenceMs).toISOString();
+            p.verified_at = iso;
+            p.approved_at = iso;
+          }
+        }
+      };
+      await hydratePartialVerifiedEvidenceDates(partialVerifiedOrders, organization.id);
+
+      const verifiedOrderNums = new Set();
+      [...(invoices || []), ...(receipts || []), ...(pendingInvoices || []), ...(pendingReceipts || [])].forEach(
+        (rec) => {
+          const d = parseDataField(rec.data);
+          (Array.isArray(d?.verified_order_numbers) ? d.verified_order_numbers : []).forEach((n) => {
+            const norm = normalizeOrderNumForList(n);
+            if (norm) verifiedOrderNums.add(norm);
+          });
+        }
+      );
+      const scannedOrders = groupScansByOrder(scansForGroup).filter((o) =>
         verifiedOrderNums.has(normalizeOrderNumForList(o.order_number))
       );
 
       const allOrders = [
-        ...(invoices || []).map(inv => ({
+        ...(invoices || []).map((inv) => ({
           ...inv,
           type: 'invoice',
           displayType: 'Invoice',
           icon: <InvoiceIcon />,
-          data_parsed: parseDataField(inv.data)
+          data_parsed: parseDataField(inv.data),
         })),
-        ...(receipts || []).map(rec => ({
+        ...(receipts || []).map((rec) => ({
           ...rec,
           type: 'receipt',
           displayType: 'Receipt',
           icon: <ShippingIcon />,
-          data_parsed: parseDataField(rec.data)
+          data_parsed: parseDataField(rec.data),
         })),
-        ...scannedOrders
+        ...partialVerifiedOrders,
+        ...scannedOrders,
       ];
       
       // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
@@ -620,7 +784,13 @@ export default function VerifiedOrders() {
         // Fallback: manual record reset
         const { error: recordError } = await supabase
           .from(tableName)
-          .update({ status: 'pending', verified_at: null, verified_by: null })
+          .update({
+            status: 'pending',
+            verified_at: null,
+            verified_by: null,
+            approved_at: null,
+            ...(tableName === 'imported_invoices' ? { auto_approved: false } : {}),
+          })
           .eq('id', order.id);
         if (recordError) throw recordError;
 
@@ -630,37 +800,82 @@ export default function VerifiedOrders() {
         await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
       }
 
-      // Remove this order from verified_order_numbers in the data JSON so it shows as pending in Order Verification.
-      // Use normalized order matching so "S47475", "47475", "047475" all match; always clear when array has any match.
+      // Single DB write: strip this order from verified_order_numbers (all # variants on this card) and
+      // always reopen the import row so Order Verification lists it again (approved_at / status were hiding it).
       try {
-        const { data: currentRecord } = await supabase.from(tableName).select('data').eq('id', order.id).single();
-        if (currentRecord?.data) {
-          const currentData = typeof currentRecord.data === 'string' ? JSON.parse(currentRecord.data) : currentRecord.data;
-          const vor = Array.isArray(currentData.verified_order_numbers) ? currentData.verified_order_numbers : [];
-          const hasMatch = vor.some(n => normalizeOrderNum(n) === normalizedOrderNum);
-          if (hasMatch) {
-            currentData.verified_order_numbers = vor.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
-            await supabase.from(tableName).update({ data: currentData }).eq('id', order.id);
-            logger.log('Removed order from verified_order_numbers:', orderNumber);
+        const normStrip = (n) => {
+          if (n == null || n === '') return '';
+          const s = String(n).trim();
+          if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+          return s;
+        };
+        const { data: currentRecord, error: curErr } = await supabase
+          .from(tableName)
+          .select('data')
+          .eq('id', order.id)
+          .eq('organization_id', organization.id)
+          .single();
+        if (curErr) throw curErr;
+        const rawData = currentRecord?.data;
+        let currentData = null;
+        if (rawData != null && rawData !== '') {
+          if (typeof rawData === 'string') {
+            try {
+              currentData = JSON.parse(rawData);
+            } catch {
+              currentData = null;
+            }
+          } else if (typeof rawData === 'object' && rawData !== null) {
+            currentData = { ...rawData };
           }
         }
-      } catch (vonErr) {
-        logger.warn('Warning clearing verified_order_numbers:', vonErr);
-      }
+        const vor =
+          currentData && Array.isArray(currentData.verified_order_numbers)
+            ? currentData.verified_order_numbers
+            : [];
+        const stripNorms = new Set(
+          [
+            normStrip(orderNumber),
+            normStrip(order.order_number),
+            normalizedOrderNum,
+            ...((order.data_parsed?.rows || order.data_parsed?.line_items || []).flatMap((r) => {
+              const o = r.order_number || r.invoice_number || r.reference_number || r.sales_receipt_number;
+              const x = normStrip(o);
+              return x ? [x] : [];
+            })),
+          ].filter(Boolean)
+        );
+        if (currentData) {
+          currentData.verified_order_numbers = vor.filter((n) => !stripNorms.has(normStrip(n)));
+        }
 
-      // Ensure import record is pending and verified fields cleared so it reappears in Order Verification
-      try {
-        await supabase
-          .from(tableName)
-          .update({
+        const patch = {
+          status: 'pending',
+          verified_at: null,
+          verified_by: null,
+          approved_at: null,
+        };
+        if (currentData) {
+          patch.data = currentData;
+        }
+        if (tableName === 'imported_invoices') {
+          patch.auto_approved = false;
+        }
+        await supabase.from(tableName).update(patch).eq('id', order.id).eq('organization_id', organization.id);
+      } catch (e) {
+        logger.warn('Warning unverify import row (data + reopen):', e);
+        try {
+          const patch = {
             status: 'pending',
             verified_at: null,
-            verified_by: null
-          })
-          .eq('id', order.id)
-          .eq('organization_id', organization.id);
-      } catch (e) {
-        logger.warn('Warning resetting import record status:', e);
+            verified_by: null,
+            approved_at: null,
+          };
+          if (tableName === 'imported_invoices') patch.auto_approved = false;
+          await supabase.from(tableName).update(patch).eq('id', order.id).eq('organization_id', organization.id);
+        } catch (e2) {
+          logger.warn('Warning unverify import row status-only fallback:', e2);
+        }
       }
 
       // bottle_scans has no status; unverify state is on import record only
@@ -889,7 +1104,7 @@ export default function VerifiedOrders() {
               filteredOrders
                 .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((order) => (
-                  <TableRow key={order.id} hover>
+                  <TableRow key={order._listKey || order.id} hover>
                     <TableCell>
                       <Chip 
                         icon={order.icon}
@@ -921,7 +1136,12 @@ export default function VerifiedOrders() {
                     <TableCell>
                       <Chip 
                         icon={<VerifiedIcon />}
-                        label={order.status || 'Verified'}
+                        label={(() => {
+                          const s = String(order.status || 'verified').toLowerCase();
+                          if (s === 'verified' || s === 'approved') return 'Verified';
+                          if (s === 'pending') return 'Pending';
+                          return order.status ? String(order.status).replace(/^./, (c) => c.toUpperCase()) : 'Verified';
+                        })()}
                         size="small"
                         color="success"
                       />

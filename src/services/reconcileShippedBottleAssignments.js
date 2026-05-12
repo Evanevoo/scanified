@@ -77,7 +77,7 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
     const { data: bottles, error } = await supabase
       .from('bottles')
       .select(
-        'id, barcode_number, assigned_customer, customer_name, status, location, product_code, category, rental_class_id, rental_class_key, description, type'
+        'id, barcode_number, assigned_customer, customer_name, status, location, product_code, category, description, type'
       )
       .eq('organization_id', organizationId)
       .eq('barcode_number', barcode)
