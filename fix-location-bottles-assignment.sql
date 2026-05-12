@@ -90,3 +90,29 @@ WHERE organization_id = 'e215231c-326f-4382-93ce-95406ca2e54d'  -- Replace with 
   AND location != ''
 GROUP BY location
 ORDER BY total_bottles DESC;
+
+-- Step 5: Bottles whose `location` is a UUID (bad import/sync — should be a branch name like SASKATOON)
+SELECT
+  id,
+  barcode_number,
+  location,
+  status,
+  assigned_customer,
+  customer_name,
+  updated_at
+FROM bottles
+WHERE organization_id = 'e215231c-326f-4382-93ce-95406ca2e54d'  -- Replace with your organization_id
+  AND location ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+
+-- Optional: fix those rows after you pick the correct branch (uncomment and edit location/status as needed)
+-- UPDATE bottles
+-- SET
+--   location = 'SASKATOON',
+--   status = COALESCE(NULLIF(TRIM(status), ''), 'available')
+-- WHERE organization_id = 'e215231c-326f-4382-93ce-95406ca2e54d'
+--   AND location ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+
+-- One-off example (barcode 687511753): bad location was customer/org UUID; bottle unassigned → in-house branch
+-- UPDATE bottles
+-- SET location = 'SASKATOON', status = 'available', updated_at = NOW()
+-- WHERE id = 'fe74a2cf-c9b6-4808-91cb-36f14b8d46bf' AND organization_id = 'e215231c-326f-4382-93ce-95406ca2e54d';
