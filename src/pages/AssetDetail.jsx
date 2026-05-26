@@ -38,6 +38,13 @@ import { useAuth } from '../hooks/useAuth';
 import { useDynamicAssetTerms } from '../hooks/useDynamicAssetTerms';
 import { bottleLocationValueForCustomer, formatLocationDisplay, normalizeLocationKey } from '../utils/locationDisplay';
 import {
+  isCustomerOwnedOwnership,
+  persistedStatusForOwnership,
+  bottleStatusDisplayLabel,
+  bottleStatusChipColor,
+  CUSTOMER_OWNED_STORED_STATUS,
+} from '../utils/bottleOwnership';
+import {
   fetchMergedAssetMovementHistory,
   normalizeAuditDetails,
   postAssignmentFromAuditFieldChanges,
@@ -45,7 +52,7 @@ import {
 } from '../services/assetMovementHistory';
 
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
-const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost'];
+const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost', 'available'];
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const customerAutocompleteFilter = createFilterOptions({
@@ -359,7 +366,9 @@ export default function AssetDetail() {
   );
   const effectiveStatus = React.useMemo(() => {
     const fallback = normalizeStatus(asset?.status);
-    if (!movementHistory.length) return fallback;
+    if (!movementHistory.length) {
+      return persistedStatusForOwnership(fallback, asset?.ownership);
+    }
 
     const timelineAsc = movementHistory
       .filter((r) => !isSyntheticTimelineNoise(r))
@@ -370,9 +379,9 @@ export default function AssetDetail() {
       });
 
     const replayed = replayBottleStateFromTimeline(timelineAsc);
-    if (replayed.status) return normalizeStatus(replayed.status);
-    return fallback;
-  }, [movementHistory, asset?.status]);
+    const raw = replayed.status ? normalizeStatus(replayed.status) : fallback;
+    return persistedStatusForOwnership(raw, asset?.ownership);
+  }, [movementHistory, asset?.status, asset?.ownership]);
 
   useEffect(() => {
     const syncAssignmentFromHistory = async () => {
@@ -807,10 +816,7 @@ export default function AssetDetail() {
       const prevAssign = String(previousCustomer ?? '').trim();
       const nextAssign = String(editData.assigned_customer ?? '').trim();
       const assignmentChanged = prevAssign !== nextAssign;
-      const ownershipValue = String(editData.ownership || '').trim().toLowerCase();
-      const isCustomerOwned = ownershipValue.includes('customer') || 
-                             ownershipValue.includes('owned') || 
-                             ownershipValue === 'customer owned';
+      const isCustomerOwned = isCustomerOwnedOwnership(editData.ownership);
       
       if (assignmentChanged) {
         // Only override status when assignment actually changed
@@ -818,7 +824,7 @@ export default function AssetDetail() {
           // Assigning to customer
           const customer = customers.find(c => c.CustomerListID === editData.assigned_customer);
           if (customer?.customer_type === 'VENDOR' || isCustomerOwned) {
-            finalStatus = 'filled'; // In-house / vendor: keep as Full
+            finalStatus = isCustomerOwned ? CUSTOMER_OWNED_STORED_STATUS : 'filled';
           } else {
             finalStatus = 'rented';
           }
@@ -832,6 +838,10 @@ export default function AssetDetail() {
         }
       }
       // If assignment did not change, finalStatus already is editData.status (user's choice)
+
+      if (isCustomerOwned) {
+        finalStatus = persistedStatusForOwnership(finalStatus, editData.ownership);
+      }
 
       const customerForSave = editData.assigned_customer
         ? customers.find((c) => c.CustomerListID === editData.assigned_customer)
@@ -1209,21 +1219,18 @@ export default function AssetDetail() {
               Status
             </Typography>
             <Chip 
-              label={
-                effectiveStatus === 'filled' || effectiveStatus === 'full' ? 'Full' :
-                effectiveStatus === 'empty' ? 'Empty' :
-                effectiveStatus === 'rented' ? 'Rented' :
-                effectiveStatus === 'lost' ? 'Lost' :
-                effectiveStatus || 'Unknown'
-              }
-              color={
-                effectiveStatus === 'filled' || effectiveStatus === 'full' ? 'success' :
-                effectiveStatus === 'empty' ? 'warning' :
-                effectiveStatus === 'rented' ? 'info' :
-                effectiveStatus === 'lost' ? 'error' : 'default'
-              }
+              label={bottleStatusDisplayLabel(asset?.status ?? effectiveStatus, asset?.ownership)}
+              color={bottleStatusChipColor(asset?.status ?? effectiveStatus, asset?.ownership)}
               size="small"
             />
+            {isCustomerOwnedOwnership(asset?.ownership) &&
+              ['rented', 'filled', 'empty', 'available', 'full'].includes(
+                String(asset?.status || '').toLowerCase()
+              ) && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
+                Customer-owned bottles do not use fill or rental status. Save to store status as not tracked (N/A).
+              </Typography>
+            )}
             {effectiveStatus === 'rented' && !hasCustomerAssignmentDisplay && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
                 No customer is linked on this asset record, so it is not clear who it is rented to. Movement history
@@ -1668,15 +1675,35 @@ export default function AssetDetail() {
               <FormControl fullWidth>
                 <InputLabel>Status</InputLabel>
                 <Select
-                  value={normalizeStatus(editData.status)}
+                  value={
+                    isCustomerOwnedOwnership(editData.ownership)
+                      ? normalizeStatus(editData.status) === 'lost'
+                        ? 'lost'
+                        : CUSTOMER_OWNED_STORED_STATUS
+                      : normalizeStatus(editData.status)
+                  }
                   onChange={(e) => setEditData({ ...editData, status: e.target.value })}
                   label="Status"
                 >
-                  <MenuItem value="filled">Full</MenuItem>
-                  <MenuItem value="empty">Empty</MenuItem>
-                  <MenuItem value="rented">Rented</MenuItem>
-                  <MenuItem value="lost">Lost</MenuItem>
+                  {isCustomerOwnedOwnership(editData.ownership) ? (
+                    [
+                      <MenuItem key="available" value={CUSTOMER_OWNED_STORED_STATUS}>N/A (not tracked)</MenuItem>,
+                      <MenuItem key="lost" value="lost">Lost</MenuItem>,
+                    ]
+                  ) : (
+                    [
+                      <MenuItem key="filled" value="filled">Full</MenuItem>,
+                      <MenuItem key="empty" value="empty">Empty</MenuItem>,
+                      <MenuItem key="rented" value="rented">Rented</MenuItem>,
+                      <MenuItem key="lost" value="lost">Lost</MenuItem>,
+                    ]
+                  )}
                 </Select>
+                {isCustomerOwnedOwnership(editData.ownership) && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                    Customer-owned bottles are not rental stock; fill level is not tracked.
+                  </Typography>
+                )}
               </FormControl>
             </Grid>
             <Grid item xs={12} md={6}>
@@ -1753,7 +1780,14 @@ export default function AssetDetail() {
                 <Select
                   value={editData.ownership || ''}
                   label="Ownership"
-                  onChange={(e) => setEditData({ ...editData, ownership: e.target.value })}
+                  onChange={(e) => {
+                    const ownership = e.target.value;
+                    const next = { ...editData, ownership };
+                    if (isCustomerOwnedOwnership(ownership)) {
+                      next.status = persistedStatusForOwnership(editData.status, ownership);
+                    }
+                    setEditData(next);
+                  }}
                 >
                   <MenuItem value="">
                     <em>None</em>

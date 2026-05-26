@@ -510,6 +510,40 @@ export class NotificationService {
   }
 
   /**
+   * Persist in-app notification preference (used by Settings).
+   */
+  public async updateNotificationSettings(settings: { enabled: boolean }): Promise<void> {
+    // No persistent store yet; callers use sendLocalNotification when enabled.
+    logger.log('Notification settings updated:', settings);
+  }
+
+  /**
+   * Local feedback when auto-sync is toggled.
+   */
+  public async sendSyncNotification(_success: boolean, message: string): Promise<void> {
+    await this.sendLocalNotification({
+      title: 'Sync',
+      body: message,
+      categoryId: 'sync_status',
+      data: { type: 'sync_status' },
+    });
+  }
+
+  /**
+   * Local feedback when offline mode is toggled.
+   */
+  public async sendOfflineModeNotification(enabled: boolean): Promise<void> {
+    await this.sendLocalNotification({
+      title: 'Offline Mode',
+      body: enabled
+        ? 'Offline mode enabled. Data will be stored locally until you reconnect.'
+        : 'Offline mode disabled. The app will sync when connected.',
+      categoryId: 'sync_status',
+      data: { type: 'offline_mode', enabled },
+    });
+  }
+
+  /**
    * Send a success notification for barcode scan
    */
   public async sendScanSuccessNotification(barcode: string): Promise<void> {

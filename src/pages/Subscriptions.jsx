@@ -84,6 +84,13 @@ import {
   expandLeaseMatchKeys,
   isActiveCustomerRecord as isActiveCustomer,
 } from '../utils/leaseCustomerMatchKeys';
+import {
+  buildCustomerParentNameMap,
+  withCustomerHierarchyDisplayName,
+  getCustomerDisplayLabel,
+  getCustomerListId,
+  branchNameFromHierarchyLabel,
+} from '../utils/customerParentConstraint';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -641,6 +648,7 @@ export default function Subscriptions() {
         if (preserveExisting && byId.has(id)) return;
         byId.set(id, candidate);
       });
+      // Index branch `name` only — never `displayName` (Parent:Child) to avoid wrong customer matches.
       const n = normalizeName(candidate.name || candidate.Name || candidate.customer_name);
       if (n && !(preserveExisting && byName.has(n))) {
         byName.set(n, candidate);
@@ -660,8 +668,17 @@ export default function Subscriptions() {
 
   const resolveCustomer = useCallback((idOrName, fallbackName = '') => {
     const idKey = normalize(idOrName);
-    const nameKey = normalizeName(idOrName) || normalizeName(fallbackName);
-    return customerResolvers.byId.get(idKey) || customerResolvers.byName.get(nameKey) || null;
+    if (idKey) {
+      const byIdHit = customerResolvers.byId.get(idKey);
+      if (byIdHit) return byIdHit;
+    }
+    const branchLabel = branchNameFromHierarchyLabel(idOrName);
+    const nameKey =
+      normalizeName(branchLabel) ||
+      normalizeName(idOrName) ||
+      normalizeName(branchNameFromHierarchyLabel(fallbackName)) ||
+      normalizeName(fallbackName);
+    return customerResolvers.byName.get(nameKey) || null;
   }, [customerResolvers]);
 
   const matchCustomerRecordBySubscriptionId = useCallback((customerId) => {
@@ -674,6 +691,11 @@ export default function Subscriptions() {
     }
     return null;
   }, [ctx.customers]);
+
+  const parentNameById = useMemo(
+    () => buildCustomerParentNameMap(ctx.customers),
+    [ctx.customers]
+  );
 
   useEffect(() => {
     if (!organization?.id) {
@@ -905,7 +927,10 @@ export default function Subscriptions() {
             name: sub.customer_name || sub.customer_id,
             Name: sub.customer_name,
           };
-      const customer = mergeCustomerDirectoryFields(baseCustomer, sub.customer_id, matchCustomerRecordBySubscriptionId);
+      const customer = withCustomerHierarchyDisplayName(
+        mergeCustomerDirectoryFields(baseCustomer, sub.customer_id, matchCustomerRecordBySubscriptionId),
+        parentNameById
+      );
       const activeLease = findActiveLeaseContract(
         ctx.leaseContracts || [],
         sub.customer_id,
@@ -1019,6 +1044,7 @@ export default function Subscriptions() {
     defaultUnitRateByPeriod,
     organization?.id,
     leaseCoveredCountByCustomerKey,
+    parentNameById,
   ]);
 
   const customersWithBottlesNoSubscription = useMemo(() => {
@@ -1099,10 +1125,13 @@ export default function Subscriptions() {
           group.assignedId ||
           '';
 
-        const mergedVirtualCustomer = mergeCustomerDirectoryFields(
-          customer || { name: displayName, Name: displayName },
-          customerIdValue,
-          matchCustomerRecordBySubscriptionId,
+        const mergedVirtualCustomer = withCustomerHierarchyDisplayName(
+          mergeCustomerDirectoryFields(
+            customer || { name: displayName, Name: displayName },
+            customerIdValue,
+            matchCustomerRecordBySubscriptionId
+          ),
+          parentNameById
         );
         const mergedBillingBasisRows = mergeOpenRentalsForBillingBasis(
           ctx.rentals || [],
@@ -1154,7 +1183,7 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId]);
+  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId, parentNameById]);
 
   /** Legacy “rentals table only” virtual rows — must track `ctx.rentals` (same as SubscriptionContext) so counts stay in sync after refresh/realtime. A one-time fetch on org id alone went stale vs Customer Detail. */
   const legacyRows = useMemo(() => {
@@ -1217,10 +1246,13 @@ export default function Subscriptions() {
         }, new Map());
 
       rows = Array.from(grouped.values()).map((g) => {
-        const mergedCustomer = mergeCustomerDirectoryFields(
-          g.customer || { name: g.customer_name, Name: g.customer_name },
-          g.customer_id,
-          matchCustomerRecordBySubscriptionId,
+        const mergedCustomer = withCustomerHierarchyDisplayName(
+          mergeCustomerDirectoryFields(
+            g.customer || { name: g.customer_name, Name: g.customer_name },
+            g.customer_id,
+            matchCustomerRecordBySubscriptionId
+          ),
+          parentNameById
         );
         return {
           id: `legacy-${g.key}`,
@@ -1243,7 +1275,7 @@ export default function Subscriptions() {
     }
 
     return rows;
-  }, [ctx.rentals, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId]);
+  }, [ctx.rentals, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId, parentNameById]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -2644,9 +2676,16 @@ export default function Subscriptions() {
         periodEnd
       );
       if (fromDb) invNo = String(fromDb).trim();
-      if (!invNo) {
-        invNo = String(sub?.invoice_number || '').trim();
+      // Reserve the next org-wide sequential # for this billing period (never reuse last month's row).
+      if (!invNo && sub?.isVirtual) {
+        const v = await ensureVirtualInvoiceNumber(sub);
+        invNo = v ? String(v).trim() : '';
       }
+      if (!invNo && !sub?.isVirtual) {
+        const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
+        invNo = ensured ? String(ensured).trim() : '';
+      }
+      // Preview-only fallback when DB reserve failed (e.g. missing subscription id).
       if (!invNo) {
         const csvPeriod =
           String(sub?.billing_period || 'monthly').toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
@@ -2659,14 +2698,6 @@ export default function Subscriptions() {
         } catch (e) {
           console.warn('QB sequential invoice number lookup failed', e);
         }
-      }
-      if (!invNo && sub?.isVirtual) {
-        const v = await ensureVirtualInvoiceNumber(sub);
-        invNo = v ? String(v).trim() : '';
-      }
-      if (!invNo && !sub?.isVirtual) {
-        const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
-        invNo = ensured ? String(ensured).trim() : '';
       }
       if (!invNo) {
         invNo = defaultInvoiceNumber(sub);
@@ -4080,7 +4111,16 @@ export default function Subscriptions() {
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
                     <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{sub.customer?.name || sub.customer?.Name || sub.customer_id}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {getCustomerDisplayLabel(sub.customer, parentNameById) || sub.customer_id}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        component="div"
+                        sx={{ color: 'text.secondary', fontFamily: 'monospace', mt: 0.25 }}
+                      >
+                        {getCustomerListId(sub.customer, sub.customer_id) || '—'}
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />

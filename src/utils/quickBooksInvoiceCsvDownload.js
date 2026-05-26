@@ -1,5 +1,7 @@
 /** QuickBooks-style invoice CSV download (W-numbers, sessionStorage map). Shared by Rentals + Lease Agreements. */
 
+import { getCustomerListId, getCustomerDisplayLabel } from './customerParentConstraint';
+
 export const QB_CSV_LAST_INV_MAP_KEY = 'qb_csv_last_invoice_map';
 
 export function resolveTaxCode(gstAmount, pstAmount) {
@@ -116,7 +118,7 @@ export function downloadQuickBooksInvoiceCsv(activeRows, options = {}) {
     const txCode = resolveTaxCode(gst, pst);
     return {
       'Invoice#': assignedInvoiceByIdx.get(idx) || `W${String(startNumber + idx).padStart(5, '0')}`,
-      'Customer Number': row.customer_id || '',
+      'Customer Number': getCustomerListId(row.customer, row.customer_id) || row.customer_id || '',
       Total: total,
       Date: invoiceDate,
       GST: gst,
@@ -125,7 +127,12 @@ export function downloadQuickBooksInvoiceCsv(activeRows, options = {}) {
       'TX code': txCode,
       'Due date': dueDate,
       Rate: subtotal,
-      Name: row.customer?.name || row.customer?.Name || row.customer_id || '',
+      Name:
+        getCustomerDisplayLabel(row.customer) ||
+        row.customer?.name ||
+        row.customer?.Name ||
+        row.customer_id ||
+        '',
       '# of Bottles': parseFloat(row.itemCount) || 0,
     };
   });

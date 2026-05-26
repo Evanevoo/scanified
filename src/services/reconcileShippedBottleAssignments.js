@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from '../utils/rentalPricing';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
+import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -133,7 +134,7 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
         previous_assigned_customer: bottle.assigned_customer,
         assigned_customer: assignedCustomerValue,
         customer_name: assignName || bottle.customer_name,
-        status: 'rented',
+        status: isCustomerOwnedOwnership(bottle.ownership) ? CUSTOMER_OWNED_STORED_STATUS : 'rented',
         days_at_location: daysAtLocation,
         last_location_update: today,
         rental_order_number: orderNumber,

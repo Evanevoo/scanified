@@ -3,7 +3,6 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Modal, Alert, ScrollView, FlatList, Pressable, Dimensions, Keyboard, Platform, KeyboardAvoidingView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../supabase';
-import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import ScanArea from '../components/ScanArea';
@@ -98,6 +97,8 @@ export default function AddCylinderScreen() {
   const [addingOwner, setAddingOwner] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [ownershipPickerVisible, setOwnershipPickerVisible] = useState(false);
   const [showSerialModal, setShowSerialModal] = useState(false);
   const [gasTypeSearch, setGasTypeSearch] = useState('');
   const [gasTypeSuggestionsVisible, setGasTypeSuggestionsVisible] = useState(false);
@@ -545,49 +546,123 @@ export default function AddCylinderScreen() {
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading locations...</Text>
             </View>
           ) : (
-            <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Picker
-                selectedValue={selectedLocation != null ? String(selectedLocation) : ''}
-                onValueChange={(value) => setSelectedLocation(value != null && value !== '' ? String(value) : '')}
-                style={[styles.picker, { color: colors.text }]}
-                enabled={true}
-                dropdownIconColor={colors.text}
-              >
-                <Picker.Item label="Select Location" value="" />
-                {locations.map(location => (
-                  <Picker.Item 
-                    key={location.id} 
-                    label={location.name} 
-                    value={String(location.id)} 
-                  />
-                ))}
-              </Picker>
-            </View>
+            <TouchableOpacity
+              style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setLocationPickerVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.pickerButtonText, { color: selectedLocation ? colors.text : colors.textSecondary }]}>
+                {selectedLocation
+                  ? locations.find((loc) => String(loc.id) === String(selectedLocation))?.name || 'Select Location'
+                  : 'Select Location'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
           )}
         </View>
 
         <View style={styles.inputGroup}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
-          <View style={[styles.pickerWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Picker
-              selectedValue={selectedOwner != null ? String(selectedOwner) : ''}
-              onValueChange={value => {
-                const str = value != null ? String(value) : '';
-                if (str === '__add_new__') setAddingOwner(true);
-                else setSelectedOwner(str);
-              }}
-              style={[styles.picker, { color: colors.text }]}
-              enabled={true}
-              dropdownIconColor={colors.text}
-            >
-              <Picker.Item label="Select Owner" value="" />
-              {owners.map(owner => (
-                <Picker.Item key={owner.id} label={owner.name} value={String(owner.name)} />
-              ))}
-              <Picker.Item label="Add new owner..." value="__add_new__" />
-            </Picker>
-          </View>
+          <TouchableOpacity
+            style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setOwnershipPickerVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pickerButtonText, { color: selectedOwner ? colors.text : colors.textSecondary }]}>
+              {selectedOwner || 'Select Owner'}
+            </Text>
+            <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
+
+        <Modal
+          visible={locationPickerVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setLocationPickerVisible(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setLocationPickerVisible(false)}>
+            <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+              <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Location</Text>
+                <TouchableOpacity onPress={() => setLocationPickerVisible(false)}>
+                  <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.pickerModalScroll}>
+                {locations.map((location) => (
+                  <TouchableOpacity
+                    key={location.id}
+                    style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setSelectedLocation(String(location.id));
+                      setLocationPickerVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.pickerModalItemText, { color: colors.text }]}>{location.name}</Text>
+                    {String(selectedLocation) === String(location.id) && (
+                      <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </Pressable>
+        </Modal>
+
+        <Modal
+          visible={ownershipPickerVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setOwnershipPickerVisible(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setOwnershipPickerVisible(false)}>
+            <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+              <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Ownership</Text>
+                <TouchableOpacity onPress={() => setOwnershipPickerVisible(false)}>
+                  <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.pickerModalScroll}>
+                <TouchableOpacity
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setSelectedOwner('');
+                    setOwnershipPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.textSecondary }]}>Select Owner</Text>
+                  {!selectedOwner && <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>}
+                </TouchableOpacity>
+                {owners.map((owner) => (
+                  <TouchableOpacity
+                    key={owner.id}
+                    style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setSelectedOwner(owner.name);
+                      setOwnershipPickerVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.pickerModalItemText, { color: colors.text }]}>{owner.name}</Text>
+                    {selectedOwner === owner.name && (
+                      <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setOwnershipPickerVisible(false);
+                    setAddingOwner(true);
+                  }}
+                >
+                  <Text style={[styles.pickerModalItemText, { color: colors.primary }]}>Add new owner...</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </Pressable>
+        </Modal>
 
         {addingOwner && (
           <View style={styles.addOwnerContainer}>
@@ -859,15 +934,62 @@ const styles = StyleSheet.create({
   suggestionEmptyText: {
     fontSize: 14,
   },
-  pickerWrapper: {
+  pickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
     borderRadius: 10,
     borderWidth: 1,
-    backgroundColor: '#fff',
-    height: 48,
+    minHeight: 48,
   },
-  picker: {
-    width: '100%',
-    height: 48,
+  pickerButtonText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerModal: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    minHeight: 200,
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  pickerModalClose: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerModalScroll: {
+    maxHeight: 400,
+  },
+  pickerModalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  pickerModalItemText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  pickerModalCheck: {
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -1035,10 +1157,6 @@ const styles = StyleSheet.create({
     borderColor: '#bbf7d0',
     backgroundColor: '#f0fdf4',
     fontSize: 14,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: '#000',
   },
   fullscreenWrapper: {
     flex: 1,

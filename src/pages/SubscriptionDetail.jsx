@@ -27,6 +27,12 @@ import {
   IoRefreshOutline,
 } from 'react-icons/io5';
 import GradientMenu from '../components/ui/gradient-menu';
+import {
+  buildCustomerParentNameMap,
+  getCustomerDisplayLabel,
+  getCustomerListId,
+  withCustomerHierarchyDisplayName,
+} from '../utils/customerParentConstraint';
 
 export default function SubscriptionDetail() {
   const { id } = useParams();
@@ -54,6 +60,14 @@ export default function SubscriptionDetail() {
         .filter(Boolean);
       return subCustKey && ids.includes(subCustKey);
     }) || null;
+  const parentNameById = useMemo(
+    () => buildCustomerParentNameMap(ctx.customers),
+    [ctx.customers]
+  );
+  const customerForDisplay = useMemo(
+    () => (customer ? withCustomerHierarchyDisplayName(customer, parentNameById) : null),
+    [customer, parentNameById]
+  );
   const subInvoices = useMemo(() => ctx.invoices.filter((i) => i.subscription_id === id), [ctx.invoices, id]);
   const total = computeSubscriptionTotal(activeItems);
 
@@ -197,7 +211,14 @@ export default function SubscriptionDetail() {
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, p: 3, mb: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2}>
           <Box>
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>{customer?.name || customer?.Name || sub.customer_id}</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>
+              {getCustomerDisplayLabel(customerForDisplay, parentNameById) || sub.customer_id}
+            </Typography>
+            {getCustomerListId(customerForDisplay, sub.customer_id) && (
+              <Typography variant="body2" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                Customer # {getCustomerListId(customerForDisplay, sub.customer_id)}
+              </Typography>
+            )}
             {String(customer?.purchase_order || '').trim() !== '' && (
               <Typography variant="body2" sx={{ mt: 0.75, color: 'text.secondary', fontFamily: 'monospace' }}>
                 P.O.: <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>{customer.purchase_order}</Box>

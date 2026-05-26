@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -13,7 +13,18 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useAuth } from '../hooks/useAuth';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/StyledComponents';
-import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
+import {
+  finalizeCustomerBranchParentFields,
+  getCustomerBranchParentValidationError,
+  CUSTOMER_TYPE_BRANCH,
+  ACCOUNT_TYPE_BRANCH,
+  ACCOUNT_TYPE_MAIN,
+  getCustomerTypeChipLabel,
+  getCustomerTypeChipColor,
+  isBranchTypeSelectedInForm,
+  buildCustomerParentNameMap,
+  formatCustomerHierarchyDisplayName,
+} from '../utils/customerParentConstraint';
 import { isActiveCustomerRecord as isCustomerRowActive } from '../utils/leaseCustomerMatchKeys';
 
 const toolbarBtnSx = { minHeight: 40, px: 3 };
@@ -439,6 +450,12 @@ function Customers({ profile }) {
       setError('CustomerListID is required.');
       return;
     }
+    if (isBranchTypeSelectedInForm(form.customer_type) && !form.parent_customer_id) {
+      setError(
+        'Branch / location requires a parent account. Choose one under “Under (parent customer)”, or change type to Customer.'
+      );
+      return;
+    }
     try {
       // Only include columns that exist in the customers table
       const basePayload = {
@@ -454,6 +471,11 @@ function Customers({ profile }) {
       if (form.department?.trim()) basePayload.department = form.department.trim();
       if (form.email?.trim()) basePayload.email = form.email.trim();
       const payload = finalizeCustomerBranchParentFields(basePayload);
+      const branchParentError = getCustomerBranchParentValidationError(payload);
+      if (branchParentError) {
+        setError(branchParentError);
+        return;
+      }
       const { error } = await supabase.from('customers').insert([payload]);
       if (error) throw error;
       
@@ -656,6 +678,11 @@ function Customers({ profile }) {
 
   // No need for client-side filtering since we search at database level
   const filteredCustomers = customers;
+
+  const parentNameById = useMemo(
+    () => buildCustomerParentNameMap(customers),
+    [customers]
+  );
 
   const pageCount = debouncedSearch.trim() ? 1 : Math.ceil(totalCount / rowsPerPage);
   const selectedCount = selected.length;
@@ -1041,7 +1068,16 @@ function Customers({ profile }) {
                   </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#1976d2', cursor: 'pointer' }} onClick={() => navigate(`/customer/${c.CustomerListID}`)}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                      <span>{c.name}</span>
+                      <Box component="span" sx={{ display: 'flex', flexDirection: 'column' }}>
+                        <span>{formatCustomerHierarchyDisplayName(c, parentNameById)}</span>
+                        <Typography
+                          component="span"
+                          variant="caption"
+                          sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+                        >
+                          {c.CustomerListID}
+                        </Typography>
+                      </Box>
                       {!isCustomerRowActive(c) && (
                         <Chip label="Inactive" size="small" color="default" variant="outlined" sx={{ fontWeight: 700, fontSize: '0.68rem' }} />
                       )}
@@ -1049,12 +1085,9 @@ function Customers({ profile }) {
                   </TableCell>
                   <TableCell>
                     <Chip 
-                      label={c.customer_type || 'CUSTOMER'} 
+                      label={getCustomerTypeChipLabel(c)} 
                       size="small"
-                      color={
-                        c.customer_type === 'VENDOR' ? 'secondary' :
-                        c.customer_type === 'BRANCH' ? 'info' : 'primary'
-                      }
+                      color={getCustomerTypeChipColor(c)}
                       variant="outlined"
                     />
                   </TableCell>
@@ -1196,9 +1229,17 @@ function Customers({ profile }) {
                 <Select
                   label="Type"
                   value={form.customer_type}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, customer_type: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    if (nextType === CUSTOMER_TYPE_BRANCH && !form.parent_customer_id) {
+                      setError(
+                        'Select a parent customer first, or pick the parent under “Under (parent customer)” and type will switch to Branch automatically.'
+                      );
+                      return;
+                    }
+                    setError(null);
+                    setForm((prev) => ({ ...prev, customer_type: nextType }));
+                  }}
                 >
                   <MenuItem value="CUSTOMER">CUSTOMER</MenuItem>
                   <MenuItem value="BRANCH">BRANCH (under parent)</MenuItem>
@@ -1220,6 +1261,7 @@ function Customers({ profile }) {
                   setForm((prev) => ({
                     ...prev,
                     parent_customer_id: pid,
+                    account_type: pid ? ACCOUNT_TYPE_BRANCH : ACCOUNT_TYPE_MAIN,
                     customer_type: pid
                       ? 'BRANCH'
                       : prev.customer_type === 'BRANCH'
