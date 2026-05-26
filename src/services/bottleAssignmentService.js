@@ -12,6 +12,7 @@ import {
   isCustomerRowUuid,
 } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 
 /** Full customer row for RPC (`customers.id`) and direct ship updates. */
 async function resolveCustomerForAssignment(organizationId, customerId, customerName) {
@@ -128,7 +129,7 @@ async function assignShippedBottlesWithCustomerListId({
       previous_assigned_customer: bottle.assigned_customer,
       previous_status: bottle.status,
       customer_name: name,
-      status: 'rented',
+      status: isCustomerOwnedOwnership(bottle.ownership) ? CUSTOMER_OWNED_STORED_STATUS : 'rented',
       rental_start_date: today,
       last_verified_order: order || null,
       updated_at: new Date().toISOString(),

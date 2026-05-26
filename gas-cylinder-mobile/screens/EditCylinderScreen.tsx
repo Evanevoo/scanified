@@ -12,11 +12,6 @@ import { useTheme } from '../context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
-interface Customer {
-  CustomerListID: string;
-  name: string;
-}
-
 interface Location {
   id: string;
   name: string;
@@ -108,20 +103,12 @@ export default function EditCylinderScreen() {
   const [scanned, setScanned] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   
-  const [ownerType, setOwnerType] = useState<'organization' | 'customer' | 'external'>('organization');
-  const [ownerCustomerId, setOwnerCustomerId] = useState('');
-  const [ownerName, setOwnerName] = useState('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customersLoading, setCustomersLoading] = useState(false);
-  const [customersError, setCustomersError] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [locationsError, setLocationsError] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
   const [selectedLocationName, setSelectedLocationName] = useState('');
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [ownerTypePickerVisible, setOwnerTypePickerVisible] = useState(false);
-  const [customerPickerVisible, setCustomerPickerVisible] = useState(false);
   const [ownershipValues, setOwnershipValues] = useState<{ id: string; value: string }[]>([]);
   const [ownershipValuesLoading, setOwnershipValuesLoading] = useState(false);
   const [selectedOwnership, setSelectedOwnership] = useState('');
@@ -162,28 +149,10 @@ export default function EditCylinderScreen() {
     navigation.navigate('CustomerDetails', { customerId: customer.id });
   };
 
-  // Fetch customers and locations when cylinder is loaded (step 2)
+  // Fetch locations and ownership values when cylinder is loaded (step 2)
   React.useEffect(() => {
     if (step === 2 && profile?.organization_id) {
-      setCustomersLoading(true);
       setLocationsLoading(true);
-      
-      // Fetch customers
-      supabase
-        .from('customers')
-        .select('CustomerListID, name')
-        .eq('organization_id', profile.organization_id)
-        .order('name')
-        .then(({ data, error }) => {
-          if (error) {
-            logger.log('❌ Error loading customers:', error);
-            setCustomersError('Failed to load customers');
-          } else {
-            logger.log('✅ Loaded customers:', data?.length || 0);
-            setCustomers(data || []);
-          }
-          setCustomersLoading(false);
-        });
 
       // Fetch locations
       supabase
@@ -215,9 +184,12 @@ export default function EditCylinderScreen() {
         .eq('organization_id', profile.organization_id)
         .order('value')
         .then(async ({ data, error }) => {
-          if (!error && data && data.length > 0) {
+          if (error && error.code !== 'PGRST116') {
+            logger.log('❌ Error loading ownership values:', error);
+          }
+          if (data && data.length > 0) {
             setOwnershipValues(data.map((item) => ({ id: item.id, value: item.value })));
-          } else {
+          } else if (!error) {
             const { data: bottlesData } = await supabase
               .from('bottles')
               .select('ownership')
@@ -293,19 +265,11 @@ export default function EditCylinderScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Set initial owner fields and location when cylinder is loaded
+  // Set initial fields when cylinder is loaded
   React.useEffect(() => {
     if (cylinder) {
       setBarcode(cylinder.barcode_number || barcode);
       setSerial(cylinder.serial_number || serial);
-      const ownerTypeValue = cylinder?.owner_type;
-      if (ownerTypeValue === 'organization' || ownerTypeValue === 'customer' || ownerTypeValue === 'external') {
-        setOwnerType(ownerTypeValue);
-      } else {
-        setOwnerType('organization');
-      }
-      setOwnerCustomerId(cylinder?.owner_id || '');
-      setOwnerName(cylinder?.owner_name || '');
       setSelectedLocation(cylinder?.location || '');
       setSelectedLocationName(cylinder?.location || '');
       setSelectedOwnership(cylinder?.ownership || '');
@@ -397,23 +361,16 @@ export default function EditCylinderScreen() {
         updateFields.description = selectedGasType.description || null;
       }
     }
-    if (ownerType === 'organization') {
-      updateFields.owner_type = 'organization';
-      updateFields.owner_id = null;
-      updateFields.owner_name = '';
-      updateFields.assigned_customer = null;
-      updateFields.ownership = selectedOwnership || null;
-    } else if (ownerType === 'customer') {
-      updateFields.owner_type = 'customer';
-      updateFields.owner_id = ownerCustomerId;
-      const selectedCustomer = customers.find(c => c.CustomerListID === ownerCustomerId);
-      updateFields.owner_name = selectedCustomer ? selectedCustomer.name : '';
-      updateFields.assigned_customer = ownerCustomerId;
-    } else if (ownerType === 'external') {
-      updateFields.owner_type = 'external';
-      updateFields.owner_id = null;
-      updateFields.owner_name = ownerName;
-      updateFields.assigned_customer = null;
+    updateFields.ownership = selectedOwnership || null;
+    const ownershipLower = String(selectedOwnership || '').trim().toLowerCase();
+    const isCustomerOwned =
+      ownershipLower.includes('customer') &&
+      (ownershipLower.includes('owned') || ownershipLower === 'customer owned' || ownershipLower.includes('customer-owned'));
+    if (isCustomerOwned) {
+      const st = String(cylinder?.status || '').toLowerCase();
+      if (st !== 'lost') {
+        updateFields.status = 'available';
+      }
     }
     const { error: updateError } = await supabase
       .from('bottles')
@@ -688,82 +645,25 @@ export default function EditCylinderScreen() {
           
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Ownership</Text>
-            
             <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Owner Type</Text>
-              <TouchableOpacity 
-                style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                onPress={() => setOwnerTypePickerVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.pickerButtonText, { color: colors.text }]}>
-                  {ownerType === 'organization' ? 'Organization' : ownerType === 'customer' ? 'Customer' : 'External Company'}
-                </Text>
-                <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
+              {ownershipValuesLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.loadingText, { color: colors.text }]}>Loading ownership options...</Text>
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => setOwnershipPickerVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.pickerButtonText, { color: selectedOwnership ? colors.text : colors.textSecondary }]}>
+                    {selectedOwnership || 'Select ownership...'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
             </View>
-
-            {ownerType === 'organization' && (
-              <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Ownership</Text>
-                {ownershipValuesLoading ? (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                    <Text style={[styles.loadingText, { color: colors.text }]}>Loading ownership options...</Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity 
-                    style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    onPress={() => setOwnershipPickerVisible(true)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.pickerButtonText, { color: selectedOwnership ? colors.text : colors.textSecondary }]}>
-                      {selectedOwnership || 'Select ownership...'}
-                    </Text>
-                    <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
-            {ownerType === 'customer' && (
-              <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Assign to Customer</Text>
-                {customersLoading ? (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                    <Text style={[styles.loadingText, { color: colors.text }]}>Loading customers...</Text>
-                  </View>
-                ) : customersError ? (
-                  <Text style={[styles.error, { color: colors.error }]}>{customersError}</Text>
-                ) : (
-                  <TouchableOpacity 
-                    style={[styles.pickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    onPress={() => setCustomerPickerVisible(true)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.pickerButtonText, { color: ownerCustomerId ? colors.text : colors.textSecondary }]}>
-                      {ownerCustomerId ? customers.find(c => c.CustomerListID === ownerCustomerId)?.name || 'Select a customer...' : 'Select a customer...'}
-                    </Text>
-                    <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
-            {ownerType === 'external' && (
-              <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>External Company Name</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                  value={ownerName}
-                  onChangeText={setOwnerName}
-                  placeholder="Enter company name"
-                  placeholderTextColor={colors.textSecondary}
-                  autoCapitalize="words"
-                />
-              </View>
-            )}
           </View>
 
           <TouchableOpacity
@@ -803,93 +703,7 @@ export default function EditCylinderScreen() {
         </View>
       </Modal>
 
-      {/* Owner Type Picker Modal */}
-      <Modal
-        visible={ownerTypePickerVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setOwnerTypePickerVisible(false)}
-      >
-        <Pressable 
-          style={styles.modalOverlay}
-          onPress={() => setOwnerTypePickerVisible(false)}
-        >
-          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
-            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Owner Type</Text>
-              <TouchableOpacity onPress={() => setOwnerTypePickerVisible(false)}>
-                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerModalScroll}>
-              {[
-                { label: 'Organization', value: 'organization' },
-                { label: 'Customer', value: 'customer' },
-                { label: 'External Company', value: 'external' }
-              ].map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
-                  onPress={() => {
-                    setOwnerType(option.value as 'organization' | 'customer' | 'external');
-                    setOwnerTypePickerVisible(false);
-                  }}
-                >
-                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
-                    {option.label}
-                  </Text>
-                  {ownerType === option.value && (
-                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-
-      {/* Customer Picker Modal */}
-      <Modal
-        visible={customerPickerVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setCustomerPickerVisible(false)}
-      >
-        <Pressable 
-          style={styles.modalOverlay}
-          onPress={() => setCustomerPickerVisible(false)}
-        >
-          <View style={[styles.pickerModal, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
-            <View style={[styles.pickerModalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Customer</Text>
-              <TouchableOpacity onPress={() => setCustomerPickerVisible(false)}>
-                <Text style={[styles.pickerModalClose, { color: colors.primary }]}>Done</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerModalScroll}>
-              {customers.map((customer) => (
-                <TouchableOpacity
-                  key={customer.CustomerListID}
-                  style={[styles.pickerModalItem, { borderBottomColor: colors.border }]}
-                  onPress={() => {
-                    setOwnerCustomerId(customer.CustomerListID);
-                    setCustomerPickerVisible(false);
-                  }}
-                >
-                  <Text style={[styles.pickerModalItemText, { color: colors.text }]}>
-                    {customer.name}
-                  </Text>
-                  {ownerCustomerId === customer.CustomerListID && (
-                    <Text style={[styles.pickerModalCheck, { color: colors.primary }]}>✓</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-
-      {/* Ownership Picker Modal (when Owner Type is Organization) */}
+      {/* Ownership Picker Modal */}
       <Modal
         visible={ownershipPickerVisible}
         transparent={true}

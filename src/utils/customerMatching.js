@@ -1,6 +1,7 @@
 import logger from '../utils/logger';
 import { supabase } from '../supabase/client';
 import { postgrestQuotedIlikeContains } from './postgrestFilterEscape';
+import { branchNameFromHierarchyLabel } from './customerParentConstraint';
 
 /**
  * Enhanced customer matching function with multiple strategies
@@ -65,9 +66,11 @@ export async function findCustomer(customerName, customerId, organizationId = nu
     }
   }
   
-  // Strategy 3: Match by normalized name (remove parentheses and IDs)
+  // Strategy 3: Match by normalized name (remove parentheses and IDs; use branch part after ":")
   if (customerName) {
-    const normalizedName = customerName.replace(/\([^)]*\)/g, '').trim();
+    const normalizedName = branchNameFromHierarchyLabel(
+      customerName.replace(/\([^)]*\)/g, '').trim()
+    );
     const { data: customer, error } = await buildQuery(
       supabase
         .from('customers')
@@ -80,13 +83,16 @@ export async function findCustomer(customerName, customerId, organizationId = nu
     }
   }
   
-  // Strategy 4: Fuzzy name matching (case-insensitive)
+  // Strategy 4: Fuzzy name matching (case-insensitive; branch part only when label is Parent:Child)
   if (customerName) {
+    const searchName =
+      branchNameFromHierarchyLabel(customerName.replace(/\([^)]*\)/g, '').trim()) ||
+      customerName.trim();
     const { data: customers, error } = await buildQuery(
       supabase
         .from('customers')
         .select('CustomerListID, name, contact_details, phone')
-        .ilike('name', `%${customerName.trim()}%`)
+        .ilike('name', `%${searchName}%`)
     );
     
     if (customers && customers.length > 0 && !error) {

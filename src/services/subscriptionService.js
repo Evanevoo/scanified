@@ -1,11 +1,11 @@
 import { supabase } from '../supabase/client';
 import {
-  generateInvoiceNumber,
   getNextBillingDate,
   getPeriodEnd,
   calculateProration,
   getEndOfMonth,
 } from '../utils/subscriptionUtils';
+import { getNextInvoiceNumbers } from '../utils/invoiceUtils';
 import {
   buildAssetPricingMap,
   buildClassificationNodesById,
@@ -358,42 +358,79 @@ export async function generateInvoice(organizationId, subscriptionId) {
   const periodEnd = sub.current_period_end;
   const dueDate = getEndOfMonth(periodEnd || new Date()).toISOString().split('T')[0];
 
-  const { data: invoice, error: invErr } = await supabase
-    .from('subscription_invoices')
-    .insert({
-      organization_id: organizationId,
-      subscription_id: subscriptionId,
-      customer_id: sub.customer_id,
-      invoice_number: generateInvoiceNumber(),
-      status: 'draft',
-      period_start: periodStart,
-      period_end: periodEnd,
-      subtotal,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      due_date: dueDate,
-    })
-    .select()
-    .single();
-  if (invErr) throw invErr;
-
-  const lineItems = lineCalcs.map((row) => ({
-    invoice_id: invoice.id,
-    subscription_item_id: row.subscription_item_id,
-    lease_contract_item_id: row.lease_contract_item_id,
-    product_code: row.product_code,
-    description: row.description,
-    quantity: row.quantity,
-    unit_price: row.unit_price,
-    amount: row.amount,
-  }));
-
-  if (lineItems.length > 0) {
-    const { error: insertLiErr } = await supabase.from('invoice_line_items').insert(lineItems);
-    if (insertLiErr) throw insertLiErr;
+  if (periodStart && periodEnd) {
+    const { data: existingSi } = await supabase
+      .from('subscription_invoices')
+      .select('id, invoice_number')
+      .eq('organization_id', organizationId)
+      .eq('subscription_id', subscriptionId)
+      .eq('period_start', periodStart)
+      .eq('period_end', periodEnd)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingSi?.id) return existingSi;
   }
 
-  return invoice;
+  let invoiceNumber = null;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const reserved = await getNextInvoiceNumbers(organizationId, 1);
+    invoiceNumber = reserved?.[0];
+    if (!invoiceNumber) {
+      throw new Error('Failed to reserve a unique invoice number. Please retry.');
+    }
+    const { data: inserted, error: invErr } = await supabase
+      .from('subscription_invoices')
+      .insert({
+        organization_id: organizationId,
+        subscription_id: subscriptionId,
+        customer_id: sub.customer_id,
+        invoice_number: invoiceNumber,
+        status: 'draft',
+        period_start: periodStart,
+        period_end: periodEnd,
+        subtotal,
+        tax_amount: taxAmount,
+        total_amount: totalAmount,
+        due_date: dueDate,
+      })
+      .select()
+      .single();
+    if (!invErr && inserted) {
+      lastErr = null;
+      const lineItems = lineCalcs.map((row) => ({
+        invoice_id: inserted.id,
+        subscription_item_id: row.subscription_item_id,
+        lease_contract_item_id: row.lease_contract_item_id,
+        product_code: row.product_code,
+        description: row.description,
+        quantity: row.quantity,
+        unit_price: row.unit_price,
+        amount: row.amount,
+      }));
+      if (lineItems.length > 0) {
+        const { error: insertLiErr } = await supabase.from('invoice_line_items').insert(lineItems);
+        if (insertLiErr) throw insertLiErr;
+      }
+      return inserted;
+    }
+    lastErr = invErr;
+    const { data: raceSi } = await supabase
+      .from('subscription_invoices')
+      .select('id, invoice_number')
+      .eq('organization_id', organizationId)
+      .eq('subscription_id', subscriptionId)
+      .eq('period_start', periodStart)
+      .eq('period_end', periodEnd)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (raceSi?.id) return raceSi;
+    if (String(invErr?.code || '') !== '23505') break;
+  }
+  if (lastErr) throw lastErr;
+  throw new Error('Failed to create subscription invoice. Please retry.');
 }
 
 export async function recordPayment(invoiceId, organizationId, amount, method, reference, notes) {

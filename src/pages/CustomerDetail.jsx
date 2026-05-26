@@ -86,7 +86,15 @@ import {
 } from '../services/billingFromAssets';
 import {
   finalizeCustomerBranchParentFields,
-  resolveCustomerTypeForParentConstraint,
+  getCustomerBranchParentValidationError,
+  CUSTOMER_TYPE_BRANCH,
+  ACCOUNT_TYPE_BRANCH,
+  ACCOUNT_TYPE_MAIN,
+  customerTypeForForm,
+  getCustomerTypeChipLabel,
+  getCustomerTypeChipColor,
+  isBranchTypeSelectedInForm,
+  formatCustomerHierarchyDisplayName,
 } from '../utils/customerParentConstraint';
 import { expandLeaseMatchKeys } from '../utils/leaseCustomerMatchKeys';
 import { normalizePricingKey } from '../services/pricingResolution';
@@ -1062,7 +1070,11 @@ export default function CustomerDetail() {
         // We have exactly one customer
         const customerData = allCustomers[0];
         setCustomer(customerData);
-        setEditForm({ ...customerData, billing_mode: customerData.billing_mode || 'rental' });
+        setEditForm({
+          ...customerData,
+          billing_mode: customerData.billing_mode || 'rental',
+          customer_type: customerTypeForForm(customerData),
+        });
 
         // Parent: customer under another (e.g. branch under head office)
         let parentRow = null;
@@ -2619,10 +2631,13 @@ export default function CustomerDetail() {
       setSaving(false);
       return;
     }
-    const resolvedCustomerType = resolveCustomerTypeForParentConstraint(
-      editForm.customer_type,
-      normalizedParentId
-    );
+    if (isBranchTypeSelectedInForm(editForm.customer_type) && !normalizedParentId) {
+      setSaveError(
+        'Branch / location requires a parent account. Choose one under “Part of (parent customer)”, or change type to Customer.'
+      );
+      setSaving(false);
+      return;
+    }
     const updateFields = {
       name: editForm.name,
       email: editForm.email,
@@ -2635,7 +2650,7 @@ export default function CustomerDetail() {
       address5: editForm.address5,
       city: editForm.city,
       postal_code: editForm.postal_code,
-      customer_type: resolvedCustomerType,
+      customer_type: editForm.customer_type,
       location: editForm.location || 'SASKATOON',
       department: (editForm.department || '').trim() || null,
       parent_customer_id: normalizedParentId,
@@ -2673,6 +2688,12 @@ export default function CustomerDetail() {
       updateFields.CustomerListID = newCustomerListID;
     }
     const updatePayload = finalizeCustomerBranchParentFields(updateFields);
+    const branchParentError = getCustomerBranchParentValidationError(updatePayload);
+    if (branchParentError) {
+      setSaveError(branchParentError);
+      setSaving(false);
+      return;
+    }
     const { error } = await supabase
       .from('customers')
       .update(updatePayload)
@@ -2682,8 +2703,10 @@ export default function CustomerDetail() {
       const msg = error.message || '';
       const branchParentHint =
         /check_branch_has_parent/i.test(msg) || /branch.*parent/i.test(msg)
-          ? ' A row under a parent must use customer type “Branch / location”, and a branch must have a parent selected.'
-          : '';
+          ? ' A row under a parent must use Branch / location with a parent selected.'
+          : /customers_customer_type_check/i.test(msg)
+            ? ' Customer type must be Customer, Vendor, or Temporary — branch hierarchy is stored separately (account type + parent).'
+            : '';
       setSaveError(
         branchParentHint ? `${msg}.${branchParentHint}` : msg
       );
@@ -2843,7 +2866,7 @@ export default function CustomerDetail() {
           <Box>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
               <Chip label="Customer detail" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
-              <Chip label={customer.customer_type || 'CUSTOMER'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+              <Chip label={getCustomerTypeChipLabel(customer)} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
               <Chip label={formatLocationDisplay(customer.location || 'SASKATOON')} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
               <Chip
                 label={`Lease: ${leaseAgreementStatus.value}`}
@@ -2934,16 +2957,18 @@ export default function CustomerDetail() {
               {editing ? (
                 <TextField name="name" value={editForm.name || ''} onChange={handleEditChange} size="small" label="Name" sx={{ minWidth: 200 }} />
               ) : (
-                customer.name
+                formatCustomerHierarchyDisplayName(
+                  customer,
+                  parentCustomer?.id
+                    ? new Map([[String(parentCustomer.id), parentCustomer.name]])
+                    : new Map()
+                )
               )}
             </Typography>
             {!editing && (
               <Chip 
-                label={customer.customer_type || 'CUSTOMER'} 
-                color={
-                  customer.customer_type === 'VENDOR' ? 'secondary' :
-                  customer.customer_type === 'BRANCH' ? 'info' : 'primary'
-                } 
+                label={getCustomerTypeChipLabel(customer)} 
+                color={getCustomerTypeChipColor(customer)}
                 size="medium"
                 sx={{ fontWeight: 'bold' }}
               />
@@ -2993,6 +3018,7 @@ export default function CustomerDetail() {
                   setEditForm((prev) => ({
                     ...prev,
                     parent_customer_id: pid,
+                    account_type: pid ? ACCOUNT_TYPE_BRANCH : ACCOUNT_TYPE_MAIN,
                     customer_type: pid
                       ? 'BRANCH'
                       : prev.customer_type === 'BRANCH'
@@ -3001,7 +3027,20 @@ export default function CustomerDetail() {
                   }));
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} size="small" label="Under (parent customer)" placeholder="Search name or customer ID…" sx={{ mb: 2, minWidth: 220 }} />
+                  <TextField
+                    {...params}
+                    size="small"
+                    label="Under (parent customer)"
+                    placeholder="Search name or customer ID…"
+                    required={isBranchTypeSelectedInForm(editForm.customer_type)}
+                    helperText={
+                      isBranchTypeSelectedInForm(editForm.customer_type) &&
+                      !editForm.parent_customer_id
+                        ? 'Required for Branch / location'
+                        : 'Optional — links this account under a parent company'
+                    }
+                    sx={{ mb: 2, minWidth: 220 }}
+                  />
                 )}
                 isOptionEqualToValue={(a, b) =>
                   String(a?.id ?? '') === String(b?.id ?? '')
@@ -3138,9 +3177,20 @@ export default function CustomerDetail() {
               <FormControl size="small" sx={{ mb: 2, minWidth: 180 }}>
                 <Select
                   value={editForm.customer_type || 'CUSTOMER'}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, customer_type: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    if (
+                      nextType === CUSTOMER_TYPE_BRANCH &&
+                      !editForm.parent_customer_id
+                    ) {
+                      setSaveError(
+                        'Select a parent customer first, then use Branch / location — or pick the parent under “Part of” and type will switch automatically.'
+                      );
+                      return;
+                    }
+                    setSaveError(null);
+                    setEditForm((prev) => ({ ...prev, customer_type: nextType }));
+                  }}
                 >
                   <MenuItem value="CUSTOMER">Customer</MenuItem>
                   <MenuItem value="BRANCH">Branch / location (under parent)</MenuItem>
@@ -3151,12 +3201,8 @@ export default function CustomerDetail() {
             ) : (
               <Typography component="div" variant="body1" sx={{ mb: 2 }}>
                 <Chip 
-                  label={customer.customer_type || 'CUSTOMER'} 
-                  color={
-                    customer.customer_type === 'VENDOR' ? 'secondary' : 
-                    customer.customer_type === 'TEMPORARY' ? 'warning' :
-                    customer.customer_type === 'BRANCH' ? 'info' : 'primary'
-                  } 
+                  label={getCustomerTypeChipLabel(customer)} 
+                  color={getCustomerTypeChipColor(customer)}
                   size="small"
                   variant="outlined"
                 />
@@ -3496,7 +3542,11 @@ export default function CustomerDetail() {
                 color="secondary"
                 onClick={() => {
                   setEditing(false);
-                  setEditForm({ ...customer, billing_mode: customer.billing_mode || 'rental' });
+                  setEditForm({
+                    ...customer,
+                    billing_mode: customer.billing_mode || 'rental',
+                    customer_type: customerTypeForForm(customer),
+                  });
                 }}
                 disabled={saving}
               >

@@ -45,9 +45,6 @@ export default function SettingsScreen() {
   
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-screen-mount',hypothesisId:'H5',location:'gas-cylinder-android/screens/SettingsScreen.tsx:47',message:'Settings screen mounted',data:{platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     loadOfflineData();
     checkConnectivity();
     initializeSoundService();
@@ -145,69 +142,26 @@ export default function SettingsScreen() {
   const handleAutoSyncToggle = useCallback(async (value: boolean) => {
     try {
       logger.log('🔄 Auto Sync toggle:', value);
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H1',location:'gas-cylinder-android/screens/SettingsScreen.tsx:142',message:'Auto sync toggle invoked',data:{value,hasSendSyncNotification:typeof (notificationService as any).sendSyncNotification === 'function'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       updateSetting('autoSync', value);
-      
-      // Send notification about auto-sync change
       await notificationService.sendSyncNotification(
-        true, 
+        true,
         `Auto-sync ${value ? 'enabled' : 'disabled'}. ${value ? 'Data will sync automatically when connected.' : 'Manual sync required.'}`
       );
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H1',location:'gas-cylinder-android/screens/SettingsScreen.tsx:142',message:'Auto sync toggle failed',data:{value,errorName:error?.name || null,errorMessage:error?.message || String(error)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      throw error;
+      logger.error('Auto sync toggle failed:', error);
+      Alert.alert('Settings', 'Could not update auto-sync. Please try again.');
     }
   }, [updateSetting]);
 
   const handleOfflineModeToggle = useCallback(async (value: boolean) => {
     try {
       logger.log('🔄 Offline Mode toggle:', value);
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H2',location:'gas-cylinder-android/screens/SettingsScreen.tsx:153',message:'Offline mode toggle invoked',data:{value,hasSetOfflineMode:typeof (offlineModeService as any).setOfflineMode === 'function',hasSendOfflineModeNotification:typeof (notificationService as any).sendOfflineModeNotification === 'function'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       updateSetting('offlineMode', value);
-      
-      // Update offline mode service
       await offlineModeService.setOfflineMode(value);
-      
-      // Send notification about offline mode change
       await notificationService.sendOfflineModeNotification(value);
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H2',location:'gas-cylinder-android/screens/SettingsScreen.tsx:153',message:'Offline mode toggle failed',data:{value,errorName:error?.name || null,errorMessage:error?.message || String(error)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      throw error;
-    }
-  }, [updateSetting]);
-
-  const handleNotificationsToggle = useCallback(async (value: boolean) => {
-    try {
-      logger.log('🔄 Notifications toggle:', value);
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H3',location:'gas-cylinder-android/screens/SettingsScreen.tsx:164',message:'Notifications toggle invoked',data:{value,hasUpdateNotificationSettings:typeof (notificationService as any).updateNotificationSettings === 'function',hasSendLocalNotification:typeof (notificationService as any).sendLocalNotification === 'function'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      updateSetting('notifications', value);
-      
-      // Update notification service settings
-      await notificationService.updateNotificationSettings({ enabled: value });
-      
-      // Send test notification if enabling
-      if (value) {
-        await notificationService.sendLocalNotification({
-          title: 'Notifications Enabled',
-          body: 'You will now receive notifications for scans, syncs, and important updates.',
-          priority: 'default',
-        });
-      }
-    } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'settings-toggle-pre-fix',hypothesisId:'H3',location:'gas-cylinder-android/screens/SettingsScreen.tsx:164',message:'Notifications toggle failed',data:{value,errorName:error?.name || null,errorMessage:error?.message || String(error)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      throw error;
+      logger.error('Offline mode toggle failed:', error);
+      Alert.alert('Settings', 'Could not update offline mode. Please try again.');
     }
   }, [updateSetting]);
 

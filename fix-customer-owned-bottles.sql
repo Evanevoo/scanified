@@ -1,44 +1,43 @@
 -- Fix Customer-Owned Bottles Status
--- 
--- Updates customer-owned bottles that have status "rented" back to "available"
--- Customer-owned bottles should always have status "available" regardless of assignment
--- 
+--
+-- Customer-owned bottles are the customer's property, not company rental stock.
+-- They must not be "rented" or use fleet fill statuses (filled/empty).
+-- Uses status = 'available' (allowed by bottles_status_check; app displays as N/A).
+--
 -- Usage: Run this in Supabase SQL Editor
 
--- First, check how many customer-owned bottles have status "rented"
-SELECT 
-  COUNT(*) as customer_owned_with_rented_status,
-  organization_id
-FROM bottles
-WHERE assigned_customer IS NOT NULL
-  AND status = 'rented'
-  AND (
-    LOWER(TRIM(ownership)) LIKE '%customer%owned%' 
-    OR LOWER(TRIM(ownership)) LIKE '%owned%customer%'
-    OR LOWER(TRIM(ownership)) LIKE '%customer owned%'
-  )
-GROUP BY organization_id;
-
--- Update customer-owned bottles from "rented" back to "available"
-UPDATE bottles
-SET status = 'available'
-WHERE assigned_customer IS NOT NULL
-  AND status = 'rented'
-  AND (
-    LOWER(TRIM(ownership)) LIKE '%customer%owned%' 
-    OR LOWER(TRIM(ownership)) LIKE '%owned%customer%'
-    OR LOWER(TRIM(ownership)) LIKE '%customer owned%'
-  );
-
--- Verify the fix
-SELECT 
-  COUNT(*) as customer_owned_bottles,
+-- Preview: customer-owned bottles with invalid fleet-style statuses
+SELECT
+  COUNT(*) AS bottles_to_fix,
   status,
   organization_id
 FROM bottles
-WHERE assigned_customer IS NOT NULL
-  AND (
-    LOWER(TRIM(ownership)) LIKE '%customer%owned%' 
+WHERE (
+    LOWER(TRIM(ownership)) LIKE '%customer%owned%'
+    OR LOWER(TRIM(ownership)) LIKE '%owned%customer%'
+    OR LOWER(TRIM(ownership)) LIKE '%customer owned%'
+  )
+  AND LOWER(TRIM(status)) IN ('rented', 'filled', 'full', 'empty')
+GROUP BY status, organization_id;
+
+-- Fix: rented / filled / empty -> available (lost is kept)
+UPDATE bottles
+SET status = 'available'
+WHERE (
+    LOWER(TRIM(ownership)) LIKE '%customer%owned%'
+    OR LOWER(TRIM(ownership)) LIKE '%owned%customer%'
+    OR LOWER(TRIM(ownership)) LIKE '%customer owned%'
+  )
+  AND LOWER(TRIM(status)) IN ('rented', 'filled', 'full', 'empty');
+
+-- Verify
+SELECT
+  COUNT(*) AS customer_owned_bottles,
+  status,
+  organization_id
+FROM bottles
+WHERE (
+    LOWER(TRIM(ownership)) LIKE '%customer%owned%'
     OR LOWER(TRIM(ownership)) LIKE '%owned%customer%'
     OR LOWER(TRIM(ownership)) LIKE '%customer owned%'
   )

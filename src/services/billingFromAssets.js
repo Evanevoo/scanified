@@ -1,3 +1,5 @@
+import { isCustomerOwnedOwnership } from '../utils/bottleOwnership';
+
 /** Same normalization as pricingResolution.normalizePricingKey (keep local to avoid import cycle). */
 function normalizePricingKey(v) {
   return String(v || '').trim().toLowerCase();
@@ -87,12 +89,7 @@ export function expandBillingNameLookupKeys(name) {
  * (they are not company fleet on rent). Uses the same ownership hints as AssetDetail / imports.
  */
 export function isCustomerOwnedForBilling(bottle) {
-  if (!bottle) return false;
-  const o = String(bottle.ownership || '').trim().toLowerCase();
-  if (!o) return false;
-  if (o === 'customer owned' || o.includes('customer-owned')) return true;
-  if (o.includes('customer') && (o.includes('owned') || /\bown(ed)?\b/.test(o))) return true;
-  return false;
+  return isCustomerOwnedOwnership(bottle?.ownership);
 }
 
 /**
