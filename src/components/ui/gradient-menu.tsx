@@ -108,7 +108,7 @@ export default function GradientMenu({
   return (
     <div
       className={cn(
-        "flex justify-center items-center min-h-screen bg-neutral-950",
+        "inline-flex justify-center items-center",
         className
       )}
     >

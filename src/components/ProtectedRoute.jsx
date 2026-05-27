@@ -89,7 +89,7 @@ const ProtectedRoute = ({ children }) => {
                       color="primary" 
                       size="large"
                       fullWidth
-                      onClick={() => navigate('/billing')}
+                      onClick={() => navigate('/settings?tab=billing')}
                       sx={{ mt: 2 }}
                     >
                       View Plans & Upgrade
@@ -118,7 +118,7 @@ const ProtectedRoute = ({ children }) => {
                       color="warning" 
                       size="large"
                       fullWidth
-                      onClick={() => navigate('/billing?action=extend-trial')}
+                      onClick={() => navigate('/settings?tab=billing&action=extend-trial')}
                       sx={{ mt: 2 }}
                     >
                       Extend Trial

@@ -1992,7 +1992,7 @@ export default function Settings() {
                   <Button
                     variant="outlined"
                     sx={{ mt: 2 }}
-                    onClick={() => navigate('/billing')}
+                    onClick={() => navigate('/settings?tab=billing')}
                   >
                     View Billing Details
                   </Button>
@@ -2282,7 +2282,7 @@ export default function Settings() {
                       placeholder="Cheque, EFT transfers, Interac E-Transfer, MasterCard, & VISA"
                     />
                     <Alert severity="info">
-                      Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>, <strong>{'{purchase_order}'}</strong> (customer P.O. when set; empty otherwise), <strong>{'{organization_name}'}</strong>, <strong>{'{organization_website}'}</strong>, remit <strong>{'{remit_address}'}</strong> / line fields, <strong>{'{payment_methods}'}</strong>, <strong>{'{e_transfer_email}'}</strong>, <strong>{'{billing_inquiry_email}'}</strong> (default invoice / org email for billing replies)
+                      Available placeholders: <strong>{'{invoice_number}'}</strong>, <strong>{'{amount}'}</strong>, <strong>{'{customer_name}'}</strong>, <strong>{'{purchase_order}'}</strong> (customer P.O. when set; empty otherwise), <strong>{'{days_at_location_summary}'}</strong> (on-hand days summary; see PDF for detail), <strong>{'{organization_name}'}</strong>, <strong>{'{organization_website}'}</strong>, remit <strong>{'{remit_address}'}</strong> / line fields, <strong>{'{payment_methods}'}</strong>, <strong>{'{e_transfer_email}'}</strong>, <strong>{'{billing_inquiry_email}'}</strong> (default invoice / org email for billing replies)
                     </Alert>
                     {invoiceEmailTemplateMsg && (
                       <Alert

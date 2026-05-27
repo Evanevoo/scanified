@@ -734,9 +734,10 @@ export async function createRentalInvoicePdfDoc(params) {
     y += 10;
   } else {
     const a1 = left;
-    const a2 = left + 26;
-    const aBarcode = left + 82;
-    const aSerial = left + 112;
+    const a2 = left + 22;
+    const aBarcode = left + 72;
+    const aSerial = left + 98;
+    const aDays = left + 118;
     const classColW = Math.max(8, a2 - a1 - 2);
     const assetColW = Math.max(8, aBarcode - a2 - 4);
     doc.setFillColor(0, 0, 0);
@@ -748,6 +749,7 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.text('ASSET / TYPE', a2, y);
     doc.text('BARCODE', aBarcode, y);
     doc.text('SERIAL', aSerial, y);
+    doc.text('DAYS@LOC', aDays, y);
     y += 6;
     doc.setFont(fontFamily, 'normal');
     doc.setFontSize(5.5);
@@ -776,8 +778,13 @@ export async function createRentalInvoicePdfDoc(params) {
       y = ensureY(y, h + 2);
       doc.text(rcLines, a1, y);
       doc.text(atLines, a2, y);
+      const daysAtLoc =
+        b.days_at_location != null && Number.isFinite(Number(b.days_at_location))
+          ? String(Number(b.days_at_location))
+          : '0';
       doc.text(String(barcode), aBarcode, y);
       doc.text(String(serial), aSerial, y);
+      doc.text(daysAtLoc, aDays, y);
       y += h;
     });
   }

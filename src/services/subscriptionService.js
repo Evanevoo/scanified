@@ -18,6 +18,7 @@ import {
 } from './pricingResolution';
 import { groupBillableUnitCountsByProductCode } from './billingFromAssets';
 import { findActiveLeaseContract, leaseLineCycleAmount } from './leaseBilling';
+import { getBillingPeriodForSub } from '../utils/rentalBillingPeriod';
 
 /** Legacy `rentals` rows and `rental_amount` are not used for subscription invoice math; invoices branch on customers.billing_mode. */
 
@@ -354,9 +355,9 @@ export async function generateInvoice(organizationId, subscriptionId) {
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
 
-  const periodStart = sub.current_period_start;
-  const periodEnd = sub.current_period_end;
-  const dueDate = getEndOfMonth(periodEnd || new Date()).toISOString().split('T')[0];
+  const { periodStart, periodEnd, dueDate: periodDueDate } = getBillingPeriodForSub(sub);
+  const dueDate =
+    periodDueDate || getEndOfMonth(periodEnd || new Date()).toISOString().split('T')[0];
 
   if (periodStart && periodEnd) {
     const { data: existingSi } = await supabase

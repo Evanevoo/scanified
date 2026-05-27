@@ -464,14 +464,29 @@ export default function AssetHistory() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {records.filter(r =>
-              !searchTerm ||
-              r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
-            ).map(record => (
+            {(() => {
+              const filtered = records.filter(r =>
+                !searchTerm ||
+                r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
+              );
+              if (filtered.length === 0) {
+                return (
+                  <TableRow>
+                    <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        {records.length === 0
+                          ? 'No movement or audit events recorded for this asset yet.'
+                          : 'No records match your search.'}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              return filtered.map(record => (
               <TableRow key={record._rowKey || record.id} sx={recordEditId === record.id ? { backgroundColor: '#fefce8' } : {}}>
                 {recordEditId === record.id ? (
                   <>
@@ -514,7 +529,8 @@ export default function AssetHistory() {
                   </>
                 )}
               </TableRow>
-            ))}
+              ));
+            })()}
           </TableBody>
         </Table>
       </TableContainer>

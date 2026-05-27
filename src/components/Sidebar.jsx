@@ -251,6 +251,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Scanned Orders', subtitle: 'Orders from scanning', path: '/scanned-orders', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Order Verification', subtitle: 'Approve pending imports', path: '/import-approvals', icon: <CheckCircle />, roles: ['admin', 'user', 'manager'] },
         { title: 'Verified Orders', subtitle: 'Completed verifications', path: '/verified-orders', icon: <AssignmentIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Import rental agreements', subtitle: 'Upload lease files', path: '/import-rental-agreements', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Transfer from customers', subtitle: 'Bulk customer transfers', path: '/transfer-from-customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Web scanning', subtitle: 'Scan without mobile app', path: '/web-scanning', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     customers: {
@@ -299,6 +302,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       title: 'Billing',
       icon: <Payment />,
       items: [
+        { title: 'Invoices', subtitle: 'All rental invoices', path: '/invoices', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Emailed invoice history', subtitle: 'Sent PDFs & audit', path: '/invoices/history', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
         { title: 'QuickBooks Export', subtitle: 'Export CSV for QB', path: '/invoices/export', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
       ]
     },

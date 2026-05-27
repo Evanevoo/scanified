@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import { unassignBottlesForRemovedCustomer } from '../utils/bottleCustomerDirectory';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -549,18 +550,23 @@ function Customers({ profile }) {
     setError(null);
     try {
       logger.log(`Deleting customer with ID: ${id}`);
-      
-      // First, unassign any bottles from this customer
-      const { error: unassignError } = await supabase
-        .from('bottles')
-        .update({ assigned_customer: null, customer_name: null })
-        .eq('assigned_customer', id)
-        .eq('organization_id', organization.id);
-      
-      if (unassignError) {
-        logger.warn('Warning: Could not unassign bottles from customer:', unassignError);
-      } else {
-        logger.log('Successfully unassigned bottles from customer');
+
+      const { data: customerRow } = await supabase
+        .from('customers')
+        .select('id, CustomerListID, name')
+        .eq('CustomerListID', id)
+        .eq('organization_id', organization.id)
+        .maybeSingle();
+
+      try {
+        await unassignBottlesForRemovedCustomer(
+          supabase,
+          organization.id,
+          customerRow || { CustomerListID: id }
+        );
+        logger.log('Unassigned bottles linked to this customer (List ID, UUID, or name)');
+      } catch (unassignErr) {
+        logger.warn('Warning: Could not unassign bottles from customer:', unassignErr);
       }
       
       // Delete the customer
@@ -624,18 +630,20 @@ function Customers({ profile }) {
     try {
       logger.log(`Bulk deleting ${selected.length} customers:`, selected);
       
-      // First, unassign any bottles from these customers
-      const { error: unassignError } = await supabase
-        .from('bottles')
-        .update({ assigned_customer: null, customer_name: null })
-        .in('assigned_customer', selected)
+      const { data: customerRows } = await supabase
+        .from('customers')
+        .select('id, CustomerListID, name')
+        .in('CustomerListID', selected)
         .eq('organization_id', organization.id);
-      
-      if (unassignError) {
-        logger.warn('Warning: Could not unassign bottles from customers:', unassignError);
-      } else {
-        logger.log('Successfully unassigned bottles from customers');
+
+      for (const row of customerRows || []) {
+        try {
+          await unassignBottlesForRemovedCustomer(supabase, organization.id, row);
+        } catch (unassignErr) {
+          logger.warn('Warning: Could not unassign bottles for customer:', row?.CustomerListID, unassignErr);
+        }
       }
+      logger.log('Unassigned bottles for selected customers (List ID, UUID, and name matches)');
       
       // Delete the customers
       const { error, count } = await supabase

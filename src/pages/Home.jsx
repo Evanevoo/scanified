@@ -144,7 +144,7 @@ export default function Home() {
       return [
         { title: 'Add New Customer', path: '/customers', icon: <AddIcon />, color: 'primary' },
         { title: 'User Management', path: '/settings?tab=team', icon: <AdminPanelSettings />, color: 'secondary' },
-        { title: 'View Analytics', path: '/analytics', icon: <Analytics />, color: 'info' },
+        { title: 'View Analytics', path: '/industry-analytics', icon: <Analytics />, color: 'info' },
         { title: 'Organization Settings', path: '/settings', icon: <Settings />, color: 'warning' },
         { title: 'Rentals & invoices', path: '/rentals', icon: <Receipt />, color: 'success' },
         { title: 'Organization Tools', path: '/organization-tools', icon: <SecurityIcon />, color: 'error' },
@@ -153,7 +153,7 @@ export default function Home() {
     if (isManager()) {
       return [
         { title: 'Add New Customer', path: '/customers', icon: <AddIcon />, color: 'primary' },
-        { title: 'View Reports', path: '/reports', icon: <Analytics />, color: 'info' },
+        { title: 'View Reports', path: '/custom-reports', icon: <Analytics />, color: 'info' },
         { title: 'Organization Tools', path: '/organization-tools', icon: <SecurityIcon />, color: 'error' },
       ];
     }
@@ -446,10 +446,10 @@ export default function Home() {
                   History
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, mt: 1 }}>
-                  Review the latest cylinder history
+                  Customer rental history
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1, opacity: 0.95, maxWidth: 400 }}>
-                  Jump into the recent cylinder history to see movement and status changes at a glance.
+                  Monthly rental billing totals by customer (ship, return, and cycle activity).
                 </Typography>
               </Box>
               <Button

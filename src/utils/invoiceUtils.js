@@ -61,14 +61,16 @@ export async function resolveInvoiceNumberForRentalPdf(supabaseClient, organizat
  * @param {number} count - Number of invoice numbers to reserve
  * @returns {Promise<string[]>} Array of formatted invoice numbers (e.g. ['W00000','W00001',...])
  */
-export async function getNextInvoiceNumbers(organizationId, count) {
+export async function getNextInvoiceNumbers(organizationId, count, supabaseClient) {
   if (!organizationId || count < 1) return [];
-  return fallbackGetNextInvoiceNumbers(organizationId, count);
+  const db = supabaseClient || supabase;
+  return fallbackGetNextInvoiceNumbers(organizationId, count, db);
 }
 
-async function getOrCreateInvoiceSettings(organizationId) {
+async function getOrCreateInvoiceSettings(organizationId, supabaseClient) {
+  const db = supabaseClient || supabase;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { data: settings, error } = await supabase
+    const { data: settings, error } = await db
       .from('invoice_settings')
       .select('invoice_prefix, next_invoice_number')
       .eq('organization_id', organizationId)
@@ -77,7 +79,7 @@ async function getOrCreateInvoiceSettings(organizationId) {
     if (!error && settings) return settings;
     if (error && error.code !== 'PGRST116') throw error;
 
-    const { data: inserted, error: insertError } = await supabase
+    const { data: inserted, error: insertError } = await db
       .from('invoice_settings')
       .insert({
         organization_id: organizationId,
@@ -98,15 +100,16 @@ async function getOrCreateInvoiceSettings(organizationId) {
   throw new Error('Failed to initialize invoice settings.');
 }
 
-async function fallbackGetNextInvoiceNumbers(organizationId, count) {
+async function fallbackGetNextInvoiceNumbers(organizationId, count, supabaseClient) {
+  const db = supabaseClient || supabase;
   try {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const settings = await getOrCreateInvoiceSettings(organizationId);
+      const settings = await getOrCreateInvoiceSettings(organizationId, db);
       const prefix = settings?.invoice_prefix || 'W';
       const safeStart = Math.max(0, settings?.next_invoice_number ?? 0);
       const nowIso = new Date().toISOString();
 
-      const { data: reservedRows, error: reserveError } = await supabase
+      const { data: reservedRows, error: reserveError } = await db
         .from('invoice_settings')
         .update({ next_invoice_number: safeStart + count, updated_at: nowIso })
         .eq('organization_id', organizationId)

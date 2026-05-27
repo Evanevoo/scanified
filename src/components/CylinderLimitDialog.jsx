@@ -30,7 +30,7 @@ export default function CylinderLimitDialog({
   const navigate = useNavigate();
 
   const handleUpgrade = () => {
-    navigate('/billing');
+    navigate('/settings?tab=billing');
     onClose();
   };
 

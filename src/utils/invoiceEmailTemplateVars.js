@@ -49,6 +49,7 @@ export function buildRentalInvoiceEmailVarMap({
   remitAddressBlock,
   billingInquiryEmail,
   savedTemplate,
+  daysAtLocationSummary,
 }) {
   const tpl = savedTemplate || {};
   const profileName = String(orgName || '').trim();
@@ -84,6 +85,7 @@ export function buildRentalInvoiceEmailVarMap({
     e_transfer_email: eTransfer,
     payment_methods,
     billing_inquiry_email: String(billingInquiryEmail || '').trim(),
+    days_at_location_summary: String(daysAtLocationSummary || '').trim(),
   };
 }
 

@@ -56,6 +56,67 @@ export const stringifyHistoryDetails = (details) => {
   }
 };
 
+const movementActionFamily = (item) => {
+  const ht = String(item?.history_type || '').toLowerCase();
+  const mode = String(item?.mode || item?.action || '').toUpperCase();
+  if (ht === 'rental_start' || mode === 'SHIP') return 'SHIP';
+  if (ht === 'rental_end' || mode === 'RETURN') return 'RETURN';
+  if (ht === 'rental_rnb' || mode === 'RNB') return 'RNB';
+  if (ht === 'fill' || mode === 'FILL') return 'FILL';
+  if (ht === 'transfer') return 'TRANSFER';
+  return mode || ht || 'OTHER';
+};
+
+const movementEventDay = (item) => String(item?.created_at || '').slice(0, 10);
+
+/** Prefer bottle_scans over rental rows when both describe the same day + action. */
+const movementSourcePriority = (item) => {
+  const ht = String(item?.history_type || '');
+  if (ht === 'bottle_scan' || ht === 'cylinder_scan') return 3;
+  if (ht === 'rental_start' || ht === 'rental_end' || ht === 'rental_rnb') return 1;
+  if (ht === 'record_update') return 0;
+  return 2;
+};
+
+/**
+ * Collapse duplicate SHIP/RETURN from scans + rentals on the same calendar day.
+ */
+export function dedupeSemanticMovementHistory(items) {
+  const list = Array.isArray(items) ? [...items] : [];
+  const groups = new Map();
+  for (const item of list) {
+    const family = movementActionFamily(item);
+    if (!['SHIP', 'RETURN', 'RNB'].includes(family)) continue;
+    const day = movementEventDay(item);
+    if (!day) continue;
+    const key = `${String(item?.barcode_number || '').trim().toUpperCase()}|${day}|${family}`;
+    const prev = groups.get(key);
+    if (!prev || movementSourcePriority(item) > movementSourcePriority(prev)) {
+      groups.set(key, item);
+    }
+  }
+  const dropKeys = new Set(groups.keys());
+  const out = [];
+  const seenSemantic = new Set();
+  for (const item of list) {
+    const family = movementActionFamily(item);
+    if (!['SHIP', 'RETURN', 'RNB'].includes(family)) {
+      out.push(item);
+      continue;
+    }
+    const day = movementEventDay(item);
+    const key = `${String(item?.barcode_number || '').trim().toUpperCase()}|${day}|${family}`;
+    if (!dropKeys.has(key)) {
+      out.push(item);
+      continue;
+    }
+    if (seenSemantic.has(key)) continue;
+    seenSemantic.add(key);
+    out.push(groups.get(key));
+  }
+  return out;
+}
+
 /** Stable key so distinct sources (scan vs rental) are never collapsed together. */
 export function movementHistoryDedupeKey(item) {
   if (item?.id != null && String(item.id).trim() !== '') {
@@ -153,6 +214,30 @@ export async function fetchMergedAssetMovementHistory(supabase, {
           history_type: 'bottle_scan',
           barcode_number: scan.barcode_number || scan.bottle_barcode,
           action: scan.mode || 'SCAN',
+        });
+      });
+    }
+
+    if (!bsError && (!bsData || bsData.length === 0)) {
+      const legacyScans = await runOptionalQuery(
+        () =>
+          supabase
+            .from('scans')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .or(scansBarcodeOrClause)
+            .order('created_at', { ascending: false })
+            .limit(limit),
+        'scans'
+      );
+      legacyScans.forEach((scan) => {
+        allHistory.push({
+          ...scan,
+          id: scan.id || `legacy_scan_${scan.created_at}`,
+          history_type: 'bottle_scan',
+          barcode_number: scan.barcode_number || scan.bottle_barcode || barcodeNumber,
+          action: scan.mode || scan.action || 'SCAN',
+          mode: scan.mode || scan.action || 'SCAN',
         });
       });
     }
@@ -465,9 +550,11 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     });
   }
 
+  const semanticDeduped = dedupeSemanticMovementHistory(allHistory);
+
   const seen = new Set();
   const uniqueHistory = [];
-  for (const item of allHistory) {
+  for (const item of semanticDeduped) {
     const k = movementHistoryDedupeKey(item);
     if (seen.has(k)) continue;
     seen.add(k);

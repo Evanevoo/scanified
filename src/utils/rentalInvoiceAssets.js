@@ -114,6 +114,10 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
       ...b,
       rental_start_date: delivered,
       delivery_date: delivered,
+      days_at_location:
+        b.days_at_location != null && Number.isFinite(Number(b.days_at_location))
+          ? Number(b.days_at_location)
+          : 0,
       _invoiceStatus: 'On hand',
     });
   }
@@ -145,6 +149,10 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
           || ''
       ).trim();
 
+    const linkedDays =
+      linkedBottle?.days_at_location != null && Number.isFinite(Number(linkedBottle.days_at_location))
+        ? Number(linkedBottle.days_at_location)
+        : 0;
     out.push({
       id: r.id || `rental-${r.bottle_barcode || Math.random()}`,
       product_code: resolvedStrict || r.product_code || null,
@@ -155,6 +163,7 @@ export function buildOpenAssetRowsForInvoice(row, bottles, openRentals, options 
       barcode_number: r.bottle_barcode,
       bottle_barcode: r.bottle_barcode,
       serial_number: '—',
+      days_at_location: linkedDays,
       _invoiceSource: 'rental_only',
       _invoiceStatus: 'On hand',
       is_dns: r.is_dns === true,

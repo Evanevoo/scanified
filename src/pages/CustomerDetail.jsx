@@ -4647,7 +4647,7 @@ export default function CustomerDetail() {
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <HistoryIcon color="primary" />
-            Transfer History
+            Scan-based transfer history
           </Box>
         </DialogTitle>
         <DialogContent>
