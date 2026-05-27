@@ -75,7 +75,7 @@ function HideOnScroll({ children }) {
 export default function NavigationBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, organization } = useAuth();
+  const { profile } = useAuth();
   const { config } = useAssetConfig();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -107,9 +107,9 @@ export default function NavigationBar() {
     return location.pathname === path;
   };
 
-  // Marketing navbar should only appear for unauthenticated/public flows.
-  // Authenticated users get the in-app MainLayout navigation shell.
-  if (location.pathname === '/login' || (profile && organization)) {
+  // Marketing navbar only for unauthenticated/public flows.
+  // Any signed-in user (including platform owner without an org) uses MainLayout — avoid double nav on /owner-portal.
+  if (location.pathname === '/login' || profile) {
     return null;
   }
 
