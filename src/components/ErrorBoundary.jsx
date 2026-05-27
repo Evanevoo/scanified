@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import React from 'react';
 import { Box, Button, Typography, Paper, Alert, Link, Fade, Chip } from '@mui/material';
 import { Error as ErrorIcon, Refresh as RefreshIcon, Home as HomeIcon, Support as SupportIcon } from '@mui/icons-material';
+import { isChunkLoadError } from '../utils/lazyWithRetry';
 
 /**
  * Global error boundary component to catch React errors
@@ -47,6 +48,7 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      const chunkStale = isChunkLoadError(this.state.error);
       return (
         <Fade in timeout={500}>
           <Box
@@ -128,7 +130,9 @@ class ErrorBoundary extends React.Component {
                 />
                 
                 <Typography variant="body1" color="text.secondary" sx={{ mb: 4, lineHeight: 1.6 }}>
-                  We encountered an unexpected error. Don't worry - your data is safe. Please try one of the options below or contact our support team if the issue persists.
+                  {chunkStale
+                    ? 'The app was updated while this tab was open, so an old page file could not load. Refresh once to load the latest version. Your data is safe.'
+                    : "We encountered an unexpected error. Don't worry - your data is safe. Please try one of the options below or contact our support team if the issue persists."}
                 </Typography>
 
                 <Box display="flex" flexDirection="column" gap={2} sx={{ mb: 4 }}>

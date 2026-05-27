@@ -1,4 +1,8 @@
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy as reactLazy, Suspense, useEffect } from 'react';
+import { lazyWithRetry } from './utils/lazyWithRetry';
+
+/** Retry / reload on stale chunk URLs after production deploys. */
+const lazy = (importFactory) => reactLazy(() => lazyWithRetry(importFactory));
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AuthProvider } from './hooks/useAuth';
