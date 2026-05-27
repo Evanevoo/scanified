@@ -24,7 +24,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.evanevoo.scanifiedandroid",
-      "versionCode": 114,
+      "versionCode": 116,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"

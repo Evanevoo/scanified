@@ -20,6 +20,7 @@ import {
   mergePaymentMethodsIntoInvoiceEmailBody,
   stripRemitInstructionsFromInvoiceEmailBody,
 } from '../utils/invoiceEmailTemplateVars';
+import { logInvoiceEmailSend } from '../services/invoiceEmailHistory';
 import {
   buildOpenAssetRowsForInvoice,
   fetchReturnsInInvoicePeriod,
@@ -62,8 +63,9 @@ import {
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip,
   Button, TextField, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
-  Select, MenuItem, Alert, TablePagination,
+  Select, MenuItem, Alert, TablePagination, IconButton, Menu,
 } from '@mui/material';
+import { MoreVert } from '@mui/icons-material';
 import {
   People, Schedule, AccountBalance,
 } from '@mui/icons-material';
@@ -77,7 +79,6 @@ import {
   IoPersonCircleOutline,
   IoRefreshOutline,
 } from 'react-icons/io5';
-import GradientMenu from '../components/ui/gradient-menu';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import {
   customerKeysForLeaseMatch,
@@ -91,6 +92,16 @@ import {
   getCustomerListId,
   branchNameFromHierarchyLabel,
 } from '../utils/customerParentConstraint';
+import {
+  getCurrentCycleRange as getSharedCurrentCycleRange,
+  getBillingPeriodForSub,
+  computeInvoicePdfPeriodForRow as computeSharedInvoicePdfPeriodForRow,
+  lastDayOfMonthYm,
+  qbCsvDatesForBilledMonth,
+  sequenceMonthForSub,
+  getPeriodForCyclePrep,
+} from '../utils/rentalBillingPeriod';
+import { preallocateCycleInvoicesForOrganization } from '../services/preallocateCycleInvoices';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -162,29 +173,6 @@ async function runPool(items, concurrency, worker) {
   await Promise.all(Array.from({ length: n }, launch));
 }
 
-/** `YYYY-MM` → `YYYY-MM-DD` (last day of that month). */
-function lastDayOfMonthYm(ym) {
-  const parts = String(ym || '').trim().split('-');
-  if (parts.length < 2) return null;
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
-  const d = new Date(y, m, 0);
-  const day = d.getDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-/** Invoice / due dates for QuickBooks CSV when billing a closed calendar month (matches cycle: period end + due end of following month). */
-function qbCsvDatesForBilledMonth(ym) {
-  const periodEnd = lastDayOfMonthYm(ym);
-  if (!periodEnd) return { invoiceDate: null, dueDate: null };
-  const y = parseInt(ym.split('-')[0], 10);
-  const m = parseInt(ym.split('-')[1], 10);
-  const dueD = new Date(y, m + 1, 0);
-  const dueDate = `${dueD.getFullYear()}-${String(dueD.getMonth() + 1).padStart(2, '0')}-${String(dueD.getDate()).padStart(2, '0')}`;
-  return { invoiceDate: periodEnd, dueDate };
-}
-
 /** Invoice # chips: keyed by customer id and by subscription id (fixes mismatched UUID vs CustomerListID on older rows). */
 function emptyCycleInvoiceLookup() {
   return { byCustomerId: {}, bySubscriptionId: {} };
@@ -200,46 +188,6 @@ function mergeCustomerDirectoryFields(baseCustomer, subscriptionCustomerId, matc
   if (!cid || typeof matchCustomerBySubId !== 'function') return baseCustomer ?? b;
   const dir = matchCustomerBySubId(cid);
   return dir ? { ...b, ...dir } : Object.keys(b).length ? b : baseCustomer;
-}
-
-/**
- * Invoice PDF period bounds — aligned with QuickBooks CSV when a billing month is selected
- * (`qbBillingMonthYm` = `YYYY-MM`, not `live`). Yearly subscriptions keep Stripe yearly bounds.
- */
-function computeInvoicePdfPeriodForRow(row, getCurrentCycleRange, qbBillingMonthYm = null) {
-  const normPeriodDay = (v) => {
-    const s = String(v || '').trim().slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-  };
-  const subStart = normPeriodDay(row?.current_period_start);
-  const subEnd = normPeriodDay(row?.current_period_end);
-  const fallback = getCurrentCycleRange();
-  const isYearly = String(row?.billing_period || '').toLowerCase() === 'yearly';
-
-  const ymRaw = qbBillingMonthYm != null ? String(qbBillingMonthYm).trim() : '';
-  if (!isYearly && ymRaw && ymRaw.toLowerCase() !== 'live') {
-    const periodEnd = lastDayOfMonthYm(ymRaw);
-    if (periodEnd) {
-      const parts = ymRaw.split('-');
-      const y = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10);
-      if (Number.isFinite(y) && Number.isFinite(m)) {
-        const periodStart = `${y}-${String(m).padStart(2, '0')}-01`;
-        const { dueDate } = qbCsvDatesForBilledMonth(ymRaw);
-        return {
-          periodStart,
-          periodEnd,
-          dueDate: dueDate || fallback.dueDate,
-        };
-      }
-    }
-  }
-
-  const periodStart =
-    isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
-  const periodEnd =
-    isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
-  return { periodStart, periodEnd, dueDate: fallback.dueDate };
 }
 
 /** Same row identity as QuickBooks CSV ordering for W-number assignment. */
@@ -284,12 +232,15 @@ function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
   return `W${String(startNumber + idx).padStart(5, '0')}`;
 }
 
-function getInvoiceNumberFromLastCsvMap(targetSub) {
+function getInvoiceNumberFromLastCsvMap(targetSub, sequenceMonth) {
   if (!targetSub) return null;
+  const wantSeq = String(sequenceMonth || '').trim();
+  if (!wantSeq) return null;
   try {
     const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (parsed?.seqMonth !== wantSeq) return null;
     const byRowKey = parsed?.byRowKey;
     if (!byRowKey || typeof byRowKey !== 'object') return null;
     for (const key of qbCsvInvoiceStorageKeys(targetSub)) {
@@ -300,6 +251,16 @@ function getInvoiceNumberFromLastCsvMap(targetSub) {
   } catch {
     return null;
   }
+}
+
+function daysAtLocationSummaryFromBottles(bottles) {
+  const vals = (bottles || [])
+    .map((b) => Number(b.days_at_location))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  if (!vals.length) return 'See attached PDF for on-hand assets.';
+  const max = Math.max(...vals);
+  const avg = Math.round(vals.reduce((a, c) => a + c, 0) / vals.length);
+  return `On-hand assets: max ${max} days at location, average ${avg} days (see PDF).`;
 }
 
 const normalize = (v) => String(v || '').trim().toLowerCase();
@@ -359,6 +320,47 @@ function rowBillingCustomerRemovedFromDirectory(row, customers) {
  * rows × 6 gradient-menu items each). The debounced value is bubbled up via
  * `onDebouncedChange` so the parent only re-renders once typing settles.
  */
+/** Compact row actions — avoids 50+ GradientMenu instances (each was min-h-screen sized). */
+function RentalRowActionsMenu({ items, onAction, disabled }) {
+  const [anchorEl, setAnchorEl] = useState(null);
+  const open = Boolean(anchorEl);
+  return (
+    <>
+      <IconButton
+        size="small"
+        aria-label="Row actions"
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          setAnchorEl(e.currentTarget);
+        }}
+      >
+        <MoreVert fontSize="small" />
+      </IconButton>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={() => setAnchorEl(null)}
+        onClick={(e) => e.stopPropagation()}
+        slotProps={{ paper: { sx: { minWidth: 168 } } }}
+      >
+        {items.map((item) => (
+          <MenuItem
+            key={item.id}
+            disabled={item.disabled}
+            onClick={() => {
+              setAnchorEl(null);
+              if (!item.disabled && item.action) onAction(item.action);
+            }}
+          >
+            {item.title}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
 const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchField(
   { onDebouncedChange },
   ref,
@@ -431,6 +433,7 @@ export default function Subscriptions() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newSub, setNewSub] = useState({ customer_id: '', billing_period: 'monthly' });
   const [saving, setSaving] = useState(false);
+  const [preallocatingNumbers, setPreallocatingNumbers] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
   /** Saved invoice template JSON for PDF/email (localStorage; org-scoped). */
@@ -572,36 +575,16 @@ export default function Subscriptions() {
     ].filter(Boolean);
     return lines.join('\n');
   }, [remitAddress, organization?.name]);
-  const getCurrentCycleRange = useCallback(() => {
-    const now = new Date();
-    const toLocalYmd = (d) => {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    };
-    const periodStart = toLocalYmd(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-    const periodEnd = toLocalYmd(new Date(now.getFullYear(), now.getMonth(), 0));
-    const dueDate = toLocalYmd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-    return { periodStart, periodEnd, dueDate };
-  }, []);
+  const getCurrentCycleRange = useCallback(() => getSharedCurrentCycleRange(), []);
 
   /** Same period boundaries as rental PDF / line items (yearly subs use Stripe period when present). */
-  const getPdfBillingPeriodForSub = useCallback((sub) => {
-    const normPeriodDay = (v) => {
-      const s = String(v || '').trim().slice(0, 10);
-      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-    };
-    const subStart = normPeriodDay(sub?.current_period_start);
-    const subEnd = normPeriodDay(sub?.current_period_end);
-    const fallback = getCurrentCycleRange();
-    const isYearly = String(sub?.billing_period || '').toLowerCase() === 'yearly';
-    const periodStart =
-      isYearly && subStart && subEnd && subStart <= subEnd ? subStart : fallback.periodStart;
-    const periodEnd =
-      isYearly && subStart && subEnd && subStart <= subEnd ? subEnd : fallback.periodEnd;
-    return { periodStart, periodEnd };
-  }, [getCurrentCycleRange]);
+  const getPdfBillingPeriodForSub = useCallback(
+    (sub, qbBillingMonthYm = 'live') => {
+      const { periodStart, periodEnd } = getBillingPeriodForSub(sub, { qbBillingMonthYm });
+      return { periodStart, periodEnd };
+    },
+    [],
+  );
 
   // Stable extraction of bottle-derived customer candidates; only recomputes
   // when the actual set of unique (id, name) pairs changes, not on every
@@ -1671,19 +1654,37 @@ export default function Subscriptions() {
     return list;
   }, [allRows, debouncedSearch, termsFilter]);
 
+  const effectiveRowsPerPage = useMemo(() => {
+    const n = Number(rowsPerPage);
+    if (!Number.isFinite(n) || n < 1) return 50;
+    return Math.min(500, Math.floor(n));
+  }, [rowsPerPage]);
+
+  const effectiveTablePage = useMemo(() => {
+    if (filtered.length === 0) return 0;
+    const maxPage = Math.max(0, Math.ceil(filtered.length / effectiveRowsPerPage) - 1);
+    const p = Number(tablePage);
+    if (!Number.isFinite(p) || p < 0) return 0;
+    return Math.min(p, maxPage);
+  }, [filtered.length, effectiveRowsPerPage, tablePage]);
+
   const pagedFiltered = useMemo(() => {
-    const start = tablePage * rowsPerPage;
-    return filtered.slice(start, start + rowsPerPage);
-  }, [filtered, tablePage, rowsPerPage]);
+    const start = effectiveTablePage * effectiveRowsPerPage;
+    return filtered.slice(start, start + effectiveRowsPerPage);
+  }, [filtered, effectiveTablePage, effectiveRowsPerPage]);
 
   useEffect(() => {
     setTablePage(0);
   }, [termsFilter, debouncedSearch]);
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filtered.length / rowsPerPage) - 1);
+    if (filtered.length === 0) {
+      if (tablePage !== 0) setTablePage(0);
+      return;
+    }
+    const maxPage = Math.max(0, Math.ceil(filtered.length / effectiveRowsPerPage) - 1);
     if (tablePage > maxPage) setTablePage(maxPage);
-  }, [filtered.length, rowsPerPage, tablePage]);
+  }, [filtered.length, effectiveRowsPerPage, tablePage]);
 
   useEffect(() => {
     let active = true;
@@ -2194,7 +2195,9 @@ export default function Subscriptions() {
   };
 
   const ensureVirtualInvoiceNumber = useCallback(async (row) => {
-    const { periodStart, periodEnd, dueDate } = getCurrentCycleRange();
+    const { periodStart, periodEnd, dueDate } = getBillingPeriodForSub(row, {
+      qbBillingMonthYm: qbCsvBillingMonth,
+    });
     const today = new Date();
     const invoiceDate = today.toISOString().split('T')[0];
     const total = parseFloat(row?.totalPerCycle) || 0;
@@ -2249,13 +2252,14 @@ export default function Subscriptions() {
     }
     if (lastErr) throw lastErr;
     return invoiceNumber;
-  }, [organization?.id, getCurrentCycleRange]);
+  }, [organization?.id, qbCsvBillingMonth]);
 
   /** Reserve a real subscription_invoices row + sequential # when none exists (avoids W00010-style id fallbacks). */
   const ensureSubscriptionCycleInvoiceNumber = useCallback(
     async (sub) => {
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
-      const { dueDate } = getCurrentCycleRange();
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
+      const { dueDate } = getBillingPeriodForSub(sub, { qbBillingMonthYm: qbCsvBillingMonth }).dueDate
+        || getCurrentCycleRange().dueDate;
       const cid = String(sub?.customer_id || '').trim();
       const rawId = sub?.id;
       const subId =
@@ -2325,7 +2329,7 @@ export default function Subscriptions() {
       if (lastErr) console.warn('ensureSubscriptionCycleInvoiceNumber:', lastErr);
       return null;
     },
-    [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange],
+    [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange, qbCsvBillingMonth],
   );
 
   /**
@@ -2348,7 +2352,7 @@ export default function Subscriptions() {
       const placeholder = defaultInvoiceNumber({ id: rawId, invoice_number: '' });
       if (n !== placeholder) return invNo;
 
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
       if (!periodStart || !periodEnd) return invNo;
       const subId = String(rawId).trim();
 
@@ -2440,8 +2444,9 @@ export default function Subscriptions() {
       if (String(rawId).startsWith('legacy-') || String(rawId).startsWith('virtual-')) return;
 
       const subId = String(rawId).trim();
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(row);
-      const { dueDate } = getCurrentCycleRange();
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(row, qbCsvBillingMonth);
+      const { dueDate } = getBillingPeriodForSub(row, { qbBillingMonthYm: qbCsvBillingMonth }).dueDate
+        || getCurrentCycleRange().dueDate;
       const cid = String(row.customer_id || '').trim();
       if (!subId || !cid || !periodStart || !periodEnd) return;
 
@@ -2509,11 +2514,12 @@ export default function Subscriptions() {
       if (!cid) {
         return { success: false, error: 'This row has no customer id.' };
       }
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
       if (!periodStart || !periodEnd) {
         return { success: false, error: 'Could not determine billing period for this row.' };
       }
-      const { dueDate } = getCurrentCycleRange();
+      const { dueDate } = getBillingPeriodForSub(sub, { qbBillingMonthYm: qbCsvBillingMonth }).dueDate
+        || getCurrentCycleRange().dueDate;
       const today = new Date().toISOString().split('T')[0];
       const total = parseFloat(sub?.totalPerCycle) || 0;
       const gstAmt = +(total * 0.05).toFixed(2);
@@ -2662,10 +2668,11 @@ export default function Subscriptions() {
     async (sub) => {
       // If user exported QB CSV, always reuse that exact assigned invoice # for PDF/email.
       // This guarantees "same customer, same cycle" parity across CSV, PDF, and email.
-      const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub);
+      const seqMonth = sequenceMonthForSub(sub, qbCsvBillingMonth);
+      const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub, seqMonth);
       if (fromLastCsv) return fromLastCsv;
 
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub);
+      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
       // Prefer DB (subscription_invoices / invoices) so custom invoice numbers always win over stale sub.invoice_number.
       let invNo = '';
       const fromDb = await resolveInvoiceNumberForRentalPdf(
@@ -2711,6 +2718,7 @@ export default function Subscriptions() {
       ensureSubscriptionCycleInvoiceNumber,
       getPdfBillingPeriodForSub,
       organization?.id,
+      qbCsvBillingMonth,
       repairPlaceholderSubscriptionInvoiceNumber,
     ]
   );
@@ -2799,9 +2807,8 @@ export default function Subscriptions() {
 
   const buildInvoicePdfForRow = useCallback(async (row, invoiceNumberOverride = null, pdfBuildOpts = {}) => {
     const orgRentalsCache = pdfBuildOpts.orgRentalsCache;
-    const { periodStart, periodEnd, dueDate } = computeInvoicePdfPeriodForRow(
+    const { periodStart, periodEnd, dueDate } = computeSharedInvoicePdfPeriodForRow(
       row,
-      getCurrentCycleRange,
       qbCsvBillingMonth
     );
     const invoiceDate = periodEnd;
@@ -3038,6 +3045,7 @@ export default function Subscriptions() {
       subtotal: total,
       invoiceNumber: invoiceNoForPdf,
       lineItems,
+      bottles: bottlesForPdf,
       totals: { subtotal: total, gst, pst, tax, amountDue: grandTotal, gstRate, pstRate, taxRate },
       dates: { invoice: invoiceDate, due: dueDate },
     };
@@ -3295,11 +3303,12 @@ export default function Subscriptions() {
     try {
       const invResolved = await resolveRentalInvoiceNumberForActions(emailRow);
       const snapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
-      const { doc, customerName: pdfCustomerName, amountDue, invoiceNumber: pdfInvNo } = await buildInvoicePdfForRow(
+      const pdfBundle = await buildInvoicePdfForRow(
         emailRow,
         invResolved,
         snapOpts
       );
+      const { doc, customerName: pdfCustomerName, amountDue, invoiceNumber: pdfInvNo, bottles: pdfBottles } = pdfBundle;
       const customerName =
         String(pdfCustomerName || '').trim()
         || emailRow?.customer?.name
@@ -3337,6 +3346,7 @@ export default function Subscriptions() {
         remitAddressBlock,
         billingInquiryEmail,
         savedTemplate: savedEmailTemplate,
+        daysAtLocationSummary: daysAtLocationSummaryFromBottles(pdfBottles),
       });
       const renderedSignature = applyInvoiceEmailTemplateVars(
         String(savedEmailTemplate?.signature || defaultTemplateSignature),
@@ -3372,6 +3382,31 @@ export default function Subscriptions() {
         throw new Error(payload?.error || payload?.details || `Email failed (${response.status})`);
       }
       await persistRentalInvoiceEmailSent(emailRow, pdfInvNo);
+      const { periodStart, periodEnd } = getBillingPeriodForSub(emailRow, {
+        qbBillingMonthYm: qbCsvBillingMonth,
+      });
+      const subIdRaw = String(emailRow.id || '').trim();
+      const subscriptionId =
+        subIdRaw && !emailRow.isVirtual && !subIdRaw.startsWith('legacy-') && !subIdRaw.startsWith('virtual-')
+          ? subIdRaw
+          : null;
+      await logInvoiceEmailSend({
+        organizationId: organization.id,
+        subscriptionId,
+        customerId: emailRow.customer_id,
+        invoiceNumber: pdfInvNo,
+        periodStart,
+        periodEnd,
+        emailedTo: String(formFromDialog.to || '')
+          .split(/[,;]/)
+          .map((e) => e.trim())
+          .filter(Boolean),
+        emailFrom: formFromDialog.from,
+        subject: subjectResolved,
+        messageId: payload?.messageId,
+        sentByUserId: profile?.id || user?.id,
+        pdfBase64,
+      });
       const cid = String(emailRow.customer_id || '').trim();
       const sid = String(emailRow.id || '').trim();
       if (cid || sid) {
@@ -3399,7 +3434,7 @@ export default function Subscriptions() {
     } finally {
       setEmailing(false);
     }
-  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
+  }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId, qbCsvBillingMonth]);
 
   const handleBulkEmailInvoices = useCallback(async () => {
     const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
@@ -3464,7 +3499,8 @@ export default function Subscriptions() {
         const invNo = await resolveRentalInvoiceNumberForActions(row);
         const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
         const bulkSnapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
-        const { doc, customerName: cn, amountDue, invoiceNumber: pdfInvNo } = await buildInvoicePdfForRow(row, invNo, bulkSnapOpts);
+        const bulkPdfBundle = await buildInvoicePdfForRow(row, invNo, bulkSnapOpts);
+        const { doc, customerName: cn, amountDue, invoiceNumber: pdfInvNo } = bulkPdfBundle;
         const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
         const customerPoBulk = String(
@@ -3486,6 +3522,7 @@ export default function Subscriptions() {
           remitAddressBlock,
           billingInquiryEmail,
           savedTemplate: savedEmailTemplate,
+          daysAtLocationSummary: daysAtLocationSummaryFromBottles(bulkPdfBundle.bottles),
         });
 
         const bulkBodyRaw = savedEmailTemplate?.body;
@@ -3537,7 +3574,29 @@ export default function Subscriptions() {
           sent += 1;
           setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
           try {
+            const bulkPayload = await response.json().catch(() => ({}));
             await persistRentalInvoiceEmailSent(row, pdfInvNo);
+            const { periodStart: bPs, periodEnd: bPe } = getBillingPeriodForSub(row, {
+              qbBillingMonthYm: qbCsvBillingMonth,
+            });
+            const rowSid = String(row.id || '').trim();
+            await logInvoiceEmailSend({
+              organizationId: organization.id,
+              subscriptionId:
+                rowSid && !row.isVirtual && !rowSid.startsWith('legacy-') && !rowSid.startsWith('virtual-')
+                  ? rowSid
+                  : null,
+              customerId: row.customer_id,
+              invoiceNumber: pdfInvNo,
+              periodStart: bPs,
+              periodEnd: bPe,
+              emailedTo: [customerEmail].filter(Boolean),
+              emailFrom: defaultFrom,
+              subject,
+              messageId: bulkPayload?.messageId,
+              sentByUserId: profile?.id || user?.id,
+              pdfBase64,
+            });
             const cid = String(row.customer_id || '').trim();
             const sid = String(row.id || '').trim();
             if (cid || sid) {
@@ -3573,7 +3632,7 @@ export default function Subscriptions() {
     } else {
       setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
     }
-  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId]);
+  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId, qbCsvBillingMonth]);
 
   const handleExportInvoicePdfsZip = useCallback(async () => {
     const baseRows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
@@ -3646,9 +3705,8 @@ export default function Subscriptions() {
     try {
       const periodKeys = new Set();
       for (const row of rows) {
-        const { periodStart, periodEnd } = computeInvoicePdfPeriodForRow(
+        const { periodStart, periodEnd } = computeSharedInvoicePdfPeriodForRow(
           row,
-          getCurrentCycleRange,
           qbCsvBillingMonth
         );
         periodKeys.add(invoiceReturnsCacheKey(periodStart, periodEnd));
@@ -3759,6 +3817,38 @@ export default function Subscriptions() {
     }
   }, [ctx]);
 
+  const handlePreallocateCycleInvoiceNumbers = useCallback(async () => {
+    if (!organization?.id) return;
+    setPreallocatingNumbers(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const result = await preallocateCycleInvoicesForOrganization(supabase, organization.id, {
+        force: true,
+      });
+      if (result.skipped) {
+        setActionError(result.hint || 'Could not determine billing period for pre-allocation.');
+        return;
+      }
+      setInvoiceLookupRefreshKey((k) => k + 1);
+      const errCount = (result.errors || []).length;
+      setActionSuccess(
+        `Invoice numbers for ${result.periodStart} – ${result.periodEnd}: ` +
+          `${result.created} new, ${result.alreadyHadNumber} already assigned` +
+          (result.skippedZeroSubtotal ? `, ${result.skippedZeroSubtotal} skipped ($0).` : '.') +
+          (errCount > 0 ? ` ${errCount} customer(s) had errors — check console.` : '') +
+          ' Numbers continue from your invoice_settings counter.',
+      );
+      if (errCount > 0) {
+        console.warn('Preallocate invoice numbers errors:', result.errors);
+      }
+    } catch (e) {
+      setActionError(e?.message || 'Failed to prepare invoice numbers.');
+    } finally {
+      setPreallocatingNumbers(false);
+    }
+  }, [organization?.id]);
+
   const rentalToolbarMenuItems = useMemo(() => {
     const emailTitle = bulkEmailing
       ? `${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
@@ -3772,8 +3862,6 @@ export default function Subscriptions() {
         title: rentalsWorkspaceRefreshing ? 'Updating…' : 'Update',
         action: 'refresh',
         icon: <IoRefreshOutline />,
-        gradientFrom: '#64748b',
-        gradientTo: '#475569',
         disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
@@ -3781,8 +3869,6 @@ export default function Subscriptions() {
         title: 'CSV',
         action: 'csv',
         icon: <IoCloudDownloadOutline />,
-        gradientFrom: '#56CCF2',
-        gradientTo: '#2F80ED',
         disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
@@ -3790,17 +3876,20 @@ export default function Subscriptions() {
         title: 'Invoices',
         action: 'invoices',
         icon: <IoReceiptOutline />,
-        gradientFrom: '#80FF72',
-        gradientTo: '#7EE8FA',
         disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
+      },
+      {
+        id: 'prep-numbers',
+        title: preallocatingNumbers ? '…' : 'Prep #',
+        action: 'prep-numbers',
+        icon: <IoCreateOutline />,
+        disabled: saving || preallocatingNumbers || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
         id: 'email',
         title: emailTitle,
         action: 'email',
         icon: <IoMailOutline />,
-        gradientFrom: '#FF9966',
-        gradientTo: '#FF5E62',
         disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
@@ -3808,8 +3897,6 @@ export default function Subscriptions() {
         title: zipTitle,
         action: 'zip',
         icon: <IoArchiveOutline />,
-        gradientFrom: '#40B5AD',
-        gradientTo: '#2E9B94',
         disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
       },
       {
@@ -3817,12 +3904,11 @@ export default function Subscriptions() {
         title: 'New',
         action: 'new',
         icon: <IoAddCircleOutline />,
-        gradientFrom: '#ffa9c6',
-        gradientTo: '#f434e2',
       },
     ];
   }, [
     saving,
+    preallocatingNumbers,
     zipExporting,
     rentalsWorkspaceRefreshing,
     bulkEmailing,
@@ -3832,6 +3918,46 @@ export default function Subscriptions() {
     zipExportProgress.done,
     zipExportProgress.total,
   ]);
+
+  const handleRentalToolbarAction = useCallback(
+    (action) => {
+      switch (action) {
+        case 'refresh':
+          void handleRefreshRentalsWorkspace();
+          break;
+        case 'csv':
+          handleExportQbInvoiceCsv('monthly', monthlyQbCohort);
+          break;
+        case 'invoices':
+          handleGenerateAllInvoices();
+          break;
+        case 'prep-numbers':
+          void handlePreallocateCycleInvoiceNumbers();
+          break;
+        case 'email':
+          handleBulkEmailInvoices();
+          break;
+        case 'zip':
+          handleExportInvoicePdfsZip();
+          break;
+        case 'new':
+          blurActiveElement();
+          setCreateOpen(true);
+          break;
+        default:
+          break;
+      }
+    },
+    [
+      handleRefreshRentalsWorkspace,
+      handleExportQbInvoiceCsv,
+      monthlyQbCohort,
+      handleGenerateAllInvoices,
+      handlePreallocateCycleInvoiceNumbers,
+      handleBulkEmailInvoices,
+      handleExportInvoicePdfsZip,
+    ],
+  );
 
   if (ctx.loading) {
     return (
@@ -3854,7 +3980,8 @@ export default function Subscriptions() {
         <Box sx={{ flexShrink: 0 }}>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Manage customer rentals and billing
+            Manage customer rentals and billing. Invoice numbers for the current cycle are prepared automatically on the
+            last and first day of each month (continuing from the previous counter), or use Prep # anytime.
           </Typography>
         </Box>
         <Stack
@@ -3865,7 +3992,7 @@ export default function Subscriptions() {
           alignItems="center"
           sx={{
             width: { xs: '100%', lg: 'auto' },
-            flex: { lg: '1 1 auto' },
+            flex: '0 0 auto',
             minWidth: 0,
             justifyContent: { xs: 'flex-start', lg: 'flex-end' },
             rowGap: 1,
@@ -3902,45 +4029,38 @@ export default function Subscriptions() {
               <MenuItem value="credit_card">Card</MenuItem>
             </Select>
           </FormControl>
-          <Box
+          <Stack
+            direction="row"
+            alignItems="center"
+            flexWrap="wrap"
+            useFlexGap
+            spacing={0.5}
             sx={{
               flex: '0 0 auto',
-              width: 'auto',
-              maxWidth: '100%',
-              ml: { xs: 0, lg: 'auto' },
+              py: 0.5,
+              px: 0.75,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'action.hover',
             }}
           >
-            <GradientMenu
-              variant="compact"
-              items={rentalToolbarMenuItems}
-              className="min-h-0 w-auto justify-center lg:justify-end py-2 sm:py-2.5 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
-              onAction={(action) => {
-                switch (action) {
-                  case 'refresh':
-                    void handleRefreshRentalsWorkspace();
-                    break;
-                  case 'csv':
-                    handleExportQbInvoiceCsv('monthly', monthlyQbCohort);
-                    break;
-                  case 'invoices':
-                    handleGenerateAllInvoices();
-                    break;
-                  case 'email':
-                    handleBulkEmailInvoices();
-                    break;
-                  case 'zip':
-                    handleExportInvoicePdfsZip();
-                    break;
-                  case 'new':
-                    blurActiveElement();
-                    setCreateOpen(true);
-                    break;
-                  default:
-                    break;
-                }
-              }}
-            />
-          </Box>
+            {rentalToolbarMenuItems.map((item) => (
+              <Tooltip key={item.id} title={item.title}>
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={item.disabled}
+                    aria-label={item.title}
+                    onClick={() => handleRentalToolbarAction(item.action)}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                  >
+                    {item.icon}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ))}
+          </Stack>
         </Stack>
       </Stack>
 
@@ -4102,10 +4222,23 @@ export default function Subscriptions() {
                     )}
                   </TableCell>
                 </TableRow>
+              ) : pagedFiltered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <Stack spacing={1} alignItems="center">
+                      <Typography variant="body2">
+                        No rows on this page ({filtered.length} match filters). Try page 1 or change rows per page.
+                      </Typography>
+                      <Button size="small" variant="outlined" onClick={() => setTablePage(0)}>
+                        Go to first page
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
               ) : (
                 pagedFiltered.map((sub) => (
                   <TableRow
-                    key={sub.id}
+                    key={`${String(sub.id || 'row')}-${String(sub.customer_id || '')}`}
                     hover
                     sx={{ cursor: sub.isVirtual ? 'default' : 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
@@ -4277,18 +4410,10 @@ export default function Subscriptions() {
                         }
 
                         return (
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'flex-end',
-                              position: 'relative',
-                              zIndex: 2,
-                            }}
-                          >
-                            <GradientMenu
-                              variant="compact"
+                          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <RentalRowActionsMenu
+                              disabled={saving}
                               items={rowActionItems}
-                              className="min-h-0 w-auto justify-end py-1 px-1.5 bg-slate-100 rounded-xl border border-slate-200/90 shadow-sm"
                               onAction={(action) => {
                                 switch (action) {
                                   case 'pdf':
@@ -4341,11 +4466,12 @@ export default function Subscriptions() {
           <TablePagination
             component="div"
             count={filtered.length}
-            page={tablePage}
+            page={effectiveTablePage}
             onPageChange={(_, nextPage) => setTablePage(nextPage)}
-            rowsPerPage={rowsPerPage}
+            rowsPerPage={effectiveRowsPerPage}
             onRowsPerPageChange={(e) => {
-              setRowsPerPage(parseInt(e.target.value, 10));
+              const next = parseInt(e.target.value, 10);
+              setRowsPerPage(Number.isFinite(next) && next > 0 ? next : 50);
               setTablePage(0);
             }}
             rowsPerPageOptions={[25, 50, 100, 250]}

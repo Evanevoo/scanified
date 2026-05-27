@@ -50,6 +50,10 @@ import {
   postAssignmentFromAuditFieldChanges,
   stringifyHistoryDetails,
 } from '../services/assetMovementHistory';
+import {
+  bottleHasStaleCustomerAssignment,
+  staleBottleCustomerLabel,
+} from '../utils/bottleCustomerDirectory';
 
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
 const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost', 'available'];
@@ -281,6 +285,7 @@ export default function AssetDetail() {
   const [exceptions, setExceptions] = useState([]);
   const [loadingExceptions, setLoadingExceptions] = useState(false);
   const [movementHistory, setMovementHistory] = useState([]);
+  const [movementHistoryError, setMovementHistoryError] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [customerData, setCustomerData] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -364,6 +369,11 @@ export default function AssetDetail() {
   const hasCustomerAssignmentDisplay = Boolean(
     String(effectiveAssignedCustomerId || '').trim() || String(effectiveAssignedCustomerName || '').trim()
   );
+  const staleCustomerAssignment = React.useMemo(
+    () => bottleHasStaleCustomerAssignment(asset, customers),
+    [asset, customers]
+  );
+  const hasActiveCustomerAssignment = hasCustomerAssignmentDisplay && !staleCustomerAssignment;
   const effectiveStatus = React.useMemo(() => {
     const fallback = normalizeStatus(asset?.status);
     if (!movementHistory.length) {
@@ -384,8 +394,57 @@ export default function AssetDetail() {
   }, [movementHistory, asset?.status, asset?.ownership]);
 
   useEffect(() => {
+    const clearStaleCustomerAssignment = async () => {
+      if (!asset?.id || !profile?.organization_id || !customers.length) return;
+      if (!bottleHasStaleCustomerAssignment(asset, customers)) return;
+
+      const repairKey = `stale-customer|${asset.id}|${staleBottleCustomerLabel(asset)}`;
+      if (assignmentRepairKeyRef.current === repairKey) return;
+      assignmentRepairKeyRef.current = repairKey;
+
+      const priorStatus = normalizeStatus(asset?.status);
+      const updateData = {
+        assigned_customer: null,
+        customer_name: null,
+        customer_uuid: null,
+        days_at_location: 0,
+        status: priorStatus === 'rented' ? 'empty' : priorStatus,
+      };
+
+      const { error: clearError } = await supabase
+        .from('bottles')
+        .update(updateData)
+        .eq('id', asset.id)
+        .eq('organization_id', profile.organization_id);
+
+      if (clearError) {
+        logger.warn('Clear stale customer assignment failed:', clearError);
+        return;
+      }
+
+      setAsset((prev) => (prev ? { ...prev, ...updateData, customer_id: null } : prev));
+      setCustomerData(null);
+      setSuccess(
+        `Cleared assignment to removed customer "${staleBottleCustomerLabel(asset)}". Status set to ${updateData.status}.`
+      );
+    };
+
+    void clearStaleCustomerAssignment();
+  }, [
+    asset?.id,
+    asset?.assigned_customer,
+    asset?.customer_name,
+    asset?.customer_uuid,
+    asset?.customer_id,
+    asset?.status,
+    customers,
+    profile?.organization_id,
+  ]);
+
+  useEffect(() => {
     const syncAssignmentFromHistory = async () => {
       if (!asset?.id || !profile?.organization_id || movementHistory.length === 0) return;
+      if (bottleHasStaleCustomerAssignment(asset, customers)) return;
       if (effectiveCustomerAssignment.sourceAction === 'fallback') return;
 
       const currentId = String(asset.assigned_customer || '').trim();
@@ -612,7 +671,7 @@ export default function AssetDetail() {
 
       const { data, error } = await supabase
         .from('customers')
-        .select('CustomerListID, name, customer_type, location, city')
+        .select('id, CustomerListID, name, customer_type, location, city, deleted_at, is_deleted, is_active, archived')
         .eq('organization_id', profile.organization_id)
         .order('name');
 
@@ -765,6 +824,7 @@ export default function AssetDetail() {
     const sourceAsset = assetSnapshot ?? asset;
     try {
       setLoadingHistory(true);
+      setMovementHistoryError('');
       if (!profile?.organization_id || !sourceAsset) {
         setLoadingHistory(false);
         return;
@@ -788,6 +848,10 @@ export default function AssetDetail() {
       setMovementHistory(merged);
     } catch (error) {
       logger.error('Error fetching movement history:', error);
+      setMovementHistory([]);
+      setMovementHistoryError(
+        error?.message || 'Could not load movement history. Try again or open the full asset log.',
+      );
     } finally {
       setLoadingHistory(false);
     }
@@ -1080,7 +1144,7 @@ export default function AssetDetail() {
 
       if (error) throw error;
 
-      navigate('/inventory-management');
+      navigate('/assets');
     } catch (error) {
       logger.error('Error deleting asset:', error);
       setError(error.message || 'Failed to delete asset');
@@ -1110,7 +1174,7 @@ export default function AssetDetail() {
       {/* Header */}
       <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
         <Box display="flex" alignItems="center" flexWrap="wrap" gap={1}>
-          <Button onClick={() => navigate('/inventory-management')} startIcon={<ArrowBackIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
+          <Button onClick={() => navigate('/assets')} startIcon={<ArrowBackIcon />} sx={{ borderRadius: 999, fontWeight: 700, textTransform: 'none' }}>
             Back
           </Button>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
@@ -1231,7 +1295,13 @@ export default function AssetDetail() {
                 Customer-owned bottles do not use fill or rental status. Save to store status as not tracked (N/A).
               </Typography>
             )}
-            {effectiveStatus === 'rented' && !hasCustomerAssignmentDisplay && (
+            {staleCustomerAssignment && (
+              <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
+                This asset still referenced removed customer &quot;{staleBottleCustomerLabel(asset)}&quot; (deleted from
+                the directory). Clearing stale assignment… or use Edit to assign a current customer.
+              </Typography>
+            )}
+            {effectiveStatus === 'rented' && !hasActiveCustomerAssignment && !staleCustomerAssignment && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
                 No customer is linked on this asset record, so it is not clear who it is rented to. Movement history
                 has no ship/delivery yet. Use Edit to assign a customer, or open Rentals / the customer page if an open
@@ -1272,7 +1342,7 @@ export default function AssetDetail() {
       </Paper>
 
       {/* Customer Assignment — show when list id, legacy customer_id, or display name exists */}
-      {hasCustomerAssignmentDisplay && (
+      {hasActiveCustomerAssignment && (
         <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Typography variant="h6" gutterBottom>
             Customer Assignment
@@ -1328,7 +1398,7 @@ export default function AssetDetail() {
 
       {/* Movement History Section */}
       <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Typography variant="h6">
             Movement History
           </Typography>
@@ -1344,6 +1414,14 @@ export default function AssetDetail() {
             View Full History
           </Button>
         </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Scan, rental, fill, and audit events for this asset (chain of custody).
+        </Typography>
+        {movementHistoryError ? (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {movementHistoryError}
+          </Alert>
+        ) : null}
         {loadingHistory ? (
           <Box display="flex" justifyContent="center" p={2}>
             <CircularProgress size={24} />
@@ -1409,18 +1487,24 @@ export default function AssetDetail() {
                   const isSyntheticBottleStamp =
                     record.history_type === 'record_update' &&
                     (record.id === 'bottle_last_updated' || String(record?.action || '').includes('Asset record updated'));
-                  const custIdForDisplay =
-                    record.customer_id ||
-                    record.assigned_customer ||
-                    (isSyntheticBottleStamp
-                      ? asset?.customer_uuid || asset?.customer_id || asset?.assigned_customer
-                      : '') ||
-                    '';
-                  const custNameForDisplay =
-                    record.customer_name ||
-                    (isSyntheticBottleStamp ? asset?.customer_name : '') ||
-                    '';
-                  if (custNameForDisplay || custIdForDisplay) {
+                  const skipSyntheticStaleCustomer =
+                    isSyntheticBottleStamp && staleCustomerAssignment;
+                  const custIdForDisplay = skipSyntheticStaleCustomer
+                    ? ''
+                    : record.customer_id ||
+                      record.assigned_customer ||
+                      (isSyntheticBottleStamp
+                        ? asset?.customer_uuid || asset?.customer_id || asset?.assigned_customer
+                        : '') ||
+                      '';
+                  const custNameForDisplay = skipSyntheticStaleCustomer
+                    ? ''
+                    : record.customer_name ||
+                      (isSyntheticBottleStamp ? asset?.customer_name : '') ||
+                      '';
+                  if (skipSyntheticStaleCustomer) {
+                    resultingLocation = 'Customer removed from directory (stale assignment cleared)';
+                  } else if (custNameForDisplay || custIdForDisplay) {
                     const base = custNameForDisplay
                       ? `Customer: ${custNameForDisplay}${custIdForDisplay ? ` (${custIdForDisplay})` : ''}`
                       : `Customer: (${custIdForDisplay})`;

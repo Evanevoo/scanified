@@ -82,6 +82,12 @@
 #    - Schedule: 0 2 * * * (runs daily at 2 AM UTC)
 #    - Environment variable: CRON_SECRET
 
+# Pre-allocate rental invoice numbers (last + first day of month only; see getPeriodForCyclePrep)
+# Configure in Netlify Dashboard > Functions > Scheduled Functions:
+# - Function: preallocate-cycle-invoices
+# - Schedule: 0 7 * * * (daily 7:00 AM UTC — runs only on month-end / month-start days)
+# - Environment: VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET (optional for manual POST)
+
 # Daily Days at Location Update
 # Configure in Netlify Dashboard > Functions > Scheduled Functions:
 # - Function: update-days-at-location

@@ -87,7 +87,6 @@ const MaintenanceWorkflows = lazy(() => import('./pages/MaintenanceWorkflows'));
 const PalletManagement = lazy(() => import('./pages/PalletManagement'));
 const HazmatCompliance = lazy(() => import('./pages/HazmatCompliance'));
 const ChainOfCustody = lazy(() => import('./pages/ChainOfCustody'));
-const IntegrationSettings = lazy(() => import('./pages/IntegrationSettings'));
 const AutomationRules = lazy(() => import('./pages/AutomationRules'));
 const Locations = lazy(() => import('./pages/Locations'));
 const TransferFromCustomers = lazy(() => import('./pages/TransferFromCustomers.jsx'));
@@ -100,6 +99,8 @@ const AssetClassifications = lazy(() => import('./pages/AssetClassifications'));
 const AssetClassificationTreePricing = lazy(() => import('./pages/AssetClassificationTreePricing'));
 const CustomerPricingOverrides = lazy(() => import('./pages/CustomerPricingOverrides'));
 const QuickBooksExport = lazy(() => import('./pages/QuickBooksExport'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const InvoiceEmailHistory = lazy(() => import('./pages/InvoiceEmailHistory'));
 const TaxRegionsPage = lazy(() => import('./pages/TaxRegions'));
 const CustomerPortal = lazy(() => import('./pages/CustomerPortal'));
 const BarcodeGenerator = lazy(() => import('./pages/BarcodeGenerator'));
@@ -131,6 +132,7 @@ const PlanManagement = lazy(() => import('./pages/OwnerPortal/PlanManagement'));
 const AssetTypeDemo = lazy(() => import('./components/AssetTypeDemo'));
 const AssetConfigurationManager = lazy(() => import('./pages/OwnerPortal/AssetConfigurationManager'));
 const FormatConfigurationManager = lazy(() => import('./pages/OwnerPortal/FormatConfigurationManager'));
+const FileFormatManager = lazy(() => import('./pages/OwnerPortal/FileFormatManager'));
 const RoleManagement = lazy(() => import('./pages/OwnerPortal/RoleManagement'));
 const ComprehensiveRoleManager = lazy(() => import('./pages/ComprehensiveRoleManager'));
 const OrganizationJoinCodes = lazy(() => import('./pages/OrganizationJoinCodes'));
@@ -334,7 +336,8 @@ function AppContent() {
                     <Route path="/inventory/asset-classifications" element={<AssetClassifications />} />
                     <Route path="/pricing/customers" element={<CustomerPricingOverrides />} />
                     <Route path="/pricing/tax-regions" element={<TaxRegionsPage />} />
-                    <Route path="/invoices" element={<Navigate to="/rentals" replace />} />
+                    <Route path="/invoices" element={<Invoices />} />
+                    <Route path="/invoices/history" element={<InvoiceEmailHistory />} />
                     <Route path="/invoices/export" element={<QuickBooksExport />} />
                     {/* Legacy redirects */}
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
@@ -399,7 +402,7 @@ function AppContent() {
                     <Route path="/assets/:id" element={<AssetDetail />} />
                     <Route path="/asset/:id" element={<AssetDetail />} />
                     <Route path="/orders" element={<ScannedOrders />} />
-                    <Route path="/billing" element={<Navigate to="/rentals" replace />} />
+                    <Route path="/billing" element={<Navigate to="/settings?tab=billing" replace />} />
                     <Route path="/invoice/:id" element={<Navigate to="/rentals" replace />} />
                     <Route path="/support" element={<SupportCenter />} />
                     <Route path="/recent-cylinders" element={<RecentCylinders />} />
@@ -433,11 +436,7 @@ function AppContent() {
                     
                     {/* Owner-only routes */}
                     <Route element={<OwnerProtectedRoute />}>
-                      <Route path="/owner-portal/integration-settings" element={
-                        <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
-                          <IntegrationSettings />
-                        </RoleProtectedRoute>
-                      } />
+                      <Route path="/owner-portal/integration-settings" element={<Navigate to="/settings" replace />} />
                       <Route path="/owner-portal" element={<OwnerPortalLanding />} />
                       <Route path="/owner-portal/analytics" element={<OwnerPortalAnalytics />} />
                       <Route path="/owner-portal/tools" element={<DataUtilities />} />
@@ -455,6 +454,7 @@ function AppContent() {
                                       <Route path="/asset-configuration" element={<AssetConfigurationManager />} />
                       <Route path="/owner-portal/asset-configuration" element={<AssetConfigurationManager />} />
                       <Route path="/owner-portal/format-configuration" element={<FormatConfigurationManager />} />
+                      <Route path="/owner-portal/file-format-manager" element={<FileFormatManager />} />
                       <Route path="/owner-portal/roles" element={<RoleManagement />} />
                       <Route path="/owner-portal/page-builder" element={<PageBuilder />} />
                       <Route path="/owner-portal/contact-management" element={<ContactManagement />} />
@@ -474,11 +474,7 @@ function AppContent() {
                     </ProtectedRoute>
                   } />
                   <Route path="/advanced-rental-calculations" element={<Navigate to="/rentals" replace />} />
-                  <Route path="/integration-settings" element={
-                    <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
-                      <IntegrationSettings />
-                    </RoleProtectedRoute>
-                  } />
+                  <Route path="/integration-settings" element={<Navigate to="/settings" replace />} />
                   <Route path="/automation-rules" element={
                     <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
                       <AutomationRules />

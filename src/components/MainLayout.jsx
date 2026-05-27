@@ -627,7 +627,7 @@ export default function MainLayout({ children }) {
           width: '100%',
           bgcolor: isDarkShell ? alpha(muiTheme.palette.background.paper, 0.55) : 'rgba(255,255,255,0.38)',
           p: { xs: 2, sm: 2.5, md: 3 },
-          borderRadius: 12,
+          borderRadius: 0,
           border: isDarkShell ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.85)',
           boxShadow: isDarkShell
             ? '0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)'

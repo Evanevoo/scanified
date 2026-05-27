@@ -1,0 +1,19 @@
+# Keep EAS upload lean (reduces worker memory/time)
+node_modules/
+.expo/
+dist/
+web-build/
+android/app/build/
+android/build/
+android/.gradle/
+**/.gradle/
+.git/
+__tests__/
+coverage/
+*.md
+test-*.js
+create-*.html
+fix-organization.js
+DESIGN_BACKUP_README.md
+npm-debug.*
+yarn-error.*
