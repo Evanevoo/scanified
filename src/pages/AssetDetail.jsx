@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -25,7 +25,6 @@ import {
   MenuItem,
   Autocomplete
 } from '@mui/material';
-import { createFilterOptions } from '@mui/material/Autocomplete';
 import {
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
@@ -54,16 +53,53 @@ import {
   bottleHasStaleCustomerAssignment,
   staleBottleCustomerLabel,
 } from '../utils/bottleCustomerDirectory';
+/** Exclude deleted rows only when those columns exist on the row (not selected from DB). */
+const isAssignableCustomer = (customer) => {
+  if (!customer) return false;
+  if (customer.is_deleted === true) return false;
+  if (customer.is_active === false) return false;
+  return true;
+};
+
+const CUSTOMER_ASSIGN_SELECT =
+  'id, CustomerListID, name, customer_type, location, city, contact_details, phone';
+const CUSTOMER_ASSIGN_SEARCH_MIN = 1;
+
+/** Same `.or()` shape as Customers.jsx `applySearchOr` (proven in production). */
+const buildCustomerSearchOr = (searchLower) =>
+  `name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%,contact_details.ilike.%${searchLower}%,phone.ilike.%${searchLower}%,city.ilike.%${searchLower}%,postal_code.ilike.%${searchLower}%`;
+
+const sanitizeCustomerSearchTerm = (raw) =>
+  String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[%(),]/g, '');
 
 // Only 4 statuses: Full, Empty, Rented, Lost (stored as filled, empty, rented, lost)
 const NORMAL_STATUSES = ['filled', 'empty', 'rented', 'lost', 'available'];
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const customerAutocompleteFilter = createFilterOptions({
-  stringify: (option) =>
-    `${String(option?.name || '')} ${String(option?.CustomerListID || '')}`.toLowerCase(),
-  trim: true,
-});
+const customerOptionSearchText = (option) =>
+  [
+    option?.name,
+    option?.Name,
+    option?.CustomerListID,
+    option?.city,
+    option?.phone,
+    option?.contact_details,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+const customerOptionLabel = (option) => {
+  const name = String(option?.name || option?.Name || '').trim();
+  const listId = String(option?.CustomerListID || '').trim();
+  const suffix = option?.customer_type === 'VENDOR' ? ' - Vendor' : '';
+  if (name && listId) return `${name} (${listId})${suffix}`;
+  if (name) return `${name}${suffix}`;
+  return listId;
+};
 const normalizeStatus = (s) => {
   if (s == null || s === '') return 'empty';
   const v = String(s).toLowerCase().trim();
@@ -270,7 +306,8 @@ const getAuditFieldChangeDisplay = (auditDetails, fieldName, fallbackValue) => {
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
+  const organizationId = organization?.id || profile?.organization_id || null;
   const { terms, isReady } = useDynamicAssetTerms();
 
   const [asset, setAsset] = useState(null);
@@ -289,7 +326,11 @@ export default function AssetDetail() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [customerData, setCustomerData] = useState(null);
   const [customers, setCustomers] = useState([]);
+  const [customerAssignOptions, setCustomerAssignOptions] = useState([]);
+  const [customerAssignInput, setCustomerAssignInput] = useState('');
+  const [customerAssignSearchError, setCustomerAssignSearchError] = useState('');
   const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const customerSearchTimerRef = useRef(null);
   const [gasTypes, setGasTypes] = useState([]);
   const assignmentRepairKeyRef = useRef(null);
   const gasTypeOptions = React.useMemo(
@@ -664,25 +705,156 @@ export default function AssetDetail() {
     }
   };
 
+  const activeCustomers = useMemo(
+    () => (customers || []).filter(isAssignableCustomer),
+    [customers]
+  );
+
+  const filterCustomersLocally = useCallback((pool, rawInput, limit = 50) => {
+    const needle = sanitizeCustomerSearchTerm(rawInput);
+    if (!needle) return (pool || []).filter(isAssignableCustomer).slice(0, limit);
+    return (pool || [])
+      .filter(isAssignableCustomer)
+      .filter((c) => customerOptionSearchText(c).includes(needle))
+      .slice(0, limit);
+  }, []);
+
   const fetchCustomers = async () => {
     try {
-      setLoadingCustomers(true);
-      if (!profile?.organization_id) return;
+      if (!organizationId) return;
 
       const { data, error } = await supabase
         .from('customers')
-        .select('id, CustomerListID, name, customer_type, location, city, deleted_at, is_deleted, is_active, archived')
-        .eq('organization_id', profile.organization_id)
-        .order('name');
+        .select(CUSTOMER_ASSIGN_SELECT)
+        .eq('organization_id', organizationId)
+        .order('name')
+        .limit(1000);
 
       if (error) throw error;
-      setCustomers(data || []);
+      setCustomers((data || []).filter(isAssignableCustomer));
     } catch (error) {
       logger.error('Error fetching customers:', error);
-    } finally {
-      setLoadingCustomers(false);
+      setCustomers([]);
     }
   };
+
+  const searchCustomerAssignOptions = useCallback(
+    async (rawInput) => {
+      if (!organizationId) {
+        setCustomerAssignOptions([]);
+        setCustomerAssignSearchError('Organization not loaded. Refresh the page and try again.');
+        return;
+      }
+
+      let directory = customers;
+      if (directory.length === 0) {
+        const { data, error } = await supabase
+          .from('customers')
+          .select(CUSTOMER_ASSIGN_SELECT)
+          .eq('organization_id', organizationId)
+          .order('name')
+          .limit(1000);
+        if (!error && data?.length) {
+          directory = data.filter(isAssignableCustomer);
+          setCustomers(directory);
+        }
+      }
+
+      const directoryActive = directory.filter(isAssignableCustomer);
+      const q = String(rawInput || '').trim();
+      setCustomerAssignSearchError('');
+
+      if (q.length < CUSTOMER_ASSIGN_SEARCH_MIN) {
+        const seed = directoryActive.slice(0, 50);
+        const assignedId = String(editData.assigned_customer || '').trim();
+        if (assignedId && !seed.some((c) => c.CustomerListID === assignedId)) {
+          const match =
+            directoryActive.find((c) => c.CustomerListID === assignedId) ||
+            directory.find((c) => c.CustomerListID === assignedId);
+          if (match) seed.unshift(match);
+        }
+        setCustomerAssignOptions(seed);
+        if (seed.length === 0) {
+          setCustomerAssignSearchError('No customers in your organization. Add customers under Customer List first.');
+        }
+        return;
+      }
+
+      const searchLower = sanitizeCustomerSearchTerm(q);
+      if (!searchLower) {
+        setCustomerAssignOptions([]);
+        return;
+      }
+
+      setLoadingCustomers(true);
+      try {
+        let { data, error } = await supabase
+          .from('customers')
+          .select(CUSTOMER_ASSIGN_SELECT)
+          .eq('organization_id', organizationId)
+          .or(buildCustomerSearchOr(searchLower))
+          .order('name')
+          .limit(50);
+
+        if (error) {
+          logger.warn('Customer search wide query failed, retrying name/id only:', error.message);
+          ({ data, error } = await supabase
+            .from('customers')
+            .select(CUSTOMER_ASSIGN_SELECT)
+            .eq('organization_id', organizationId)
+            .or(`name.ilike.%${searchLower}%,CustomerListID.ilike.%${searchLower}%`)
+            .order('name')
+            .limit(50));
+        }
+
+        if (error) throw error;
+
+        let rows = (data || []).filter(isAssignableCustomer);
+        if (rows.length === 0) {
+          rows = filterCustomersLocally(directory, q);
+        }
+        setCustomerAssignOptions(rows);
+        if (rows.length === 0) {
+          setCustomerAssignSearchError(
+            directoryActive.length === 0
+              ? 'No customers loaded for your organization. Check Customer List, then try again.'
+              : `No customers matching "${q}".`
+          );
+        }
+      } catch (error) {
+        logger.error('Error searching customers for bottle assign:', error);
+        const local = filterCustomersLocally(directory, q);
+        setCustomerAssignOptions(local);
+        setCustomerAssignSearchError(
+          local.length > 0
+            ? ''
+            : error.message || 'Customer search failed. Try Customer List to confirm records exist.'
+        );
+      } finally {
+        setLoadingCustomers(false);
+      }
+    },
+    [
+      organizationId,
+      activeCustomers,
+      customers,
+      editData.assigned_customer,
+      filterCustomersLocally,
+    ]
+  );
+
+  useEffect(() => {
+    if (!editDialog) {
+      setCustomerAssignInput('');
+      return undefined;
+    }
+    void searchCustomerAssignOptions('');
+    return () => {
+      if (customerSearchTimerRef.current) {
+        clearTimeout(customerSearchTimerRef.current);
+      }
+    };
+  }, [editDialog, searchCustomerAssignOptions]);
 
   // Load gas type catalog so gas type can drive product code automatically.
   const fetchGasTypes = async () => {
@@ -1811,11 +1983,23 @@ export default function AssetDetail() {
             </Grid>
             <Grid item xs={12} md={6}>
               <Autocomplete
-                options={customers}
+                options={customerAssignOptions}
                 loading={loadingCustomers}
                 clearOnEscape
+                inputValue={customerAssignInput}
+                onInputChange={(_, value, reason) => {
+                  if (reason === 'reset') return;
+                  setCustomerAssignInput(value || '');
+                  if (customerSearchTimerRef.current) {
+                    clearTimeout(customerSearchTimerRef.current);
+                  }
+                  customerSearchTimerRef.current = setTimeout(() => {
+                    void searchCustomerAssignOptions(value);
+                  }, 300);
+                }}
                 value={
-                  customers.find((c) => c.CustomerListID === editData.assigned_customer) ||
+                  customerAssignOptions.find((c) => c.CustomerListID === editData.assigned_customer) ||
+                  activeCustomers.find((c) => c.CustomerListID === editData.assigned_customer) ||
                   (editData.assigned_customer
                     ? {
                         CustomerListID: editData.assigned_customer,
@@ -1827,33 +2011,40 @@ export default function AssetDetail() {
                 isOptionEqualToValue={(option, value) =>
                   String(option?.CustomerListID || '') === String(value?.CustomerListID || '')
                 }
-                getOptionLabel={(option) => {
-                  const name = String(option?.name || '').trim();
-                  const listId = String(option?.CustomerListID || '').trim();
-                  const suffix = option?.customer_type === 'VENDOR' ? ' - Vendor' : '';
-                  if (name && listId) return `${name} (${listId})${suffix}`;
-                  if (name) return `${name}${suffix}`;
-                  return listId;
-                }}
-                filterOptions={(options, state) => customerAutocompleteFilter(options, state)}
+                getOptionLabel={customerOptionLabel}
+                filterOptions={(options) => options}
+                noOptionsText={
+                  loadingCustomers
+                    ? 'Searching customers…'
+                    : customerAssignSearchError || 'No customers found'
+                }
                 onChange={(_, selectedCustomer) => {
                   const customerId = selectedCustomer?.CustomerListID || null;
                   const next = {
                     ...editData,
                     assigned_customer: customerId,
-                    customer_name: selectedCustomer?.name || null,
+                    customer_name: selectedCustomer?.name || selectedCustomer?.Name || null,
                   };
                   if (customerId && selectedCustomer && selectedCustomer.customer_type !== 'VENDOR') {
                     const loc = bottleLocationValueForCustomer(selectedCustomer, locations);
                     if (loc) next.location = loc;
                   }
                   setEditData(next);
+                  setCustomerAssignInput(selectedCustomer ? customerOptionLabel(selectedCustomer) : '');
+                  setCustomerAssignSearchError('');
                 }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
                     label="Assign to Customer"
-                    placeholder="Type customer name or ID (clear to unassign)"
+                    placeholder="Search by name, CustomerListID, phone, or city"
+                    error={Boolean(customerAssignSearchError)}
+                    helperText={
+                      customerAssignSearchError ||
+                      (activeCustomers.length > 0
+                        ? `${activeCustomers.length} customers in directory — type to search`
+                        : 'Type a name or CustomerListID to search')
+                    }
                   />
                 )}
               />
