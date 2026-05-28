@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box, Typography, Grid, Card, CardContent, CardActions, Button,
   Chip, Avatar, Divider, Alert
@@ -27,17 +27,85 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../supabase/client';
 
 export default function OwnerPortalLanding() {
   const navigate = useNavigate();
   const { user, profile, organization } = useAuth();
+  const [overview, setOverview] = useState({
+    newOrgsThisWeek: 0,
+    openTickets: 0,
+    trialsExpiringSoon: 0,
+    activeTenants: 0,
+    loading: true,
+  });
 
-  // Org owners (role 'orgowner') or anyone with an org should use org dashboard, not platform owner portal
+  // Tenant account owners (orgowner, e.g. WeldCor) must use /home — not Scanified platform owner portal
   useEffect(() => {
     if (profile?.role === 'orgowner' || profile?.organization_id || organization) {
       navigate('/home', { replace: true });
     }
   }, [profile?.role, profile?.organization_id, organization, navigate]);
+
+  useEffect(() => {
+    if (profile?.role !== 'owner') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const soon = new Date();
+        soon.setDate(soon.getDate() + 14);
+
+        const { data: orgs } = await supabase
+          .from('organizations')
+          .select('id, subscription_status, trial_ends_at, trial_end_date, created_at')
+          .is('deleted_at', null);
+
+        let openTickets = 0;
+        const { count, error: ticketError } = await supabase
+          .from('support_tickets')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['open', 'pending']);
+
+        if (!ticketError) {
+          openTickets = count || 0;
+        }
+
+        const list = orgs || [];
+        const newOrgsThisWeek = list.filter(
+          (o) => o.created_at && new Date(o.created_at) >= weekAgo
+        ).length;
+        const activeTenants = list.filter((o) => o.subscription_status === 'active').length;
+        const trialsExpiringSoon = list.filter((o) => {
+          if (o.subscription_status !== 'trial') return false;
+          const end = o.trial_ends_at || o.trial_end_date;
+          if (!end) return false;
+          const d = new Date(end);
+          return d >= new Date() && d <= soon;
+        }).length;
+
+        if (!cancelled) {
+          setOverview({
+            newOrgsThisWeek,
+            openTickets,
+            trialsExpiringSoon,
+            activeTenants,
+            loading: false,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setOverview((prev) => ({ ...prev, loading: false }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.role]);
 
   if (profile?.role === 'orgowner' || profile?.organization_id || organization) {
     return null; // Redirecting to /home
@@ -45,19 +113,41 @@ export default function OwnerPortalLanding() {
 
   const quickActions = [
     {
-      title: 'Command Center',
-      description: 'AI-powered insights, competitive intelligence, and growth tools',
-      icon: <AIIcon sx={{ fontSize: 40 }} />,
-      color: '#7c3aed',
-      path: '/owner-portal/command-center',
+      title: 'Customer Management',
+      description: 'Manage subscribing organizations, SaaS plans, and tenant lifecycle',
+      icon: <PeopleIcon sx={{ fontSize: 40 }} />,
+      color: '#1976d2',
+      path: '/owner-portal/customer-management',
       featured: true
     },
     {
-      title: 'Customer Management',
-      description: 'Manage all customer organizations, subscriptions, and billing',
-      icon: <PeopleIcon sx={{ fontSize: 40 }} />,
-      color: '#1976d2',
-      path: '/owner-portal/customer-management'
+      title: 'Plan Management',
+      description: 'Manage subscription plans, pricing, and feature limits',
+      icon: <PaymentIcon sx={{ fontSize: 40 }} />,
+      color: '#2e7d32',
+      path: '/owner-portal/plans',
+      featured: true
+    },
+    {
+      title: 'User Management',
+      description: 'Manage users across all tenant organizations',
+      icon: <AdminIcon sx={{ fontSize: 40 }} />,
+      color: '#5c6bc0',
+      path: '/owner-portal/user-management'
+    },
+    {
+      title: 'Support Center',
+      description: 'Customer support tools and ticket management',
+      icon: <SupportIcon sx={{ fontSize: 40 }} />,
+      color: '#9c27b0',
+      path: '/owner-portal/support'
+    },
+    {
+      title: 'Command Center',
+      description: 'Growth insights and platform overview (preview)',
+      icon: <AIIcon sx={{ fontSize: 40 }} />,
+      color: '#7c3aed',
+      path: '/owner-portal/command-center'
     },
     {
       title: 'Analytics Dashboard',
@@ -98,13 +188,6 @@ export default function OwnerPortalLanding() {
       featured: true
     },
     {
-      title: 'Support Center',
-      description: 'Customer support tools and ticket management',
-      icon: <SupportIcon sx={{ fontSize: 40 }} />,
-      color: '#9c27b0',
-      path: '/owner-portal/support'
-    },
-    {
       title: 'System Health',
       description: 'Monitor system performance, database status, and service health',
       icon: <HealthIcon sx={{ fontSize: 40 }} />,
@@ -126,13 +209,6 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/security'
     },
     {
-      title: 'User Management',
-      description: 'Manage users across all organizations and assign roles',
-      icon: <AdminIcon sx={{ fontSize: 40 }} />,
-      color: '#7b1fa2',
-      path: '/owner-portal/user-management'
-    },
-    {
       title: 'Audit Log',
       description: 'View comprehensive audit trail of all system activities',
       icon: <HistoryIcon sx={{ fontSize: 40 }} />,
@@ -145,13 +221,6 @@ export default function OwnerPortalLanding() {
       icon: <PersonIcon sx={{ fontSize: 40 }} />,
       color: '#ff9800',
       path: '/owner-portal/impersonation'
-    },
-    {
-      title: 'Plan Management',
-      description: 'Manage subscription plans, pricing, and feature access',
-      icon: <AssignmentIcon sx={{ fontSize: 40 }} />,
-      color: '#009688',
-      path: '/owner-portal/plans'
     },
     {
       title: 'Role Management',
@@ -204,13 +273,6 @@ export default function OwnerPortalLanding() {
       path: '/owner-portal/visual-builder',
       featured: true
     }
-  ];
-
-  const systemStatus = [
-    { name: 'Database', status: 'healthy', color: 'success' },
-    { name: 'API Services', status: 'healthy', color: 'success' },
-    { name: 'Payment Processing', status: 'healthy', color: 'success' },
-    { name: 'Email Services', status: 'warning', color: 'warning' }
   ];
 
   return (
@@ -286,29 +348,11 @@ export default function OwnerPortalLanding() {
 
       <Divider sx={{ my: 4 }} />
 
-      {/* System Status */}
-      <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
-        System Status
-      </Typography>
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        {systemStatus.map((service, index) => (
-          <Grid item xs={12} sm={6} md={3} key={index}>
-            <Card sx={{ p: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                  {service.name}
-                </Typography>
-                <Chip 
-                  label={service.status} 
-                  color={service.color}
-                  size="small"
-                  icon={<CheckCircleIcon />}
-                />
-              </Box>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+      <Alert severity="info" sx={{ mb: 4 }}>
+        Infrastructure health (database, email, payments) is not monitored on this dashboard yet.
+        Use <strong>Disaster Recovery</strong> and <strong>Support</strong> for operational tasks.
+        Apply <code>sql/platform_owner_rls.sql</code> in Supabase if tenant lists or counts fail to load.
+      </Alert>
 
       {/* Quick Stats */}
       <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
@@ -323,19 +367,33 @@ export default function OwnerPortalLanding() {
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <TrendingUpIcon color="success" sx={{ mr: 1 }} />
               <Typography variant="body2">
-                5 new customer registrations this week
+                {overview.loading
+                  ? 'Loading tenant activity…'
+                  : `${overview.newOrgsThisWeek} new tenant${overview.newOrgsThisWeek === 1 ? '' : 's'} this week`}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <EmailIcon color="primary" sx={{ mr: 1 }} />
               <Typography variant="body2">
-                12 support tickets pending
+                {overview.loading
+                  ? 'Loading support queue…'
+                  : `${overview.openTickets} open or pending support ticket${overview.openTickets === 1 ? '' : 's'}`}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <CheckCircleIcon color="success" sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                {overview.loading
+                  ? 'Loading subscriptions…'
+                  : `${overview.activeTenants} active SaaS subscription${overview.activeTenants === 1 ? '' : 's'}`}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <SecurityIcon color="warning" sx={{ mr: 1 }} />
               <Typography variant="body2">
-                3 trial accounts expiring soon
+                {overview.loading
+                  ? 'Loading trials…'
+                  : `${overview.trialsExpiringSoon} trial${overview.trialsExpiringSoon === 1 ? '' : 's'} expiring in the next 14 days`}
               </Typography>
             </Box>
           </Card>
@@ -349,7 +407,7 @@ export default function OwnerPortalLanding() {
               <Button 
                 variant="text" 
                 startIcon={<BusinessIcon />}
-                onClick={() => navigate('/owner-portal/customers')}
+                onClick={() => navigate('/owner-portal/customer-management')}
                 sx={{ justifyContent: 'flex-start' }}
               >
                 Manage Customers

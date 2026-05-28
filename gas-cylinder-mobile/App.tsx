@@ -234,10 +234,10 @@ function AppContent() {
         <View style={styles.content}>
           <Text style={styles.title}>🏢 No Organization</Text>
           <Text style={styles.text}>
-            You are not associated with any organization.
+            {authError || 'You are not associated with any organization.'}
           </Text>
           <Text style={styles.subtext}>
-            Please contact your administrator or create a new organization.
+            Tenant users need role orgowner (or admin) with a company assigned. Platform Scanified owners use the web owner portal, not this app.
           </Text>
         </View>
       </SafeAreaView>

@@ -1,7 +1,7 @@
 import logger from '../utils/logger';
 import { useState, useEffect } from 'react';
 import { useAuth } from './useAuth.jsx';
-import { supabase } from '../supabase/client';
+import { isPlatformOwnerProfile } from '../constants/roles';
 
 const SUPER_ADMIN_EMAILS = (import.meta.env.VITE_SUPER_ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
 
@@ -27,7 +27,7 @@ export const useOwnerAccess = (profile) => {
         SUPER_ADMIN_EMAILS.includes(user.email)
       );
 
-      const isOwnerUser = profile?.role === 'owner' || isSuperAdmin;
+      const isOwnerUser = isPlatformOwnerProfile(profile) || isSuperAdmin;
 
       setIsOwner(isOwnerUser);
 

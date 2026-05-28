@@ -31,7 +31,18 @@ import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import * as XLSX from 'xlsx';
 import { OrganizationDeletionService } from '../../services/organizationDeletionService';
+import { fetchTenantSummaries } from '../../services/platformOwnerService';
 import { PageSearchInput } from '../../components/ui/search-input-with-icon';
+
+const subscriptionStatusOf = (org) => org?.subscription_status || org?.status || 'unknown';
+
+const enrichOrgFromSummary = (org, summary) => ({
+  ...org,
+  userCount: summary?.userCount ?? org.userCount ?? 0,
+  customerCount: summary?.customerCount ?? org.customerCount ?? 0,
+  bottleCount: summary?.bottleCount ?? org.bottleCount ?? 0,
+  contactEmail: summary?.contactEmail ?? org.contactEmail ?? 'No contact found',
+});
 
 export default function OwnerCustomers() {
   const { profile } = useAuth();
@@ -67,13 +78,19 @@ export default function OwnerCustomers() {
     expired: 0,
     deleted: 0
   });
+  const [fetchError, setFetchError] = useState(null);
+
+  useEffect(() => {
+    if (profile?.role === 'owner') {
+      fetchAvailablePlans();
+    }
+  }, [profile]);
 
   useEffect(() => {
     if (profile?.role === 'owner') {
       fetchOrganizations();
-      fetchAvailablePlans();
     }
-  }, [profile]);
+  }, [profile, showDeleted]);
 
   const fetchAvailablePlans = async () => {
     try {
@@ -90,92 +107,85 @@ export default function OwnerCustomers() {
     }
   };
 
+  const fetchOrgCountsFallback = async (org) => {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('email, role')
+      .eq('organization_id', org.id);
+
+    const { count: customerCount } = await supabase
+      .from('customers')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', org.id);
+
+    const { count: bottleCount } = await supabase
+      .from('bottles')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', org.id);
+
+    const primaryContact =
+      profiles?.find((p) => p.role === 'orgowner') ||
+      profiles?.find((p) => p.role === 'admin') ||
+      profiles?.[0];
+
+    return enrichOrgFromSummary(org, {
+      userCount: profiles?.length || 0,
+      customerCount: customerCount || 0,
+      bottleCount: bottleCount || 0,
+      contactEmail: primaryContact?.email || 'No contact found',
+    });
+  };
+
   const fetchOrganizations = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
-      logger.log('Fetching organizations...');
-      logger.log('Current profile:', profile);
-      
-      // Fetch all organizations first (including soft-deleted ones)
       let query = supabase
         .from('organizations')
         .select('*')
         .order('created_at', { ascending: false });
-      
-      // Filter based on showDeleted toggle
+
       if (!showDeleted) {
         query = query.is('deleted_at', null);
       }
-      
-      const { data: orgs, error } = await query;
 
+      const { data: orgs, error } = await query;
       if (error) throw error;
 
-      // Then fetch counts and contact info for each organization
-      const orgsWithCounts = await Promise.all(
-        (orgs || []).map(async (org) => {
-          // Get user count and primary contact email
-          const { data: profiles, count: userCount, error: profilesError } = await supabase
-            .from('profiles')
-            .select('email, role')
-            .eq('organization_id', org.id);
-          
-          logger.log(`Organization ${org.name} (${org.id}):`, {
-            profiles: profiles?.length || 0,
-            userCount: userCount,
-            profilesError: profilesError,
-            profilesData: profiles
-          });
+      const orgList = orgs || [];
+      const orgIds = orgList.map((o) => o.id);
+      const summaryMap = await fetchTenantSummaries(orgIds);
 
-          // Get customer count
-          const { count: customerCount } = await supabase
-            .from('customers')
-            .select('*', { count: 'exact', head: true })
-            .eq('organization_id', org.id);
+      let orgsWithCounts;
+      if (summaryMap.size > 0) {
+        orgsWithCounts = orgList.map((org) =>
+          enrichOrgFromSummary(org, summaryMap.get(org.id))
+        );
+      } else {
+        orgsWithCounts = await Promise.all(orgList.map(fetchOrgCountsFallback));
+        if (orgList.length > 0) {
+          setFetchError(
+            'Tenant counts loaded via fallback. Apply sql/platform_owner_rls.sql in Supabase for faster, reliable cross-tenant metrics.'
+          );
+        }
+      }
 
-          // Get bottle count
-          const { count: bottleCount } = await supabase
-            .from('bottles')
-            .select('*', { count: 'exact', head: true })
-            .eq('organization_id', org.id);
+      setOrganizations(orgsWithCounts);
 
-          // Get the primary contact email (first user or owner)
-          const primaryContact = profiles?.find(p => p.role === 'owner') || profiles?.[0];
-          const contactEmail = primaryContact?.email || 'No contact found';
+      const activeOrgs = orgList.filter((org) => !org.deleted_at);
+      const total = activeOrgs.length;
+      const active = activeOrgs.filter((org) => subscriptionStatusOf(org) === 'active').length;
+      const trial = activeOrgs.filter((org) => subscriptionStatusOf(org) === 'trial').length;
+      const expired = activeOrgs.filter((org) =>
+        ['past_due', 'canceled', 'incomplete', 'expired', 'suspended'].includes(subscriptionStatusOf(org))
+      ).length;
+      const deleted = orgList.filter((org) => org.deleted_at).length;
 
-          return {
-            ...org,
-            userCount: userCount || profiles?.length || 0,
-            customerCount: customerCount || 0,
-            bottleCount: bottleCount || 0,
-            contactEmail: contactEmail
-          };
-        })
-      );
-
-      logger.log('Organizations with counts:', orgsWithCounts);
-      
-      // Also try a simple count query to see if we can access the table
-      const { count, error: countError } = await supabase
-        .from('organizations')
-        .select('*', { count: 'exact', head: true });
-      
-      logger.log('Organizations count:', { count, countError });
-
-      setOrganizations(orgsWithCounts || []);
-      
-      // Calculate stats
-      const total = orgs?.filter(org => !org.deleted_at).length || 0;
-      const active = orgs?.filter(org => !org.deleted_at && org.status === 'active').length || 0;
-      const trial = orgs?.filter(org => !org.deleted_at && org.status === 'trial').length || 0;
-      const expired = orgs?.filter(org => !org.deleted_at && org.status === 'expired').length || 0;
-      const deleted = orgs?.filter(org => org.deleted_at).length || 0;
-      
-      logger.log('Calculated stats:', { total, active, trial, expired, deleted });
-      
       setStats({ total, active, trial, expired, deleted });
     } catch (error) {
       logger.error('Error fetching organizations:', error);
+      setFetchError(error.message || 'Failed to load organizations');
+      setOrganizations([]);
     } finally {
       setLoading(false);
     }
@@ -191,8 +201,12 @@ export default function OwnerCustomers() {
     switch (status) {
       case 'active': return 'success';
       case 'trial': return 'warning';
-      case 'expired': return 'error';
-      case 'suspended': return 'error';
+      case 'past_due': return 'warning';
+      case 'canceled':
+      case 'incomplete':
+      case 'expired':
+      case 'suspended':
+        return 'error';
       default: return 'default';
     }
   };
@@ -201,8 +215,6 @@ export default function OwnerCustomers() {
     switch (status) {
       case 'active': return <CheckCircleIcon />;
       case 'trial': return <WarningIcon />;
-      case 'expired': return <WarningIcon />;
-      case 'suspended': return <WarningIcon />;
       default: return <WarningIcon />;
     }
   };
@@ -861,6 +873,12 @@ export default function OwnerCustomers() {
         </Box>
       </Box>
 
+      {fetchError && (
+        <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setFetchError(null)}>
+          {fetchError}
+        </Alert>
+      )}
+
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={2.4}>
@@ -1023,9 +1041,9 @@ export default function OwnerCustomers() {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      icon={getStatusIcon(org.status)}
-                      label={org.status || 'unknown'}
-                      color={getStatusColor(org.status)}
+                      icon={getStatusIcon(subscriptionStatusOf(org))}
+                      label={subscriptionStatusOf(org)}
+                      color={getStatusColor(subscriptionStatusOf(org))}
                       size="small"
                     />
                   </TableCell>
@@ -1166,9 +1184,9 @@ export default function OwnerCustomers() {
                       Status
                     </Typography>
                     <Chip
-                      icon={getStatusIcon(selectedOrg.status)}
-                      label={selectedOrg.status}
-                      color={getStatusColor(selectedOrg.status)}
+                      icon={getStatusIcon(subscriptionStatusOf(selectedOrg))}
+                      label={subscriptionStatusOf(selectedOrg)}
+                      color={getStatusColor(subscriptionStatusOf(selectedOrg))}
                       size="small"
                     />
                   </Box>

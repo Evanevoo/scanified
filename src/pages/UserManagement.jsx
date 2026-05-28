@@ -11,25 +11,26 @@ import { usePermissions } from '../context/PermissionsContext';
 import { validateInput } from '../utils/security';
 import { netlifyFunctionUrl } from '../utils/netlifyFunctions';
 
+const ROLE_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Helper function to get role display name
 const getRoleDisplayName = (user) => {
-  // Try role from JOIN first (roles.name)
+  // Try role from JOIN first (roles.name via role_id)
   if (user.roles?.name) return user.roles.name;
-  
+
+  // Legacy: invite stored roles.id in profiles.role
+  if (user._resolvedRoleName) return user._resolvedRoleName;
+
   // Fallback to direct role field (map known roles to display names)
-  if (user.role === 'orgowner') return 'Org Owner';
-  if (user.role === 'owner') return 'Platform Owner';
-  if (user.role) return user.role;
-  
-  // Handle common role IDs/names
-  if (user.role_id) {
-    // If role_id looks like a UUID but we don't have the joined name, show a fallback
-    if (user.role_id.includes('-')) {
-      return 'Loading...';
-    }
-    return user.role_id;
+  if (user.role === 'orgowner') return 'Account owner';
+  if (user.role === 'owner') return 'Scanified owner';
+  if (user.role && !ROLE_UUID_RE.test(user.role)) return user.role;
+
+  if (user.role_id && ROLE_UUID_RE.test(user.role_id)) {
+    return 'Custom role';
   }
-  
+
   return 'N/A';
 };
 
@@ -168,12 +169,35 @@ export default function UserManagement() {
       .order('created_at', { ascending: false });
     
     logger.log('Fetched users with roles:', data);
-    
+
     if (error) {
       logger.error('Error fetching users:', error);
       setError(error.message);
     } else {
-      setUsers(data);
+      let users = data || [];
+      const legacyRoleIds = [
+        ...new Set(
+          users
+            .filter((u) => u.role && ROLE_UUID_RE.test(u.role))
+            .map((u) => u.role)
+        ),
+      ];
+      if (legacyRoleIds.length > 0) {
+        const { data: roleRows } = await supabase
+          .from('roles')
+          .select('id, name')
+          .in('id', legacyRoleIds);
+        const nameById = Object.fromEntries(
+          (roleRows || []).map((r) => [r.id, r.name])
+        );
+        users = users.map((u) => ({
+          ...u,
+          _resolvedRoleName: ROLE_UUID_RE.test(u.role || '')
+            ? nameById[u.role]
+            : undefined,
+        }));
+      }
+      setUsers(users);
     }
     setLoading(false);
   }
@@ -448,6 +472,10 @@ export default function UserManagement() {
       const updateData = {};
       if (updates.role_id !== undefined) {
         updateData.role_id = updates.role_id;
+        const matchedRole = roles.find((r) => r.id === updates.role_id);
+        if (matchedRole?.name) {
+          updateData.role = matchedRole.name.toLowerCase();
+        }
       }
       if (updates.full_name !== undefined) {
         updateData.full_name = updates.full_name;
@@ -620,7 +648,11 @@ export default function UserManagement() {
   }
 
   const handleEditUser = (user) => {
-    setEditingUser(user);
+    let roleId = user.role_id;
+    if (!roleId && user.role && ROLE_UUID_RE.test(user.role)) {
+      roleId = user.role;
+    }
+    setEditingUser({ ...user, role_id: roleId });
     setShowEditDialog(true);
   };
 

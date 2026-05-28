@@ -139,6 +139,7 @@ export default function UserManagementAllOrgs() {
       const { data, error } = await supabase
         .from('organizations')
         .select('id, name')
+        .is('deleted_at', null)
         .order('name');
       if (error) throw error;
       setOrganizations(data || []);

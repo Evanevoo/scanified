@@ -4,6 +4,14 @@ import { supabase } from '../supabase/client';
 
 const AuthContext = createContext({});
 
+/** True when profile fetch finished and org state matches what the app needs (or failed load). */
+function hasLoadedAuthContext(profile, organization) {
+  if (!profile) return false;
+  if (profile.role === 'owner' && !profile.organization_id) return true;
+  if (profile.organization_id) return !!organization;
+  return true;
+}
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   
@@ -30,6 +38,12 @@ export const AuthProvider = ({ children }) => {
   const isInitialLoadRef = useRef(true);
   const inactivityTimerRef = useRef(null);
   const warningTimerRef = useRef(null);
+  const profileRef = useRef(null);
+  const organizationRef = useRef(null);
+  const userRef = useRef(null);
+  profileRef.current = profile;
+  organizationRef.current = organization;
+  userRef.current = user;
 
   // 15 minutes inactivity auto-logout
   const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
@@ -64,7 +78,11 @@ export const AuthProvider = ({ children }) => {
 
       // Check if auth state hasn't actually changed
       const currentAuthState = sessionUser?.id;
-      if (lastAuthStateRef.current === currentAuthState && user && profile && organization) {
+      if (
+        lastAuthStateRef.current === currentAuthState &&
+        userRef.current &&
+        hasLoadedAuthContext(profileRef.current, organizationRef.current)
+      ) {
         if (import.meta.env.DEV) {
           logger.log('Auth: Auth state unchanged, skipping flow...');
         }
@@ -72,7 +90,12 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Additional check: if we have a valid session and user, don't restart
-      if (sessionUser && user && sessionUser.id === user.id && profile && organization) {
+      if (
+        sessionUser &&
+        userRef.current &&
+        sessionUser.id === userRef.current.id &&
+        hasLoadedAuthContext(profileRef.current, organizationRef.current)
+      ) {
         if (import.meta.env.DEV) {
           logger.log('Auth: Valid session already exists, skipping restart...');
         }
@@ -282,7 +305,7 @@ export const AuthProvider = ({ children }) => {
         if (_event === 'TOKEN_REFRESHED') {
           logger.log('Auth: Token refreshed, maintaining session');
           // Update session but don't reload user/profile unnecessarily
-          if (session?.user && user && session.user.id === user.id) {
+          if (session?.user && userRef.current && session.user.id === userRef.current.id) {
             return; // Same user, just token refresh
           }
         }
@@ -298,8 +321,13 @@ export const AuthProvider = ({ children }) => {
         const previousSessionId = previousSessionRef.current?.user?.id;
         
         if (_event === 'SIGNED_IN' && currentSessionId === previousSessionId) {
-          logger.log('Auth: Session refresh detected, not a genuine sign-in event');
-          return;
+          if (hasLoadedAuthContext(profileRef.current, organizationRef.current)) {
+            logger.log('Auth: Session refresh detected, auth context already loaded');
+            return;
+          }
+          logger.log(
+            'Auth: SIGNED_IN for same user but profile/org not ready — loading (e.g. after login or failed RLS fetch)'
+          );
         }
         
         // Only treat as sign-out if event is explicitly SIGNED_OUT

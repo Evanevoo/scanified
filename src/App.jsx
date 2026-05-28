@@ -277,7 +277,7 @@ function AppContent() {
                   <Route path="/reviews" element={<Reviews />} />
                   <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                   <Route path="/terms-of-service" element={<TermsOfService />} />
-                  <Route path="/pricing" element={<Navigate to="/" replace />} />
+                  <Route path="/pricing" element={<Navigate to="/landing#pricing" replace />} />
                   <Route path="/documentation" element={<Documentation />} />
                   <Route path="/p/:slug" element={<CustomPageViewer />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
@@ -416,22 +416,22 @@ function AppContent() {
                       </RoleProtectedRoute>
                     } />
                     <Route path="/maintenance-workflows" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                      <RoleProtectedRoute allowedRoles={['admin', 'orgowner', 'manager']}>
                         <MaintenanceWorkflows />
                       </RoleProtectedRoute>
                     } />
                     <Route path="/pallet-management" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                      <RoleProtectedRoute allowedRoles={['admin', 'orgowner', 'manager']}>
                         <PalletManagement />
                       </RoleProtectedRoute>
                     } />
                     <Route path="/hazmat-compliance" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                      <RoleProtectedRoute allowedRoles={['admin', 'orgowner', 'manager']}>
                         <HazmatCompliance />
                       </RoleProtectedRoute>
                     } />
                     <Route path="/chain-of-custody" element={
-                      <RoleProtectedRoute allowedRoles={['admin', 'owner', 'manager']}>
+                      <RoleProtectedRoute allowedRoles={['admin', 'orgowner', 'manager']}>
                         <ChainOfCustody />
                       </RoleProtectedRoute>
                     } />
@@ -446,7 +446,8 @@ function AppContent() {
                       <Route path="/owner-portal/tools" element={<DataUtilities />} />
                       <Route path="/owner-portal/support" element={<SupportTickets />} />
                       <Route path="/owner-portal/customer-management" element={<OwnerCustomers />} />
-                      <Route path="/owner-portal/billing" element={<Navigate to="/rentals" replace />} />
+                      <Route path="/owner-portal/billing" element={<Navigate to="/owner-portal/customer-management" replace />} />
+                      <Route path="/owner-portal/customers" element={<Navigate to="/owner-portal/customer-management" replace />} />
                       <Route path="/owner-portal/system-health" element={<SystemHealth />} />
                       <Route path="/owner-portal/disaster-recovery" element={<DisasterRecoveryDashboard />} />
                       <Route path="/owner-portal/security" element={<SecurityEvents />} />
@@ -480,7 +481,7 @@ function AppContent() {
                   <Route path="/advanced-rental-calculations" element={<Navigate to="/rentals" replace />} />
                   <Route path="/integration-settings" element={<Navigate to="/settings" replace />} />
                   <Route path="/automation-rules" element={
-                    <RoleProtectedRoute allowedRoles={['admin', 'owner']}>
+                    <RoleProtectedRoute allowedRoles={['admin', 'orgowner']}>
                       <AutomationRules />
                     </RoleProtectedRoute>
                   } />

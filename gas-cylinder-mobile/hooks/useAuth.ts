@@ -352,8 +352,11 @@ export function useAuth() {
                           checkTrialExpiration(orgData);
                         }
                       } else {
-                        logger.error('Organization not found');
+                        logger.error('Organization not found for organization_id:', profileData.organization_id);
                         setOrganization(null);
+                        setAuthError(
+                          'Your account is linked to an organization that could not be loaded. Ask your administrator to confirm your WeldCor/tenant access, or sign out and try again.'
+                        );
                       }
                     } catch (error) {
                       logger.error('❌ Error processing organization data:', error);
@@ -371,9 +374,19 @@ export function useAuth() {
                   });
               } else {
                 clearTimeout(orgTimeoutId);
-                logger.log('Profile has no organization_id');
+                logger.log('Profile has no organization_id', { role: profileData.role });
                 setOrganization(null);
                 setOrganizationLoading(false);
+                const role = String(profileData.role || '').toLowerCase();
+                if (role === 'owner') {
+                  setAuthError(
+                    'This login is configured as Scanified platform owner (not a WeldCor tenant user). Use scanified.com/owner-portal on the web, or ask support to set your role to orgowner and link your organization.'
+                  );
+                } else {
+                  setAuthError(
+                    'No organization is linked to your account. Contact your administrator to assign you to your company, or use Join Organization if you have a code.'
+                  );
+                }
               }
             }
           } catch (error) {

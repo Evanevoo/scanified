@@ -30,6 +30,7 @@ import Chip from '@mui/material/Chip';
 import Avatar from '@mui/material/Avatar';
 import { SearchInputWithIcon, APP_SHELL_SEARCH_INPUT_CLASSNAME } from './ui/search-input-with-icon';
 import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
+import { isOrgOwnerProfile, isPlatformOwnerProfile, roleDisplayName } from '../constants/roles';
 
 
 const drawerWidth = 280;
@@ -42,9 +43,10 @@ export default function MainLayout({ children }) {
   const muiTheme = useMuiTheme();
   const isDarkShell = muiTheme.palette.mode === 'dark';
   const primaryColor = resolveAccentToHex(accent);
-  const rolePillLabel =
-    profile?.role === 'owner'
-      ? 'Owner'
+  const rolePillLabel = isPlatformOwnerProfile(profile)
+    ? roleDisplayName('owner')
+    : isOrgOwnerProfile(profile)
+      ? roleDisplayName('orgowner')
       : isAdmin()
         ? 'Administrator'
         : isManager()
@@ -67,6 +69,8 @@ export default function MainLayout({ children }) {
   const location = useLocation();
   const { isOwner } = useOwnerAccess();
   const isOwnerPortal = profile?.role === 'owner' && location.pathname.startsWith('/owner-portal');
+  const headerBrandName = isOwnerPortal ? 'Scanified' : (organization?.name || 'WeldCor');
+  const headerBrandInitial = isOwnerPortal ? 'S' : (organization?.name?.charAt(0)?.toUpperCase() || 'W');
 
   // Top navigation — classic tab bar (pre–post-login redesign); hidden for platform owner
   const topNavLinks = profile?.role === 'owner'
@@ -386,13 +390,29 @@ export default function MainLayout({ children }) {
                   }}
                 />
               ) : (
-                organization?.name?.charAt(0)?.toUpperCase() || 'W'
+                headerBrandInitial
               )}
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', fontSize: '18px', display: { xs: 'none', sm: 'block' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {organization?.name || 'WeldCor'}
+                {headerBrandName}
               </Typography>
+              {isOwnerPortal && (
+                <Chip
+                  label="Owner Portal"
+                  size="small"
+                  sx={{
+                    display: { xs: 'none', md: 'inline-flex' },
+                    fontWeight: 700,
+                    fontSize: '0.62rem',
+                    height: 26,
+                    borderRadius: '8px',
+                    bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(64, 181, 173, 0.14)',
+                    color: isDarkShell ? 'text.secondary' : '#2E9B94',
+                    border: isDarkShell ? `1px solid ${alpha('#fff', 0.14)}` : '1px solid rgba(64, 181, 173, 0.35)',
+                  }}
+                />
+              )}
               {!isOwnerPortal && (
                 <Chip
                   label={rolePillLabel}
@@ -479,7 +499,11 @@ export default function MainLayout({ children }) {
               ref={searchRef}
             >
               <SearchInputWithIcon
-                placeholder="Search customers & assets — or press Ctrl+K for pages"
+                placeholder={
+                  isOwnerPortal
+                    ? 'Search tenant organizations — or press Ctrl+K for pages'
+                    : 'Search customers & assets — or press Ctrl+K for pages'
+                }
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);

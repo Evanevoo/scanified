@@ -351,8 +351,11 @@ export function useAuth() {
                         checkTrialExpiration(orgData);
                       }
                     } else {
-                      logger.error('Organization not found');
+                      logger.error('Organization not found for organization_id:', profileData.organization_id);
                       setOrganization(null);
+                      setAuthError(
+                        'Your account is linked to an organization that could not be loaded. Ask your administrator to confirm your tenant access.'
+                      );
                     }
                   } catch (error) {
                     logger.error('❌ Error processing organization data:', error);
@@ -368,9 +371,19 @@ export function useAuth() {
                   setOrganizationLoading(false);
                 });
             } else {
-              logger.log('Profile has no organization_id');
+              logger.log('Profile has no organization_id', { role: profileData.role });
               setOrganization(null);
               setOrganizationLoading(false);
+              const role = String(profileData.role || '').toLowerCase();
+              if (role === 'owner') {
+                setAuthError(
+                  'This login is configured as Scanified platform owner. Use the web owner portal, or ask support to set role orgowner with your company.'
+                );
+              } else {
+                setAuthError(
+                  'No organization is linked to your account. Contact your administrator or use Join Organization.'
+                );
+              }
             }
           }
         } catch (error) {

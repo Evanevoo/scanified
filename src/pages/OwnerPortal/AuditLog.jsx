@@ -26,6 +26,7 @@ import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import OwnerPreviewBanner from '../../components/owner/OwnerPreviewBanner';
 
 export default function AuditLog() {
   const { profile } = useAuth();
@@ -332,13 +333,10 @@ export default function AuditLog() {
       <Typography variant="h4" gutterBottom>
         Audit Log
       </Typography>
-      
-      <Alert severity="info" sx={{ mb: 3 }}>
-        <Typography variant="body2">
-          This page shows a comprehensive log of all user actions, system events, and administrative activities. 
-          All actions are logged for security, compliance, and troubleshooting purposes.
-        </Typography>
-      </Alert>
+
+      <OwnerPreviewBanner title="Sample audit data">
+        Entries below are mock data until an <code>audit_logs</code> table and ingestion pipeline are connected.
+      </OwnerPreviewBanner>
 
       {/* Search and Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
