@@ -49,6 +49,12 @@ function LoginPage() {
       } else if (user && profile && !organization && profile.role === 'owner') {
         // Platform owner without organization (Scanified only)
         navigate('/owner-portal');
+      } else if (user && profile && !organization && profile.organization_id && profile.role !== 'owner') {
+        // Has org id on profile but org row did not load (often RLS) — not the same as missing org
+        setShowOrgError(true);
+        setError(
+          'Your company is assigned on your account but could not be loaded. Ask your administrator to run sql/fix_rls_auth_emergency.sql in Supabase, then sign in again.'
+        );
       } else if (user && profile && !organization && profile.role !== 'owner') {
         // Check if there's a redirect flag set
         const redirectAfterLogin = sessionStorage.getItem('redirect_after_login');

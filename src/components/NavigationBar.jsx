@@ -33,7 +33,7 @@ const navigationItems = [
   },
   {
     label: 'Pricing',
-    path: '/pricing',
+    path: '/landing#pricing',
     description: 'Simple, transparent pricing'
   },
   {

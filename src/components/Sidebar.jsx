@@ -390,8 +390,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
       case 'admin': return 'Administrator';
       case 'manager': return 'Manager';
       case 'user': return 'User';
-      case 'owner': return 'Platform Owner';
-      case 'orgowner': return 'Org Owner';
+      case 'owner': return 'Scanified owner';
+      case 'orgowner': return 'Account owner';
       default: return role;
     }
   };

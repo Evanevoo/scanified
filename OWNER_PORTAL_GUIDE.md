@@ -10,20 +10,28 @@ The Owner Portal is a separate, dedicated interface for platform owners and admi
 - **Owner Portal**: `/owner-portal`
 - **Main Website**: `/home` (accessible from owner portal)
 
-### Access Control
-The owner portal is restricted to users with owner privileges. Access is controlled by:
-- User role: `owner`
-- Admin email addresses (configurable in `useOwnerAccess.js`)
+### Access Control — two different “owners”
+
+| Role | Who | Organization | App |
+|------|-----|--------------|-----|
+| **`owner`** | You — owner of **Scanified** (the SaaS platform) | `organization_id` must be **NULL** | `/owner-portal` |
+| **`orgowner`** | Primary subscriber of a **tenant** (e.g. WeldCor Supplies) | Has `organization_id` | `/home` (tenant app) |
+
+`orgowner` is **not** the Scanified platform owner. Do not use `owner` for WeldCor account holders — use `orgowner`.
+
+Access to this portal:
+- Role `owner` with no organization, or `VITE_SUPER_ADMIN_EMAILS` (see `useOwnerAccess.js`)
+
+If tenant users still have role `owner`, run [`migrate-owner-to-orgowner.sql`](migrate-owner-to-orgowner.sql).
 
 ## Features
 
 ### 1. Dashboard & Landing Page (`/owner-portal`)
-- **Quick Stats**: Total customers, active/trial/cancelled subscriptions
-- **System Status**: Real-time health monitoring
-- **Quick Actions**: Direct access to key features
-- **Platform Overview**: Recent activity and quick links
+- **Quick Actions**: SaaS operations (tenants, plans, users, support) plus marketing/CMS tools
+- **Platform Overview**: Live tenant and support ticket counts (from Supabase)
+- **Note**: Infrastructure health is not monitored on the landing page; use Disaster Recovery and Support for operations
 
-### 2. Customer Management (`/owner-portal/customers`)
+### 2. Customer Management (`/owner-portal/customer-management`)
 - **Organization Management**: View and edit all customer organizations
 - **Subscription Management**: Change plans, cancel/reactivate subscriptions
 - **Billing Management**: Update payment methods, trial extensions
@@ -46,10 +54,17 @@ The owner portal is restricted to users with owner privileges. Access is control
 - **Knowledge Base**: Documentation and guides
 - **Communication Tools**: Customer outreach and notifications
 
-### 6. System Health (`/owner-portal/health`)
-- **Service Monitoring**: Database, API, payment processing status
-- **Performance Metrics**: Response times, error rates
-- **Alert Management**: System notifications and warnings
+### 6. System Health (`/owner-portal/system-health`)
+- **Preview only**: Simulated metrics until production monitoring is integrated
+- **Disaster Recovery** (`/owner-portal/disaster-recovery`): Backups and tenant restore
+
+### 7. SaaS billing
+- **Tenant subscriptions**: `/owner-portal/customer-management` (per-organization plan and status)
+- **Plan catalog**: `/owner-portal/plans`
+- **Billing shortcut**: `/owner-portal/billing` redirects to customer management (not tenant `/rentals`)
+
+### Database setup (required for cross-tenant data)
+Apply [`sql/platform_owner_rls.sql`](sql/platform_owner_rls.sql) in Supabase so platform owners can list all tenants, users, and accurate per-tenant counts via `get_tenant_summaries`.
 
 ## Navigation
 

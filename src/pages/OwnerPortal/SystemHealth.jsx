@@ -29,6 +29,7 @@ import {
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import OwnerPreviewBanner from '../../components/owner/OwnerPreviewBanner';
 
 export default function SystemHealth() {
   const { profile } = useAuth();
@@ -134,6 +135,9 @@ export default function SystemHealth() {
 
   return (
     <Box sx={{ p: 3 }}>
+      <OwnerPreviewBanner title="Simulated health checks">
+        Component status and metrics are generated locally for demonstration — not connected to production monitoring.
+      </OwnerPreviewBanner>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">
           System Health Monitor

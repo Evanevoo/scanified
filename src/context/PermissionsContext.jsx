@@ -2,6 +2,14 @@ import logger from '../utils/logger';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
+import {
+  isLegacyOwnerOnTenantProfile,
+  isPlatformOwnerProfile,
+  isTenantOrgAdminProfile,
+  normalizeRoleKey,
+  ROLE_ORG_OWNER,
+  ROLE_PLATFORM_OWNER,
+} from '../constants/roles';
 
 const PermissionsContext = createContext({
   permissions: [],
@@ -22,11 +30,7 @@ export function PermissionsProvider({ children }) {
   const [isOrgAdmin, setIsOrgAdmin] = useState(false);
   const [actualRole, setActualRole] = useState(null);
 
-  // Helper function to normalize role for case-insensitive comparison
-  const normalizeRole = (role) => {
-    if (!role) return '';
-    return role.toLowerCase();
-  };
+  const normalizeRole = normalizeRoleKey;
 
   useEffect(() => {
     if (!profile) {
@@ -86,16 +90,22 @@ export function PermissionsProvider({ children }) {
 
       const userRole = normalizeRole(roleName);
 
-      // Platform owner (Scanified) - full access, no organization
-      if (userRole === 'owner') {
+      // Scanified platform owner — SaaS console; not a tenant org role
+      if (userRole === ROLE_PLATFORM_OWNER && isPlatformOwnerProfile(profile)) {
         setPermissions(['*']);
-        setIsOrgAdmin(true);
+        setIsOrgAdmin(false);
         setLoading(false);
         return;
       }
 
-      // Org owner - same as admin within their organization
-      if (userRole === 'orgowner') {
+      if (isLegacyOwnerOnTenantProfile(profile)) {
+        logger.warn(
+          'Profile has role owner with organization_id; run migrate-owner-to-orgowner.sql to use orgowner'
+        );
+      }
+
+      // Tenant account owner (e.g. WeldCor primary subscriber) — full access inside their org
+      if (userRole === ROLE_ORG_OWNER) {
         setPermissions(['*']);
         setIsOrgAdmin(true);
         setLoading(false);
@@ -136,14 +146,12 @@ export function PermissionsProvider({ children }) {
   };
 
   // Helper functions for role checking - case insensitive
-  const isAdmin = () => {
-    const userRole = normalizeRole(actualRole);
-    return userRole === 'admin' || userRole === 'owner' || userRole === 'orgowner';
-  };
+  /** Tenant organization admin (orgowner or admin) — not Scanified platform owner */
+  const isAdmin = () => isTenantOrgAdminProfile({ role: actualRole, organization_id: profile?.organization_id });
 
   const isManager = () => {
     const userRole = normalizeRole(actualRole);
-    return userRole === 'manager' || userRole === 'admin' || userRole === 'owner' || userRole === 'orgowner';
+    return userRole === 'manager' || isAdmin();
   };
 
   const isUser = () => {

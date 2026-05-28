@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
 import { supabase } from '../../supabase/client';
+import OwnerPreviewBanner from '../../components/owner/OwnerPreviewBanner';
 
 export default function Analytics() {
   const { profile } = useAuth();
@@ -330,6 +331,9 @@ export default function Analytics() {
 
   return (
     <Box sx={{ p: 3 }}>
+      <OwnerPreviewBanner title="Mixed live and estimated metrics">
+        Organization and user counts may be live; revenue growth, churn, uptime, and export use placeholders or estimates until billing analytics are integrated.
+      </OwnerPreviewBanner>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h3" gutterBottom sx={{ fontWeight: 700 }}>

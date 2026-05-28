@@ -2,6 +2,10 @@ import logger from '../utils/logger';
 import { useEffect, useState } from 'react';
 import { useAuth } from './useAuth.jsx';
 import { supabase } from '../supabase/client';
+import {
+  isPlatformOwnerProfile,
+  isTenantOrgAdminProfile,
+} from '../constants/roles';
 
 export function usePermissions() {
   const { user, profile } = useAuth();
@@ -15,15 +19,15 @@ export function usePermissions() {
       return;
     }
 
-    // Platform owner (Scanified) has all permissions
-    if (profile.role === 'owner') {
+    // Scanified platform owner — not a tenant org role
+    if (isPlatformOwnerProfile(profile)) {
       setPermissions(['*']);
-      setIsOrgAdmin(true);
+      setIsOrgAdmin(false);
       setLoading(false);
       return;
     }
 
-    // Org owner - same as admin within their organization
+    // Tenant account owner (e.g. WeldCor subscriber) — admin-level inside their org
     if (profile.role === 'orgowner') {
       setPermissions([
         'manage:users', 'manage:billing', 'manage:roles', 'manage:organization', 'manage:settings',
@@ -119,14 +123,12 @@ export function usePermissions() {
   };
 
   const hasRole = (role) => {
-    if (profile?.role === 'owner') return true;
+    if (isPlatformOwnerProfile(profile)) return true;
     if (profile?.role === role) return true;
     return false;
   };
 
-  const isAdmin = () => {
-    return profile?.role === 'owner' || profile?.role === 'orgowner' || profile?.role === 'admin' || isOrgAdmin;
-  };
+  const isAdmin = () => isTenantOrgAdminProfile(profile) || isOrgAdmin;
 
   const isManager = () => {
     return profile?.role === 'manager' || isAdmin();

@@ -1,6 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { motion, useInView, useReducedMotion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ import { useAssetConfig } from '../hooks/useAssetConfig';
 import SEOHead, { SEOConfigs } from '../components/SEOHead';
 import { ParticleTextEffect } from '@/components/ui/particle-text-effect';
 import { marketingTokens } from '../config/marketingTokens';
+import { fetchPublicSubscriptionPlans } from '../services/publicPlansService';
 
 const FeatureCard = ({ icon, title, description, index, reduceMotion }) => {
   const ref = useRef(null);
@@ -68,9 +69,43 @@ const BenefitItem = ({ text, index, reduceMotion }) => {
 
 export default function ModernLandingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { organization } = useAuth();
   const { config: assetConfig } = useAssetConfig();
   const reduceMotion = useReducedMotion();
+  const [pricingTiers, setPricingTiers] = useState([]);
+  const [pricingLoading, setPricingLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPricingLoading(true);
+      const { tiers } = await fetchPublicSubscriptionPlans();
+      if (!cancelled) {
+        setPricingTiers(tiers);
+        setPricingLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const hash = location.hash || window.location.hash;
+    if (!hash) return undefined;
+    const id = hash.replace(/^#/, '');
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({
+          behavior: reduceMotion ? 'auto' : 'smooth',
+          block: 'start',
+        });
+      }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname, location.hash, reduceMotion]);
 
   // Words for particle effect background
   const particleWords = [
@@ -237,7 +272,7 @@ export default function ModernLandingPage() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-24 bg-gradient-to-b from-transparent via-white/30 to-violet-50/20">
+      <section id="features" className="py-24 scroll-mt-24 bg-gradient-to-b from-transparent via-white/30 to-violet-50/20">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <Badge className="mb-4 border-2 border-primary bg-white text-foreground" variant="outline">Features</Badge>
@@ -263,6 +298,79 @@ export default function ModernLandingPage() {
         </div>
       </section>
 
+      {/* Pricing */}
+      <section id="pricing" className="py-24 scroll-mt-24 bg-gradient-to-b from-violet-50/20 via-white/50 to-transparent">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 border-2 border-primary bg-white text-foreground" variant="outline">
+              Pricing
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Simple, transparent pricing
+            </h2>
+            <p className="text-xl text-gray-700 max-w-2xl mx-auto">
+              Start with a 7-day free trial. Upgrade when your team is ready — no hidden fees.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            {pricingLoading && (
+              <p className="col-span-full text-center text-gray-600">Loading plans…</p>
+            )}
+            {!pricingLoading && pricingTiers.length === 0 && (
+              <p className="col-span-full text-center text-gray-600">
+                Pricing plans are not published yet. Active plans from Owner portal → Plans appear here.
+              </p>
+            )}
+            {pricingTiers.map((tier, index) => (
+              <motion.div
+                key={tier.id}
+                initial={{ opacity: 0, y: 40 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.2 }}
+                transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : index * 0.08 }}
+              >
+                <Card
+                  className={`h-full rounded-2xl border backdrop-blur-xl ${
+                    tier.highlighted
+                      ? 'border-primary bg-white/80 shadow-[0_20px_52px_rgba(64,181,173,0.2)] ring-2 ring-primary/30'
+                      : 'border-white/70 bg-white/55 shadow-[0_14px_44px_rgba(99,102,241,0.12)]'
+                  }`}
+                >
+                  <CardHeader>
+                    {tier.highlighted && (
+                      <Badge className="w-fit mb-2 bg-primary text-primary-foreground">Most popular</Badge>
+                    )}
+                    <CardTitle className="text-2xl text-gray-900">{tier.name}</CardTitle>
+                    <CardDescription className="text-base">{tier.description}</CardDescription>
+                    <p className="pt-4">
+                      <span className="text-4xl font-bold text-gray-900">${tier.price}</span>
+                      <span className="text-gray-600"> / {tier.priceInterval}</span>
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <ul className="space-y-2">
+                      {tier.features.map((feature, featureIndex) => (
+                        <li key={`${tier.id}-f-${featureIndex}`} className="flex items-start gap-2 text-sm text-gray-700">
+                          <CheckCircle2 className="w-4 h-4 text-[#40B5AD] flex-shrink-0 mt-0.5" />
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      className={`w-full ${tier.highlighted ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
+                      variant={tier.highlighted ? 'default' : 'outline'}
+                      onClick={() => navigate('/create-organization')}
+                    >
+                      Start free trial
+                    </Button>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t border-white/50 bg-white/40 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-12">
@@ -281,8 +389,38 @@ export default function ModernLandingPage() {
             <div>
               <h3 className="font-semibold text-black mb-4">Product</h3>
               <ul className="space-y-2">
-                <li><a href="#features" className="text-sm text-gray-700 hover:text-black transition-colors">Features</a></li>
-                <li><a href="#pricing" className="text-sm text-gray-700 hover:text-black transition-colors">Pricing</a></li>
+                <li>
+                  <a
+                    href="#features"
+                    className="text-sm text-gray-700 hover:text-black transition-colors"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('features')?.scrollIntoView({
+                        behavior: reduceMotion ? 'auto' : 'smooth',
+                        block: 'start',
+                      });
+                      window.history.replaceState(null, '', `${location.pathname}#features`);
+                    }}
+                  >
+                    Features
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="#pricing"
+                    className="text-sm text-gray-700 hover:text-black transition-colors"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('pricing')?.scrollIntoView({
+                        behavior: reduceMotion ? 'auto' : 'smooth',
+                        block: 'start',
+                      });
+                      window.history.replaceState(null, '', `${location.pathname}#pricing`);
+                    }}
+                  >
+                    Pricing
+                  </a>
+                </li>
                 <li><a href="#" className="text-sm text-gray-700 hover:text-black transition-colors" onClick={(e) => { e.preventDefault(); navigate('/case-studies'); }}>Case studies</a></li>
                 <li><a href="#" className="text-sm text-gray-700 hover:text-black transition-colors" onClick={(e) => { e.preventDefault(); navigate('/security'); }}>Security</a></li>
                 <li><a href="#" className="text-sm text-gray-700 hover:text-black transition-colors" onClick={(e) => { e.preventDefault(); navigate('/integrations'); }}>Integrations</a></li>

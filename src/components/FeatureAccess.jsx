@@ -1,6 +1,7 @@
 import React from 'react';
 import { usePermissions } from '../context/PermissionsContext';
 import { useAuth } from '../hooks/useAuth';
+import { isPlatformOwnerProfile } from '../constants/roles';
 import { Box, Alert, Button, Typography, Paper } from '@mui/material';
 import { Lock as LockIcon, AdminPanelSettings, ContactSupport } from '@mui/icons-material';
 
@@ -28,10 +29,10 @@ export default function FeatureAccess({
 
   // Check access based on different criteria
   const hasAccess = () => {
-    // Owner always has access
-    if (profile?.role === 'owner' || profile?.role === 'orgowner') return true;
+    // Scanified platform owner uses /owner-portal, not tenant feature gates
+    if (isPlatformOwnerProfile(profile)) return true;
 
-    // Check admin only access
+    // Check admin only access (tenant orgowner + admin via isAdmin())
     if (adminOnly && !isAdmin()) return false;
 
     // Check manager only access

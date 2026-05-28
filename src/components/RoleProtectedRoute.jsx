@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from './LoadingSpinner';
 import { Alert, Box, Typography, Button } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import { isPlatformOwnerProfile, normalizeRoleKey, ROLE_ORG_OWNER } from '../constants/roles';
 
 const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
   const { user, profile, loading, organization } = useAuth();
@@ -22,16 +23,17 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
     return <LoadingSpinner />;
   }
 
-  // Normalize role comparison (case-insensitive)
-  const normalizeRole = (role) => {
-    if (!role) return '';
-    return role.toLowerCase().trim();
-  };
+  const userRole = normalizeRoleKey(profile.role);
 
-  const userRole = normalizeRole(profile.role);
-  // Org owners (role 'orgowner') get same access as admin for role checks
-  const hasAccess = allowedRoles.some(role => normalizeRole(role) === userRole)
-    || (userRole === 'orgowner' && allowedRoles.some(role => normalizeRole(role) === 'admin'));
+  // Scanified platform owner is not a tenant orgowner — use /owner-portal
+  if (isPlatformOwnerProfile(profile)) {
+    return <Navigate to="/owner-portal" replace />;
+  }
+
+  // Tenant account owner (orgowner) gets same access as admin when routes allow admin
+  const hasAccess =
+    allowedRoles.some((role) => normalizeRoleKey(role) === userRole) ||
+    (userRole === ROLE_ORG_OWNER && allowedRoles.some((role) => normalizeRoleKey(role) === 'admin'));
   if (typeof window !== 'undefined') {
     window.__lastRoleProtectedRoute = {
       path: window.location.pathname,

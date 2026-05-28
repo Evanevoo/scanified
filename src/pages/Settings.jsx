@@ -308,10 +308,13 @@ export default function Settings() {
 
   const hasElevatedSettingsAccess = useMemo(() => {
     const r = resolvedRoleName.toLowerCase();
-    return r === 'admin' || r === 'owner' || r === 'orgowner';
+    return r === 'admin' || r === 'orgowner';
   }, [resolvedRoleName]);
 
-  const isPlatformOwner = useMemo(() => resolvedRoleName.toLowerCase() === 'owner', [resolvedRoleName]);
+  const isPlatformOwner = useMemo(
+    () => resolvedRoleName.toLowerCase() === 'owner' && !profile?.organization_id,
+    [resolvedRoleName, profile?.organization_id]
+  );
 
   // Support ticket history
   const [supportTickets, setSupportTickets] = useState([]);

@@ -1,12 +1,14 @@
--- Migrate existing org owners from role 'owner' to 'orgowner'
+-- Migrate tenant account holders off role 'owner' → 'orgowner'
 -- Run in Supabase: SQL Editor → New query → paste and Run
 --
--- Two roles after this:
---   owner   = Scanified platform owner (no organization, sees owner-portal)
---   orgowner = Organization owner (has organization, sees org dashboard like admin)
+-- These are NOT the same role:
+--   owner    = YOU — owner of Scanified (SaaS platform). organization_id MUST be NULL.
+--              Uses /owner-portal to manage subscribing companies.
+--   orgowner = Primary subscriber of a tenant org (e.g. WeldCor Supplies).
+--              Has organization_id set; uses /home like an admin for that company only.
 --
--- This updates everyone who has role 'owner' AND an organization to 'orgowner'.
--- The Scanified platform owner should have role 'owner' and organization_id = NULL (unchanged).
+-- This script fixes profiles that were wrongly given role 'owner' while belonging to a tenant.
+-- It does NOT change your Scanified platform account (owner + NULL organization_id).
 
 -- 1) Preview: who will be updated
 SELECT id, email, role, organization_id

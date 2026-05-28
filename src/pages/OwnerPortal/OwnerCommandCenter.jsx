@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
 import { supabase } from '../../supabase/client';
+import OwnerPreviewBanner from '../../components/owner/OwnerPreviewBanner';
 
 export default function OwnerCommandCenter() {
   const { profile } = useAuth();
@@ -200,6 +201,9 @@ export default function OwnerCommandCenter() {
 
   return (
     <Box sx={{ p: 3 }}>
+      <OwnerPreviewBanner title="Preview — AI insights not production-ready">
+        Recommendations and competitive metrics are illustrative. Churn and lifetime value require Stripe and usage pipelines.
+      </OwnerPreviewBanner>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h3" fontWeight={700} sx={{ mb: 1 }}>

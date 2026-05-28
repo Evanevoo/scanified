@@ -31,6 +31,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import OwnerPreviewBanner from '../../components/owner/OwnerPreviewBanner';
 import { PageSearchInput } from '../../components/ui/search-input-with-icon';
 
 export default function SecurityEvents() {
@@ -298,6 +299,9 @@ export default function SecurityEvents() {
 
   return (
     <Box sx={{ p: 3 }}>
+      <OwnerPreviewBanner title="Sample security events">
+        Events and statistics are simulated. Export and investigation actions are not wired to production logging yet.
+      </OwnerPreviewBanner>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
       <Typography variant="h4" gutterBottom>

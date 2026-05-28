@@ -52,7 +52,8 @@ export default function TenantBackupRestore() {
   const [dryRun, setDryRun] = useState(true);
   const [restoring, setRestoring] = useState(false);
 
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'owner' || profile?.role === 'orgowner';
+  const isAdmin =
+    profile?.role === 'admin' || profile?.role === 'orgowner';
 
   useEffect(() => {
     if (isAdmin && organization?.id) {

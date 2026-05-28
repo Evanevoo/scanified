@@ -1,14 +1,16 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useOwnerAccess } from '../hooks/useOwnerAccess';
+import { roleDisplayName } from '../constants/roles';
 import LoadingSpinner from './LoadingSpinner';
-import MainLayout from './MainLayout';
 import { Alert, Box } from '@mui/material';
 
 const OwnerProtectedRoute = ({ children }) => {
-  const { user, profile, organization, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
+  const { isOwner, loading: ownerAccessLoading } = useOwnerAccess(profile);
 
-  if (loading) {
+  if (loading || ownerAccessLoading) {
     return <LoadingSpinner />;
   }
 
@@ -20,25 +22,19 @@ const OwnerProtectedRoute = ({ children }) => {
     return <LoadingSpinner />;
   }
 
-  // CRITICAL: Only platform owners can access owner portal
-  if (profile.role !== 'owner') {
+  if (!isOwner) {
     return (
-      <MainLayout profile={profile}>
-        <Box sx={{ p: 3 }}>
-          <Alert severity="error">
-            Access denied. This page is only available to platform owners.
-          </Alert>
-        </Box>
-      </MainLayout>
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">
+          Access denied. This page is only for Scanified platform owners (`owner`), not tenant account owners (`orgowner`).
+          Your role: {roleDisplayName(profile?.role)}.
+        </Alert>
+      </Box>
     );
   }
 
-  // Platform owners don't need an organization
-  return (
-    <MainLayout profile={profile}>
-      {children || <Outlet />}
-    </MainLayout>
-  );
+  // MainLayout is provided by parent ProtectedRoute — do not nest another shell here
+  return children || <Outlet />;
 };
 
 export default OwnerProtectedRoute;

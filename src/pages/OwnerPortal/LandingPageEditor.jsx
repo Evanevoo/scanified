@@ -150,24 +150,6 @@ export default React.memo(function LandingPageEditor() {
       uptime: '99.9%'
     },
 
-    // Pricing
-    pricing: {
-      starter: {
-        name: 'Starter',
-        price: 29,
-        features: ['Up to 100 cylinders', 'Basic reporting', 'Mobile app', 'Email support']
-      },
-      professional: {
-        name: 'Professional',
-        price: 79,
-        features: ['Up to 1,000 cylinders', 'Advanced analytics', 'API access', 'Priority support']
-      },
-      enterprise: {
-        name: 'Enterprise',
-        price: 199,
-        features: ['Unlimited cylinders', 'Custom integrations', 'Dedicated support', 'Advanced security']
-      }
-    }
   });
 
   // Dialog states
@@ -179,18 +161,22 @@ export default React.memo(function LandingPageEditor() {
   }, []);
 
   const loadLandingContent = () => {
-    // Load from localStorage or API
     const saved = localStorage.getItem('landingPageContent');
-    if (saved) {
-      setLandingContent(JSON.parse(saved));
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved);
+      delete parsed.pricing;
+      setLandingContent((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // ignore corrupt local storage
     }
   };
 
   const saveLandingContent = () => {
     setLoading(true);
     try {
-      // Save to localStorage (in production, save to database)
-      localStorage.setItem('landingPageContent', JSON.stringify(landingContent));
+      const { pricing: _removed, ...contentWithoutPricing } = landingContent;
+      localStorage.setItem('landingPageContent', JSON.stringify(contentWithoutPricing));
       
       // Here you would also update the actual LandingPage.jsx component
       // For now, we'll just show success message
@@ -398,6 +384,13 @@ export default React.memo(function LandingPageEditor() {
         </Box>
       </Box>
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2">
+          <strong>Pricing:</strong> Plans on the public site (<code>/landing#pricing</code>) come from Owner portal →{' '}
+          <strong>Plans</strong> (<code>/owner-portal/plans</code>), not this editor.
+        </Typography>
+      </Alert>
+
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
           <strong>Legal Notice:</strong> Using fake testimonials or reviews is illegal and can result in FTC fines. 
@@ -412,7 +405,6 @@ export default React.memo(function LandingPageEditor() {
           <Tab label="Features" />
           <Tab label="Testimonials" />
           <Tab label="Clients & Security" />
-          <Tab label="Pricing" />
         </Tabs>
 
         {/* Hero Section Tab */}
@@ -722,59 +714,6 @@ export default React.memo(function LandingPageEditor() {
           </Grid>
         </TabPanel>
 
-        {/* Pricing Tab */}
-        <TabPanel value={activeTab} index={5}>
-          <Typography variant="h6" gutterBottom>Pricing Plans</Typography>
-          <Grid container spacing={3}>
-            {Object.entries(landingContent.pricing).map(([key, plan]) => (
-              <Grid item xs={12} md={4} key={key}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      {plan.name}
-                    </Typography>
-                    <Typography variant="h4" color="primary" gutterBottom>
-                      ${plan.price}
-                      <Typography variant="body2" component="span" color="text.secondary">
-                        /month
-                      </Typography>
-                    </Typography>
-                    <List dense>
-                      {plan.features.map((feature, index) => (
-                        <ListItem key={index}>
-                          <ListItemText primary={feature} />
-                        </ListItem>
-                      ))}
-                    </List>
-                    <NativeInput
-                      fullWidth
-                      label="Plan Name"
-                      initialValue={plan.name}
-                      onSave={(value) => {
-                        const newPricing = { ...landingContent.pricing };
-                        newPricing[key].name = value;
-                        setLandingContent(prev => ({ ...prev, pricing: newPricing }));
-                      }}
-                      sx={{ mt: 2, mb: 1 }}
-                    />
-                    <NativeInput
-                      fullWidth
-                      label="Price"
-                      type="number"
-                      initialValue={plan.price}
-                      onSave={(value) => {
-                        const newPricing = { ...landingContent.pricing };
-                        newPricing[key].price = parseInt(value);
-                        setLandingContent(prev => ({ ...prev, pricing: newPricing }));
-                      }}
-                      sx={{ mb: 1 }}
-                    />
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        </TabPanel>
       </Paper>
 
       {/* Testimonial Dialog */}

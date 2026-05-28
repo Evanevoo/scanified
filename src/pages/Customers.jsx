@@ -205,7 +205,7 @@ function Customers({ profile }) {
   /** Match Sidebar "Customer List" access: admin, manager, user (and owner aliases). */
   const canEdit = (() => {
     const r = String(effectiveProfile?.role || '').toLowerCase();
-    return r === 'admin' || r === 'manager' || r === 'user' || r === 'owner' || r === 'orgowner';
+    return r === 'admin' || r === 'manager' || r === 'user' || r === 'orgowner';
   })();
   const initialLoadDone = useRef(false);
 
