@@ -187,7 +187,13 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     const raw = String(barcodeNumber || '').trim();
     if (!raw) return [];
     const stripped = raw.replace(/^0+/, '') || raw;
-    return [...new Set([raw, stripped])];
+    const variants = new Set([raw, stripped]);
+    if (/^\d+$/.test(stripped)) {
+      for (const len of [8, 9, 10, 11, 12, 13]) {
+        if (stripped.length <= len) variants.add(stripped.padStart(len, '0'));
+      }
+    }
+    return [...variants];
   })();
 
   const scansBarcodeOrClause = barcodeVariants
@@ -198,27 +204,59 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     ])
     .join(',');
 
-  if (barcodeNumber) {
-    const { data: bsData, error: bsError } = await supabase
-      .from('bottle_scans')
-      .select('*')
-      .or(scansBarcodeOrClause)
-      .eq('organization_id', organizationId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (!bsError && bsData) {
-      bsData.forEach((scan) => {
-        allHistory.push({
-          ...scan,
-          history_type: 'bottle_scan',
-          barcode_number: scan.barcode_number || scan.bottle_barcode,
-          action: scan.mode || 'SCAN',
-        });
+  const ingestBottleScanRows = (rows, target) => {
+    (rows || []).forEach((scan) => {
+      target.push({
+        ...scan,
+        history_type: 'bottle_scan',
+        barcode_number: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
+        action: scan.mode || 'SCAN',
       });
+    });
+  };
+
+  if (barcodeNumber && scansBarcodeOrClause) {
+    const mergedScans = new Map();
+    const addScanRows = (rows) => {
+      (rows || []).forEach((scan) => {
+        const key =
+          scan.id ??
+          `${scan.created_at || scan.timestamp || ''}|${scan.mode || ''}|${scan.bottle_barcode || scan.barcode_number || ''}|${scan.order_number || ''}`;
+        if (!mergedScans.has(key)) mergedScans.set(key, scan);
+      });
+    };
+
+    const fetchBottleScanBatch = async (orgFilter) => {
+      let query = supabase
+        .from('bottle_scans')
+        .select('*')
+        .or(scansBarcodeOrClause)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (orgFilter === 'org' && organizationId) {
+        query = query.eq('organization_id', organizationId);
+      } else if (orgFilter === 'null') {
+        query = query.is('organization_id', null);
+      }
+      const { data, error } = await query;
+      if (error) {
+        logger.warn(`Movement history bottle_scans (${orgFilter || 'any'}):`, error.message);
+        return;
+      }
+      addScanRows(data);
+    };
+
+    if (organizationId) {
+      await fetchBottleScanBatch('org');
+      await fetchBottleScanBatch('null');
+    } else {
+      await fetchBottleScanBatch(null);
     }
 
-    if (!bsError && (!bsData || bsData.length === 0)) {
+    const bsData = Array.from(mergedScans.values());
+    ingestBottleScanRows(bsData, allHistory);
+
+    if (bsData.length === 0) {
       const legacyScans = await runOptionalQuery(
         () =>
           supabase
