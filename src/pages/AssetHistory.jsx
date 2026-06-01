@@ -24,6 +24,10 @@ import {
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import { fetchMergedAssetMovementHistory } from '../services/assetMovementHistory';
+import {
+  isPendingOrderScanRecord,
+  scanRecordModeFamily,
+} from '../utils/orderScanApprovalStatus';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 
 const UUID_RE =
@@ -53,7 +57,11 @@ function mergedMovementToLogRows(asset, merged) {
     const mode = String(row.mode || row.action || '').trim();
     let typeLabel = mode || 'SCAN';
     if (ht === 'rental_rnb' || mode === 'RNB') typeLabel = 'RNB (order return — not on open rental)';
-    else if (ht === 'rental_start' || mode === 'SHIP') typeLabel = 'SHIP';
+    else if (isPendingOrderScanRecord(row) && scanRecordModeFamily(row) === 'SHIP') {
+      typeLabel = 'Ship scan (pending approval)';
+    } else if (isPendingOrderScanRecord(row) && scanRecordModeFamily(row) === 'RETURN') {
+      typeLabel = 'Return scan (pending approval)';
+    } else if (ht === 'rental_start' || mode === 'SHIP') typeLabel = 'SHIP';
     else if (ht === 'rental_end' || mode === 'RETURN') typeLabel = 'RETURN';
     else if (ht === 'fill' || mode === 'FILL') typeLabel = 'FILL';
     else if (ht === 'transfer') typeLabel = 'TRANSFER';
@@ -67,17 +75,25 @@ function mergedMovementToLogRows(asset, merged) {
     const cid = row.customer_id || row.assigned_customer || '';
     const cname = row.customer_name || '';
     const loc =
-      cname || cid
+      isPendingOrderScanRecord(row)
         ? (() => {
-            const base = cname
-              ? `Customer: ${cname}${cid ? ` (${cid})` : ''}`
-              : `Customer: (${cid})`;
-            return ht === 'rental_rnb' || mode === 'RNB'
-              ? `${base} · billing exception (not on open rental when approved)`
-              : base;
+            const orderLabel = row.order_number ? `Order ${row.order_number}` : 'Order (pending)';
+            const custHint = cname || cid ? ` · ${cname || cid}` : '';
+            return scanRecordModeFamily(row) === 'RETURN'
+              ? `${orderLabel}${custHint} · scanned return, inventory not updated yet`
+              : `${orderLabel}${custHint} · scanned, not assigned yet`;
           })()
-        : row.location
-          ? `In-House: ${row.location}`
+        : cname || cid
+          ? (() => {
+              const base = cname
+                ? `Customer: ${cname}${cid ? ` (${cid})` : ''}`
+                : `Customer: (${cid})`;
+              return ht === 'rental_rnb' || mode === 'RNB'
+                ? `${base} · billing exception (not on open rental when approved)`
+                : base;
+            })()
+          : row.location
+            ? `In-House: ${row.location}`
           : ht === 'fill'
             ? 'Fill Plant'
             : '-';
