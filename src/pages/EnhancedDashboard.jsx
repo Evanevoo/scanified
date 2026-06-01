@@ -194,11 +194,11 @@ export default function EnhancedDashboard() {
       },
       {
         id: 2,
-        title: 'Scan Cylinders',
-        description: 'Quick cylinder scanning',
+        title: 'Scanned Orders',
+        description: 'Orders from mobile app scanning',
         icon: <InventoryIcon />,
         color: '#10B981',
-        path: '/web-scanning',
+        path: '/scanned-orders',
         count: dashboardData.availableBottles
       },
       {

@@ -670,7 +670,6 @@ input:focus-visible {
 .analytics-search .gooey-search-wrapper,
 .bottles-search .gooey-search-wrapper,
 .audit-search .gooey-search-wrapper,
-.web-scanning-search .gooey-search-wrapper,
 .import-approvals-search .gooey-search-wrapper {
   width: 100%;
 }

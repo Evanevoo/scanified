@@ -45,7 +45,6 @@ const UserInvites = lazy(() => import('./pages/UserInvites'));
 const DebugSession = lazy(() => import('./pages/DebugSession'));
 const Customers = lazy(() => import('./pages/Customers.jsx'));
 const IndustryAnalyticsDashboard = lazy(() => import('./pages/IndustryAnalyticsDashboard'));
-const WebScanning = lazy(() => import('./pages/WebScanning'));
 const RecentCylinders = lazy(() => import('./pages/RecentCylinders'));
 const BottleLocations = lazy(() => import('./pages/BottleLocations'));
 const CustomReports = lazy(() => import('./pages/CustomReports'));
@@ -346,7 +345,6 @@ function AppContent() {
                     {/* Legacy redirects */}
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
-                    <Route path="/web-scanning" element={<WebScanning />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
                     <Route path="/customer-self-service" element={<CustomerSelfService />} />
                     {import.meta.env.DEV && (
