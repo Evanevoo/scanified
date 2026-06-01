@@ -183,7 +183,7 @@ const replayBottleStateFromTimeline = (timelineAsc) => {
       status = 'filled';
       continue;
     }
-    if (modeIndicatesReturn(record)) {
+    if (modeIndicatesReturn(record) || record?.history_type === 'rental_end') {
       assignedCustomerId = '';
       customerName = '';
       status = 'empty';
@@ -202,7 +202,7 @@ const replayBottleStateFromTimeline = (timelineAsc) => {
       status = auditSt;
       continue;
     }
-    if (modeIndicatesDelivery(record)) {
+    if (modeIndicatesDelivery(record) || record?.history_type === 'rental_start') {
       const cid = String(record?.customer_id || record?.assigned_customer || '').trim();
       const cname = String(record?.customer_name || '').trim();
       if (cid || cname) {
@@ -1043,7 +1043,7 @@ export default function AssetDetail() {
         organizationId: profile.organization_id,
         asset: sourceAsset,
         perSourceLimit: 200,
-        maxRecords: 120,
+        maxRecords: 250,
       });
       setMovementHistory(merged);
     } catch (error) {
