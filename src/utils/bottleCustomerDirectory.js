@@ -36,6 +36,15 @@ export function bottleHasStaleCustomerAssignment(bottle, customers) {
   return true;
 }
 
+/** True when assignment is empty or matches an active customer in the directory. */
+export function isActiveCustomerAssignment(assignedCustomerId, customerName, customers) {
+  if (!String(assignedCustomerId || '').trim() && !String(customerName || '').trim()) return true;
+  return !bottleHasStaleCustomerAssignment(
+    { assigned_customer: assignedCustomerId, customer_name: customerName },
+    customers
+  );
+}
+
 /** Label for UI when assignment points at a removed customer (name preferred). */
 export function staleBottleCustomerLabel(bottle) {
   const name = String(bottle?.customer_name || '').trim();

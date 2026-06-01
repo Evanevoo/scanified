@@ -51,6 +51,7 @@ import {
 } from '../services/assetMovementHistory';
 import {
   bottleHasStaleCustomerAssignment,
+  isActiveCustomerAssignment,
   staleBottleCustomerLabel,
 } from '../utils/bottleCustomerDirectory';
 /** Exclude deleted rows only when those columns exist on the row (not selected from DB). */
@@ -214,6 +215,18 @@ const replayBottleStateFromTimeline = (timelineAsc) => {
   return { assignedCustomerId, customerName, status };
 };
 
+/** Drop deleted-directory customers from timeline replay so auto-repair does not re-assign them. */
+const sanitizeReplayedBottleState = (replayed, customers) => {
+  if (!replayed) return replayed;
+  let { assignedCustomerId = '', customerName = '', status = '' } = replayed;
+  if (!isActiveCustomerAssignment(assignedCustomerId, customerName, customers)) {
+    assignedCustomerId = '';
+    customerName = '';
+    if (normalizeStatus(status) === 'rented') status = 'empty';
+  }
+  return { assignedCustomerId, customerName, status };
+};
+
 /**
  * Manual edits write audit_logs BOTTLE_UPDATE with field_changes; scan-only inference must not skip these,
  * otherwise an old RETURN row wins and the Status chip shows Empty despite empty→rented in the audit.
@@ -332,7 +345,8 @@ export default function AssetDetail() {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const customerSearchTimerRef = useRef(null);
   const [gasTypes, setGasTypes] = useState([]);
-  const assignmentRepairKeyRef = useRef(null);
+  const staleClearRepairKeyRef = useRef(null);
+  const historySyncRepairKeyRef = useRef(null);
   const gasTypeOptions = React.useMemo(
     () =>
       [...new Set((gasTypes || []).map((item) => (item?.type || '').trim()).filter(Boolean))]
@@ -383,7 +397,7 @@ export default function AssetDetail() {
         return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
       });
 
-    const replayed = replayBottleStateFromTimeline(timelineAsc);
+    const replayed = sanitizeReplayedBottleState(replayBottleStateFromTimeline(timelineAsc), customers);
     const sameAsDb =
       String(replayed.assignedCustomerId || '') === String(fallback.assignedCustomerId || '') &&
       String(replayed.customerName || '') === String(fallback.customerName || '');
@@ -403,6 +417,7 @@ export default function AssetDetail() {
     asset?.customer_id,
     asset?.customer_uuid,
     asset?.customer_name,
+    customers,
   ]);
 
   const effectiveAssignedCustomerId = effectiveCustomerAssignment.assignedCustomerId;
@@ -410,10 +425,19 @@ export default function AssetDetail() {
   const hasCustomerAssignmentDisplay = Boolean(
     String(effectiveAssignedCustomerId || '').trim() || String(effectiveAssignedCustomerName || '').trim()
   );
-  const staleCustomerAssignment = React.useMemo(
-    () => bottleHasStaleCustomerAssignment(asset, customers),
-    [asset, customers]
-  );
+  const staleCustomerAssignment = React.useMemo(() => {
+    if (bottleHasStaleCustomerAssignment(asset, customers)) return true;
+    if (effectiveAssignedCustomerId || effectiveAssignedCustomerName) {
+      return bottleHasStaleCustomerAssignment(
+        {
+          assigned_customer: effectiveAssignedCustomerId,
+          customer_name: effectiveAssignedCustomerName,
+        },
+        customers
+      );
+    }
+    return false;
+  }, [asset, customers, effectiveAssignedCustomerId, effectiveAssignedCustomerName]);
   const hasActiveCustomerAssignment = hasCustomerAssignmentDisplay && !staleCustomerAssignment;
   const effectiveStatus = React.useMemo(() => {
     const fallback = normalizeStatus(asset?.status);
@@ -429,10 +453,10 @@ export default function AssetDetail() {
         return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
       });
 
-    const replayed = replayBottleStateFromTimeline(timelineAsc);
+    const replayed = sanitizeReplayedBottleState(replayBottleStateFromTimeline(timelineAsc), customers);
     const raw = replayed.status ? normalizeStatus(replayed.status) : fallback;
     return persistedStatusForOwnership(raw, asset?.ownership);
-  }, [movementHistory, asset?.status, asset?.ownership]);
+  }, [movementHistory, asset?.status, asset?.ownership, customers]);
 
   useEffect(() => {
     const clearStaleCustomerAssignment = async () => {
@@ -440,8 +464,8 @@ export default function AssetDetail() {
       if (!bottleHasStaleCustomerAssignment(asset, customers)) return;
 
       const repairKey = `stale-customer|${asset.id}|${staleBottleCustomerLabel(asset)}`;
-      if (assignmentRepairKeyRef.current === repairKey) return;
-      assignmentRepairKeyRef.current = repairKey;
+      if (staleClearRepairKeyRef.current === repairKey) return;
+      staleClearRepairKeyRef.current = repairKey;
 
       const priorStatus = normalizeStatus(asset?.status);
       const updateData = {
@@ -492,13 +516,14 @@ export default function AssetDetail() {
       const currentName = String(asset.customer_name || '').trim();
       const nextId = String(effectiveAssignedCustomerId || '').trim();
       const nextName = String(effectiveAssignedCustomerName || '').trim();
+      if (!isActiveCustomerAssignment(nextId, nextName, customers)) return;
       const currentStatus = normalizeStatus(asset?.status);
       const needsRepair = currentId !== nextId || currentName !== nextName || currentStatus !== effectiveStatus;
       if (!needsRepair) return;
 
       const repairKey = `${asset.id}|${currentId}|${currentName}|${nextId}|${nextName}|${currentStatus}|${effectiveStatus}|${effectiveCustomerAssignment.sourceAction}`;
-      if (assignmentRepairKeyRef.current === repairKey) return;
-      assignmentRepairKeyRef.current = repairKey;
+      if (historySyncRepairKeyRef.current === repairKey) return;
+      historySyncRepairKeyRef.current = repairKey;
 
       const updateData = {
         assigned_customer: nextId || null,
@@ -535,7 +560,8 @@ export default function AssetDetail() {
     effectiveAssignedCustomerId,
     effectiveAssignedCustomerName,
     effectiveStatus,
-    effectiveCustomerAssignment.sourceAction
+    effectiveCustomerAssignment.sourceAction,
+    customers,
   ]);
 
   const derivedDaysAtLocation = React.useMemo(() => {
@@ -583,6 +609,8 @@ export default function AssetDetail() {
     asset?.created_at,
     asset?.days_at_location
   ]);
+
+  const displayStatus = movementHistory.length ? effectiveStatus : normalizeStatus(asset?.status);
 
   useEffect(() => {
     fetchAssetDetail();
@@ -1455,13 +1483,13 @@ export default function AssetDetail() {
               Status
             </Typography>
             <Chip 
-              label={bottleStatusDisplayLabel(asset?.status ?? effectiveStatus, asset?.ownership)}
-              color={bottleStatusChipColor(asset?.status ?? effectiveStatus, asset?.ownership)}
+              label={bottleStatusDisplayLabel(displayStatus, asset?.ownership)}
+              color={bottleStatusChipColor(displayStatus, asset?.ownership)}
               size="small"
             />
             {isCustomerOwnedOwnership(asset?.ownership) &&
               ['rented', 'filled', 'empty', 'available', 'full'].includes(
-                String(asset?.status || '').toLowerCase()
+                String(displayStatus || '').toLowerCase()
               ) && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
                 Customer-owned bottles do not use fill or rental status. Save to store status as not tracked (N/A).
