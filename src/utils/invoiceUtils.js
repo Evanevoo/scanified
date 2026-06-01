@@ -3,6 +3,169 @@
  */
 import { supabase } from '../supabase/client';
 import logger from './logger';
+import { getBillingPeriodForSub } from './rentalBillingPeriod';
+
+function distinctBillingPeriodPairs(periods) {
+  const seen = new Set();
+  const out = [];
+  for (const p of periods) {
+    const ps = String(p?.periodStart || '').trim();
+    const pe = String(p?.periodEnd || '').trim();
+    if (!ps || !pe) continue;
+    const k = `${ps}\t${pe}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ periodStart: ps, periodEnd: pe });
+  }
+  return out;
+}
+
+function mergeCycleInvoiceEntry(prev, incoming) {
+  if (!prev) return incoming;
+  const pSent = prev.status === 'sent';
+  const iSent = incoming.status === 'sent';
+  if (iSent) return incoming;
+  if (pSent) return prev;
+  const pt = new Date(prev.updated_at || 0).getTime();
+  const it = new Date(incoming.updated_at || 0).getTime();
+  return it >= pt ? incoming : prev;
+}
+
+function appendPeriodFilterToQuery(query, periodPairs) {
+  if (!periodPairs?.length) return query;
+  if (periodPairs.length === 1) {
+    return query
+      .eq('period_start', periodPairs[0].periodStart)
+      .eq('period_end', periodPairs[0].periodEnd);
+  }
+  const orExpr = periodPairs
+    .map((p) => `and(period_start.eq.${p.periodStart},period_end.eq.${p.periodEnd})`)
+    .join(',');
+  return query.or(orExpr);
+}
+
+/** Empty lookup maps for Rentals Invoice # column. */
+export function emptyCycleInvoiceLookup() {
+  return { byCustomerId: {}, bySubscriptionId: {} };
+}
+
+/**
+ * Batch-load cycle invoice numbers for the Rentals table (same tables as resolveInvoiceNumberForRentalPdf).
+ */
+export async function loadRentalCycleInvoiceLookup(
+  supabaseClient,
+  organizationId,
+  { customerIds = [], subscriptionIds = [], periodPairs = [], virtualCycle = null } = {},
+) {
+  const mapByCustomer = {};
+  const mapBySubscription = {};
+  if (!organizationId) return emptyCycleInvoiceLookup();
+
+  const applySubInvRows = (rows) => {
+    for (const row of rows || []) {
+      const incoming = {
+        invoice_number: row.invoice_number,
+        status: String(row.status || '').toLowerCase(),
+        updated_at: row.updated_at || null,
+      };
+      const ck = String(row.customer_id || '').trim();
+      if (ck) {
+        mapByCustomer[ck] = mergeCycleInvoiceEntry(mapByCustomer[ck], incoming);
+      }
+      const sid = String(row.subscription_id || '').trim();
+      if (sid) {
+        mapBySubscription[sid] = mergeCycleInvoiceEntry(mapBySubscription[sid], incoming);
+      }
+    }
+  };
+
+  const uniqueCustomerIds = [...new Set(customerIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  const uniqueSubIds = [...new Set(subscriptionIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  const pairs = distinctBillingPeriodPairs(periodPairs);
+
+  if (
+    uniqueCustomerIds.length > 0
+    && virtualCycle?.periodStart
+    && virtualCycle?.periodEnd
+  ) {
+    const { data } = await supabaseClient
+      .from('invoices')
+      .select('customer_id, invoice_number, status, created_at')
+      .eq('organization_id', organizationId)
+      .eq('period_start', virtualCycle.periodStart)
+      .eq('period_end', virtualCycle.periodEnd)
+      .in('customer_id', uniqueCustomerIds);
+    for (const row of data || []) {
+      const key = String(row.customer_id || '').trim();
+      if (!key) continue;
+      mapByCustomer[key] = {
+        invoice_number: row.invoice_number,
+        status: String(row.status || '').toLowerCase(),
+        updated_at: row.created_at || null,
+      };
+    }
+  }
+
+  const subInvSelect =
+    'subscription_id, customer_id, invoice_number, status, updated_at, period_start, period_end';
+
+  if (uniqueSubIds.length > 0 && pairs.length > 0) {
+    let q = supabaseClient
+      .from('subscription_invoices')
+      .select(subInvSelect)
+      .eq('organization_id', organizationId)
+      .in('subscription_id', uniqueSubIds);
+    q = appendPeriodFilterToQuery(q, pairs);
+    const { data } = await q;
+    applySubInvRows(data);
+  }
+
+  if (uniqueCustomerIds.length > 0 && pairs.length > 0) {
+    let q = supabaseClient
+      .from('subscription_invoices')
+      .select(subInvSelect)
+      .eq('organization_id', organizationId)
+      .in('customer_id', uniqueCustomerIds);
+    q = appendPeriodFilterToQuery(q, pairs);
+    const { data } = await q;
+    applySubInvRows(data);
+  }
+
+  return { byCustomerId: mapByCustomer, bySubscriptionId: mapBySubscription };
+}
+
+/**
+ * Read saved invoice # for a billing cycle (tries QB month period, then live cycle).
+ */
+export async function resolveInvoiceNumberForRentalCycle(
+  supabaseClient,
+  organizationId,
+  sub,
+  qbBillingMonthYm = 'live',
+) {
+  if (!organizationId) return null;
+  const primary = getBillingPeriodForSub(sub, { qbBillingMonthYm });
+  const periods = distinctBillingPeriodPairs([primary]);
+  if (String(qbBillingMonthYm || 'live').trim().toLowerCase() !== 'live') {
+    const live = getBillingPeriodForSub(sub, { qbBillingMonthYm: 'live' });
+    for (const p of distinctBillingPeriodPairs([live])) {
+      if (!periods.some((x) => x.periodStart === p.periodStart && x.periodEnd === p.periodEnd)) {
+        periods.push(p);
+      }
+    }
+  }
+  for (const { periodStart, periodEnd } of periods) {
+    const n = await resolveInvoiceNumberForRentalPdf(
+      supabaseClient,
+      organizationId,
+      sub,
+      periodStart,
+      periodEnd,
+    );
+    if (n) return n;
+  }
+  return null;
+}
 
 /**
  * Reuse an invoice # already stored for this customer + billing cycle so PDF download / email
