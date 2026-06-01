@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDebounce } from '../utils/performance';
 import { toCsv, downloadFile, getNextAgreementNumbers } from '../utils/invoiceUtils';
 import { downloadQuickBooksInvoiceCsv } from '../utils/quickBooksInvoiceCsvDownload';
+import { attachInvoiceNumbersToExportRows } from '../services/rentalInvoiceNumber';
 import { buildYearlyLeaseExportRows } from '../services/yearlyLeaseExportRows';
 import { downloadLeaseAgreementPdfZip } from '../utils/leaseAgreementPdfZip';
 import * as XLSX from 'xlsx';
@@ -362,14 +363,23 @@ export default function LeaseAgreements() {
         });
         return;
       }
+      if (!organization?.id) {
+        setSnackbar({ open: true, message: 'No organization.', severity: 'error' });
+        return;
+      }
       const now = new Date();
       const seqMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const c = getLeaseExportCycleRange();
-      const n = downloadQuickBooksInvoiceCsv(rows, {
+      const rowsWithNumbers = await attachInvoiceNumbersToExportRows(
+        supabase,
+        organization.id,
+        rows,
+        { qbBillingMonthYm: 'live' },
+      );
+      const n = downloadQuickBooksInvoiceCsv(rowsWithNumbers, {
         filePrefix: `quickbooks_invoices_yearly_lease_${seqMonth}`,
         invoiceDate: c.periodEnd,
         dueDate: c.dueDate,
-        sequenceMonth: seqMonth,
         getCurrentCycleRange: getLeaseExportCycleRange,
       });
       setSnackbar({
@@ -382,7 +392,7 @@ export default function LeaseAgreements() {
     } finally {
       setBillingExportBusy(false);
     }
-  }, [fetchFreshBillingWorkspace, getLeaseExportCycleRange]);
+  }, [fetchFreshBillingWorkspace, getLeaseExportCycleRange, organization?.id]);
 
   const handleExportLeaseExcel = useCallback(async () => {
     setBillingExportBusy(true);

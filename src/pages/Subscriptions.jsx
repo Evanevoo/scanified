@@ -7,13 +7,12 @@ import { createSubscription, generateInvoice } from '../services/subscriptionSer
 import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
-import { getNextInvoiceNumbers, resolveInvoiceNumberForRentalPdf } from '../utils/invoiceUtils';
+import { getNextInvoiceNumbers, emptyCycleInvoiceLookup, loadRentalCycleInvoiceLookup } from '../utils/invoiceUtils';
+import { downloadQuickBooksInvoiceCsv, resolveTaxCode } from '../utils/quickBooksInvoiceCsvDownload';
 import {
-  downloadQuickBooksInvoiceCsv,
-  qbCsvInvoiceStorageKeys,
-  QB_CSV_LAST_INV_MAP_KEY,
-  resolveTaxCode,
-} from '../utils/quickBooksInvoiceCsvDownload';
+  attachInvoiceNumbersToExportRows,
+  resolveRentalInvoiceNumber,
+} from '../services/rentalInvoiceNumber';
 import {
   applyInvoiceEmailTemplateVars,
   buildRentalInvoiceEmailVarMap,
@@ -173,11 +172,6 @@ async function runPool(items, concurrency, worker) {
   await Promise.all(Array.from({ length: n }, launch));
 }
 
-/** Invoice # chips: keyed by customer id and by subscription id (fixes mismatched UUID vs CustomerListID on older rows). */
-function emptyCycleInvoiceLookup() {
-  return { byCustomerId: {}, bySubscriptionId: {} };
-}
-
 /**
  * Overlay the real `customers` row onto resolver stubs so fields like purchase_order /
  * payment_terms are not dropped when subscriptions match bottle-derived lookups first.
@@ -188,48 +182,6 @@ function mergeCustomerDirectoryFields(baseCustomer, subscriptionCustomerId, matc
   if (!cid || typeof matchCustomerBySubId !== 'function') return baseCustomer ?? b;
   const dir = matchCustomerBySubId(cid);
   return dir ? { ...b, ...dir } : Object.keys(b).length ? b : baseCustomer;
-}
-
-/** Same row identity as QuickBooks CSV ordering for W-number assignment. */
-function qbExportRowMatchesSub(exportRow, sub) {
-  if (exportRow?.id != null && sub?.id != null && String(exportRow.id) === String(sub.id)) return true;
-  const cr = String(exportRow?.customer_id || '').trim();
-  const cs = String(sub?.customer_id || '').trim();
-  if (!cr || !cs || cr !== cs) return false;
-  const pr = String(exportRow?.billing_period || 'monthly').toLowerCase();
-  const ps = String(sub?.billing_period || 'monthly').toLowerCase();
-  return pr === ps;
-}
-
-/**
- * Read-only W###### matching the last QuickBooks CSV download for this `sequenceMonth`, then the same
- * formula as `downloadQuickBooksInvoiceCsv` for the current export row order (does not advance invoice_state).
- */
-function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
-  if (!targetSub) return null;
-  try {
-    const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const wantSeq = String(csvOptions?.sequenceMonth || '').trim();
-      if (parsed?.seqMonth === wantSeq && parsed?.byRowKey && wantSeq) {
-        for (const key of qbCsvInvoiceStorageKeys(targetSub)) {
-          const fromLastExport = parsed.byRowKey[key];
-          if (fromLastExport) return fromLastExport;
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  if (!exportRows?.length) return null;
-  const state = JSON.parse(localStorage.getItem('invoice_state') || '{}');
-  const lastNumber = Number(state?.lastNumber);
-  const hasLastNumber = Number.isFinite(lastNumber);
-  const startNumber = hasLastNumber ? (lastNumber + 1) : 10000;
-  const idx = exportRows.findIndex((r) => qbExportRowMatchesSub(r, targetSub));
-  if (idx < 0) return null;
-  return `W${String(startNumber + idx).padStart(5, '0')}`;
 }
 
 function daysAtLocationSummaryFromBottles(bottles) {
@@ -416,7 +368,6 @@ export default function Subscriptions() {
   const [newSub, setNewSub] = useState({ customer_id: '', billing_period: 'monthly' });
   const [saving, setSaving] = useState(false);
   const [preallocatingNumbers, setPreallocatingNumbers] = useState(false);
-  const resolveInvNoRef = useRef(null);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
   /** Saved invoice template JSON for PDF/email (localStorage; org-scoped). */
@@ -1694,89 +1645,23 @@ export default function Subscriptions() {
         return;
       }
 
-      const mergeCycleEntry = (prev, incoming) => {
-        if (!prev) return incoming;
-        const pSent = prev.status === 'sent';
-        const iSent = incoming.status === 'sent';
-        if (iSent) return incoming;
-        if (pSent) return prev;
-        const pt = new Date(prev.updated_at || 0).getTime();
-        const it = new Date(incoming.updated_at || 0).getTime();
-        return it >= pt ? incoming : prev;
-      };
-
-      const mapByCustomer = {};
-      const mapBySubscription = {};
-
-      if (customerIds.length > 0) {
-        const { periodStart: virtualCycleStart, periodEnd: virtualCycleEnd } = getCurrentCycleRange();
-        const { data } = await supabase
-          .from('invoices')
-          .select('customer_id, invoice_number, status, created_at')
-          .eq('organization_id', organization.id)
-          .eq('period_start', virtualCycleStart)
-          .eq('period_end', virtualCycleEnd)
-          .in('customer_id', customerIds);
-        if (!active) return;
-        for (const row of (data || [])) {
-          const key = String(row.customer_id || '').trim();
-          if (!key) continue;
-          mapByCustomer[key] = {
-            invoice_number: row.invoice_number,
-            status: String(row.status || '').toLowerCase(),
-            updated_at: row.created_at || null,
-          };
+      const periodPairsMap = new Map();
+      for (const r of allRows || []) {
+        if (r.isVirtual || !r.id || String(r.id).startsWith('legacy-') || String(r.id).startsWith('virtual-')) {
+          continue;
         }
+        const { periodStart: ps, periodEnd: pe } = getPdfBillingPeriodForSub(r);
+        periodPairsMap.set(`${ps}\t${pe}`, { periodStart: ps, periodEnd: pe });
       }
-
-      if (subscriptionIds.length > 0) {
-        const periodPairsMap = new Map();
-        for (const r of allRows || []) {
-          if (r.isVirtual || !r.id || String(r.id).startsWith('legacy-') || String(r.id).startsWith('virtual-')) {
-            continue;
-          }
-          const { periodStart: ps, periodEnd: pe } = getPdfBillingPeriodForSub(r);
-          periodPairsMap.set(`${ps}\t${pe}`, { periodStart: ps, periodEnd: pe });
-        }
-        const periodPairs = [...periodPairsMap.values()];
-
-        let subInvQuery = supabase
-          .from('subscription_invoices')
-          .select('subscription_id, customer_id, invoice_number, status, updated_at, period_start, period_end')
-          .eq('organization_id', organization.id)
-          .in('subscription_id', subscriptionIds);
-
-        if (periodPairs.length === 1) {
-          subInvQuery = subInvQuery
-            .eq('period_start', periodPairs[0].periodStart)
-            .eq('period_end', periodPairs[0].periodEnd);
-        } else if (periodPairs.length > 1) {
-          const orExpr = periodPairs
-            .map((p) => `and(period_start.eq.${p.periodStart},period_end.eq.${p.periodEnd})`)
-            .join(',');
-          subInvQuery = subInvQuery.or(orExpr);
-        }
-
-        const { data: subInvRows } = await subInvQuery;
-        if (!active) return;
-        for (const row of (subInvRows || [])) {
-          const incoming = {
-            invoice_number: row.invoice_number,
-            status: String(row.status || '').toLowerCase(),
-            updated_at: row.updated_at || null,
-          };
-          const ck = String(row.customer_id || '').trim();
-          if (ck) {
-            mapByCustomer[ck] = mergeCycleEntry(mapByCustomer[ck], incoming);
-          }
-          const sid = String(row.subscription_id || '').trim();
-          if (sid) {
-            mapBySubscription[sid] = mergeCycleEntry(mapBySubscription[sid], incoming);
-          }
-        }
-      }
-
-      setCycleInvoiceLookup({ byCustomerId: mapByCustomer, bySubscriptionId: mapBySubscription });
+      const virtualCycle = getCurrentCycleRange();
+      const lookup = await loadRentalCycleInvoiceLookup(supabase, organization.id, {
+        customerIds,
+        subscriptionIds,
+        periodPairs: [...periodPairsMap.values()],
+        virtualCycle,
+      });
+      if (!active) return;
+      setCycleInvoiceLookup(lookup);
     };
     loadCycleInvoiceStatus().catch(() => {
       if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
@@ -1903,10 +1788,14 @@ export default function Subscriptions() {
         }
       }
 
-      const exported = downloadQuickBooksInvoiceCsv(
-        (allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0),
-        { getCurrentCycleRange },
+      const exportRows = (allRows || []).filter((r) => r.status === 'active' && (parseFloat(r.itemCount) || 0) > 0);
+      const rowsWithNumbers = await attachInvoiceNumbersToExportRows(
+        supabase,
+        organization.id,
+        exportRows,
+        { qbBillingMonthYm: 'live' },
       );
+      const exported = downloadQuickBooksInvoiceCsv(rowsWithNumbers, { getCurrentCycleRange });
 
       if (subscriptionCreated === 0 && legacyCreated === 0) {
         setActionSuccess('No active rentals to invoice right now.');
@@ -2154,18 +2043,12 @@ export default function Subscriptions() {
             ? '_creditcard'
             : '';
       const monthTag = qbCsvBillingMonth === 'live' ? 'live' : qbCsvBillingMonth;
-      const resolveInvNo = resolveInvNoRef.current;
-      const rowsWithInvoiceNumbers = [];
-      if (resolveInvNo) {
-        for (const row of rows) {
-          rowsWithInvoiceNumbers.push({
-            ...row,
-            invoice_number: await resolveInvNo(row),
-          });
-        }
-      } else {
-        rowsWithInvoiceNumbers.push(...rows);
-      }
+      const rowsWithInvoiceNumbers = await attachInvoiceNumbersToExportRows(
+        supabase,
+        organization.id,
+        rows,
+        { qbBillingMonthYm: qbCsvBillingMonth },
+      );
       const exported = downloadQuickBooksInvoiceCsv(rowsWithInvoiceNumbers, {
         ...csvOptions,
         filePrefix: `quickbooks_invoices_${period}${cohortSuffix}_${monthTag}`,
@@ -2189,144 +2072,6 @@ export default function Subscriptions() {
       setSaving(false);
     }
   };
-
-  const ensureVirtualInvoiceNumber = useCallback(async (row) => {
-    const { periodStart, periodEnd, dueDate } = getBillingPeriodForSub(row, {
-      qbBillingMonthYm: qbCsvBillingMonth,
-    });
-    const today = new Date();
-    const invoiceDate = today.toISOString().split('T')[0];
-    const total = parseFloat(row?.totalPerCycle) || 0;
-    const gstAmt = +(total * 0.05).toFixed(2);
-    const pstAmt = +(total * 0.06).toFixed(2);
-    const taxAmount = +(gstAmt + pstAmt).toFixed(2);
-    const totalAmount = +(total + taxAmount).toFixed(2);
-
-    const { data: existing } = await supabase
-      .from('invoices')
-      .select('id, invoice_number')
-      .eq('organization_id', organization.id)
-      .eq('customer_id', row.customer_id)
-      .eq('period_start', periodStart)
-      .eq('period_end', periodEnd)
-      .limit(1)
-      .maybeSingle();
-    if (existing?.invoice_number) return existing.invoice_number;
-
-    const basePayload = {
-      organization_id: organization.id,
-      customer_id: row.customer_id,
-      customer_name: row.customer?.name || row.customer?.Name || row.customer_id,
-      period_start: periodStart,
-      period_end: periodEnd,
-      invoice_date: invoiceDate,
-      due_date: dueDate,
-      subtotal: total,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      status: 'pending',
-    };
-    let invoiceNumber = null;
-    let lastErr = null;
-    for (let i = 0; i < 3; i++) {
-      const reserved = await getNextInvoiceNumbers(organization.id, 1);
-      invoiceNumber = reserved?.[0];
-      if (!invoiceNumber) {
-        throw new Error('Failed to reserve a unique invoice number. Please retry.');
-      }
-      const payload = { ...basePayload, invoice_number: invoiceNumber };
-      const { error } = await supabase.from('invoices').insert(payload);
-      if (!error) {
-        lastErr = null;
-        break;
-      }
-      lastErr = error;
-      const isDuplicateInvoiceNumber =
-        String(error?.code || '') === '23505'
-        && String(error?.message || '').includes('invoices_org_invoice_number_unique');
-      if (!isDuplicateInvoiceNumber) throw error;
-    }
-    if (lastErr) throw lastErr;
-    return invoiceNumber;
-  }, [organization?.id, qbCsvBillingMonth]);
-
-  /** Reserve a real subscription_invoices row + sequential # when none exists (avoids W00010-style id fallbacks). */
-  const ensureSubscriptionCycleInvoiceNumber = useCallback(
-    async (sub) => {
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
-      const { dueDate } = getBillingPeriodForSub(sub, { qbBillingMonthYm: qbCsvBillingMonth }).dueDate
-        || getCurrentCycleRange().dueDate;
-      const cid = String(sub?.customer_id || '').trim();
-      const rawId = sub?.id;
-      const subId =
-        rawId != null
-        && !sub?.isVirtual
-        && !String(rawId).startsWith('virtual-')
-        && !String(rawId).startsWith('legacy-')
-          ? String(rawId).trim()
-          : '';
-      if (!organization?.id || !cid || !subId || !periodStart || !periodEnd) return null;
-
-      const { data: existingSi } = await supabase
-        .from('subscription_invoices')
-        .select('invoice_number')
-        .eq('organization_id', organization.id)
-        .eq('subscription_id', subId)
-        .eq('period_start', periodStart)
-        .eq('period_end', periodEnd)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const existingNo = String(existingSi?.invoice_number || '').trim();
-      if (existingNo) return existingNo;
-
-      const total = parseFloat(sub?.totalPerCycle) || 0;
-      const gstAmt = +(total * 0.05).toFixed(2);
-      const pstAmt = +(total * 0.06).toFixed(2);
-      const taxAmount = +(gstAmt + pstAmt).toFixed(2);
-      const totalAmount = +(total + taxAmount).toFixed(2);
-
-      let lastErr = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const reserved = await getNextInvoiceNumbers(organization.id, 1);
-        const invoiceNumber = reserved?.[0];
-        if (!invoiceNumber) {
-          throw new Error('Failed to reserve a unique invoice number. Please retry.');
-        }
-        const { error } = await supabase.from('subscription_invoices').insert({
-          organization_id: organization.id,
-          subscription_id: subId,
-          customer_id: cid,
-          invoice_number: invoiceNumber,
-          status: 'draft',
-          period_start: periodStart,
-          period_end: periodEnd,
-          subtotal: total,
-          tax_amount: taxAmount,
-          total_amount: totalAmount,
-          due_date: dueDate,
-        });
-        if (!error) return invoiceNumber;
-        lastErr = error;
-        const { data: raceSi } = await supabase
-          .from('subscription_invoices')
-          .select('invoice_number')
-          .eq('organization_id', organization.id)
-          .eq('subscription_id', subId)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const raceNo = String(raceSi?.invoice_number || '').trim();
-        if (raceNo) return raceNo;
-        if (String(error?.code || '') !== '23505') break;
-      }
-      if (lastErr) console.warn('ensureSubscriptionCycleInvoiceNumber:', lastErr);
-      return null;
-    },
-    [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange, qbCsvBillingMonth],
-  );
 
   /**
    * `defaultInvoiceNumber(sub)` derives Wxxxxx from the Stripe subscription id (e.g. W00010).
@@ -2659,74 +2404,18 @@ export default function Subscriptions() {
     [organization?.id, getPdfBillingPeriodForSub, getCurrentCycleRange],
   );
 
-  /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
+  /** Single source: DB (subscription_invoices / invoices) then invoice_settings counter. */
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
-      const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
-      // Saved / prep # / subscription_invoices always win — never stale browser CSV cache for org users.
-      let invNo = '';
-      let fromDb = await resolveInvoiceNumberForRentalPdf(
-        supabase,
-        organization.id,
-        sub,
-        periodStart,
-        periodEnd
-      );
-      // Invoice # column uses live cycle; QB month dropdown must not miss prep # rows.
-      if (!fromDb && String(qbCsvBillingMonth || 'live').trim().toLowerCase() !== 'live') {
-        const livePeriod = getPdfBillingPeriodForSub(sub, 'live');
-        fromDb = await resolveInvoiceNumberForRentalPdf(
-          supabase,
-          organization.id,
-          sub,
-          livePeriod.periodStart,
-          livePeriod.periodEnd
-        );
-      }
-      if (fromDb) invNo = String(fromDb).trim();
-
-      // Reserve the next org-wide sequential # for this billing period (never reuse last month's row).
-      if (!invNo && sub?.isVirtual) {
-        const v = await ensureVirtualInvoiceNumber(sub);
-        invNo = v ? String(v).trim() : '';
-      }
-      if (!invNo && !sub?.isVirtual) {
-        const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
-        invNo = ensured ? String(ensured).trim() : '';
-      }
-
-      // Legacy localStorage W10000+ preview only when org counter could not run.
-      if (!invNo && !organization?.id) {
-        const csvPeriod =
-          String(sub?.billing_period || 'monthly').toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
-        try {
-          const built = await buildQbCsvExportRows(csvPeriod, 'all');
-          if (!built.invalidBillingMonth && built.rows?.length) {
-            const qbNo = computeQbSequentialInvoiceNumber(built.rows, built.csvOptions, sub);
-            if (qbNo) invNo = String(qbNo).trim();
-          }
-        } catch (e) {
-          console.warn('QB sequential invoice number lookup failed', e);
-        }
-      }
-      if (!invNo) {
-        invNo = defaultInvoiceNumber(sub);
-      }
-      const repaired = await repairPlaceholderSubscriptionInvoiceNumber(sub, invNo);
-      return repaired || invNo;
+      let invNo = await resolveRentalInvoiceNumber(supabase, organization.id, sub, {
+        qbBillingMonthYm: qbCsvBillingMonth,
+      });
+      if (!invNo) return '';
+      invNo = await repairPlaceholderSubscriptionInvoiceNumber(sub, invNo);
+      return invNo || '';
     },
-    [
-      buildQbCsvExportRows,
-      ensureVirtualInvoiceNumber,
-      ensureSubscriptionCycleInvoiceNumber,
-      getPdfBillingPeriodForSub,
-      organization?.id,
-      qbCsvBillingMonth,
-      repairPlaceholderSubscriptionInvoiceNumber,
-    ]
+    [organization?.id, qbCsvBillingMonth, repairPlaceholderSubscriptionInvoiceNumber],
   );
-
-  resolveInvNoRef.current = resolveRentalInvoiceNumberForActions;
 
   const openInvoiceNumberDialog = useCallback(
     async (sub) => {
@@ -3022,10 +2711,10 @@ export default function Subscriptions() {
       mergedTemplate.remit_address_line3 = remitForPdf.remit_address_line3 || '';
       mergedTemplate.gst_number = remitForPdf.gst_number || '';
     }
-    const invoiceNoForPdf =
-      String(invoiceNumberOverride ?? '').trim() ||
-      String(row?.invoice_number ?? '').trim() ||
-      defaultInvoiceNumber(row);
+    const invoiceNoForPdf = String(invoiceNumberOverride ?? '').trim();
+    if (!invoiceNoForPdf) {
+      throw new Error('Invoice number is required. Run Prep # or use Edit Inv # before exporting.');
+    }
     const poForPdf = String(customerRecord?.purchase_order ?? row?.customer?.purchase_order ?? '').trim();
     const pdfResult = await createRentalInvoicePdfDoc({
       organization,
