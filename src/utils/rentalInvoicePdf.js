@@ -128,6 +128,50 @@ function inclusiveDaysBetweenYmd(startYmd, endYmd) {
   return Math.max(0, Math.floor((ub - ua) / 86400000) + 1);
 }
 
+/**
+ * Inclusive days a unit was on rent within billing period [ps, pe].
+ * @param {string|null|undefined} returnYmdOrNull - rental end; omit when still on rent through period end
+ */
+function daysHeldInBillingPeriod(deliveryYmd, returnYmdOrNull, ps, pe) {
+  const del = clipYmd(deliveryYmd);
+  if (!del || !ps || !pe) return null;
+  const periodStart = del > ps ? del : ps;
+  if (periodStart > pe) return 0;
+  const ret = clipYmd(returnYmdOrNull);
+  const periodEnd = ret && ret <= pe ? ret : pe;
+  return inclusiveDaysBetweenYmd(periodStart, periodEnd);
+}
+
+/**
+ * Average days on rent in the billing period for units matching a summary line (serialized
+ * on-hand rows + returns closed in the period). Falls back to full period length when no matches.
+ */
+export function averageBillableDaysForInvoiceLine(line, ps, pe, inPeriodBottles, returnsInPeriod) {
+  if (!ps || !pe) return null;
+  const samples = [];
+
+  for (const b of inPeriodBottles || []) {
+    if (!bottleMatchesLineItem(b, line)) continue;
+    const del = b.rental_start_date || b.delivery_date || b.purchase_date;
+    const days = daysHeldInBillingPeriod(del, null, ps, pe);
+    if (days != null && days > 0) samples.push(days);
+  }
+
+  for (const r of returnsInPeriod || []) {
+    if (!returnMatchesLineItem(r, line)) continue;
+    const days = daysHeldInBillingPeriod(r.rental_start_date, r.rental_end_date, ps, pe);
+    if (days != null && days > 0) samples.push(days);
+  }
+
+  if (samples.length === 0) {
+    const fallback = inclusiveDaysBetweenYmd(ps, pe);
+    return fallback != null && fallback > 0 ? fallback : null;
+  }
+
+  const sum = samples.reduce((a, c) => a + c, 0);
+  return Math.max(1, Math.round(sum / samples.length));
+}
+
 function normInvoiceProductKey(v) {
   return String(v || '').trim().toLowerCase();
 }
@@ -636,9 +680,6 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.setTextColor(35, 35, 35);
   const totalsX0 = tableLeft + tableW * 0.52;
   const lineCount = lineItems.length;
-  const periodBillDays = ps && pe ? inclusiveDaysBetweenYmd(ps, pe) : null;
-  const rentDaysStr =
-    periodBillDays != null && periodBillDays > 0 ? String(periodBillDays) : '—';
 
   lineItems.forEach((line) => {
     const rawLabel = line.description || line.product_code || '—';
@@ -665,7 +706,16 @@ export async function createRentalInvoicePdfDoc(params) {
     drawCenteredInBand(ship, colShip, wShip, y);
     drawCenteredInBand(rtn, colRtn, wRtn, y);
     drawCenteredInBand(end, colEnd, wEnd, y);
-    drawCenteredInBand(rentDaysStr, colDays, wDays, y);
+    const lineBillDays = averageBillableDaysForInvoiceLine(
+      line,
+      ps,
+      pe,
+      inPeriodBottles,
+      returnsInPeriod,
+    );
+    const daysLabel =
+      lineBillDays != null && lineBillDays > 0 ? String(lineBillDays) : '—';
+    drawCenteredInBand(daysLabel, colDays, wDays, y);
     drawCenteredInBand(formatMoneyRate3(line.unit || 0), colRate, wRate, y);
     drawRightEdgeAt(formatCurrency(line.amount || 0), colTot, y);
     y += rowH;

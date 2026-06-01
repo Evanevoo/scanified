@@ -253,7 +253,6 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Verified Orders', subtitle: 'Completed verifications', path: '/verified-orders', icon: <AssignmentIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import rental agreements', subtitle: 'Upload lease files', path: '/import-rental-agreements', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Transfer from customers', subtitle: 'Bulk customer transfers', path: '/transfer-from-customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Web scanning', subtitle: 'Scan without mobile app', path: '/web-scanning', icon: <OrdersIcon />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     customers: {
