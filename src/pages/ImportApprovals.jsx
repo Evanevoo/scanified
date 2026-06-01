@@ -374,6 +374,79 @@ function isBottleAtCustomerByStatus(status) {
   return s === 'delivered' || s === 'rented';
 }
 
+function normalizeImportBarcode(v) {
+  return v == null || v === '' ? '' : String(v).trim().replace(/^0+/, '') || String(v).trim();
+}
+
+function normalizeImportOrderNum(num) {
+  if (num == null || num === '') return '';
+  const s = String(num).trim();
+  if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+  return s;
+}
+
+function isReturnScanRow(s) {
+  const mode = (s?.mode || '').toString().toUpperCase();
+  const action = (s?.action || '').toString().toLowerCase();
+  const scanType = (s?.scan_type || '').toString().toLowerCase();
+  return (
+    mode === 'RETURN' ||
+    mode === 'PICKUP' ||
+    scanType === 'pickup' ||
+    (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY')
+  );
+}
+
+function getScanRowBarcode(s) {
+  return (s?.bottle_barcode || s?.barcode_number || s?.cylinder_barcode)?.toString().trim() || '';
+}
+
+/** Fetch scans matching any barcode column (some rows only populate barcode_number or cylinder_barcode). */
+async function fetchBottleScansByBarcodes(supabaseClient, organizationId, barcodeArray) {
+  if (!organizationId || !barcodeArray?.length) return [];
+  const merged = new Map();
+  const addRows = (rows) => {
+    (rows || []).forEach((row) => {
+      const key = `${row.id || ''}\t${row.created_at || row.timestamp || ''}\t${getScanRowBarcode(row)}\t${row.mode || ''}\t${row.order_number || ''}`;
+      if (!merged.has(key)) merged.set(key, row);
+    });
+  };
+  const select =
+    'id, bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id';
+  for (const col of ['bottle_barcode', 'barcode_number', 'cylinder_barcode']) {
+    const { data, error } = await supabaseClient
+      .from('bottle_scans')
+      .select(select)
+      .eq('organization_id', organizationId)
+      .in(col, barcodeArray);
+    if (error) logger.warn(`fetchBottleScansByBarcodes (${col}):`, error.message);
+    else addRows(data);
+  }
+  return Array.from(merged.values());
+}
+
+/** True when a SHIP on this order conflicts with inventory — ignores stale DB when scan history already shows return or this order's ship. */
+function shouldWarnShippedBottleOtherCustomer(bottle, targetCustomerName, targetCustomerId) {
+  const scanActionUpper = String(bottle.scanAction || '').trim().toUpperCase();
+  const isShipScan =
+    scanActionUpper === 'OUT' || scanActionUpper === 'SHIP' || scanActionUpper === 'DELIVERY';
+  if (!isShipScan) return false;
+  if (bottle.latestGlobalOnThisOrder) return false;
+  if (bottle.returnRecordedBeforeThisShip) return false;
+  if (!isBottleAtCustomerByStatus(bottle.status)) return false;
+  const norm = (v) => (v != null && v !== '' ? String(v).trim().toLowerCase() : '');
+  const targetName = norm(targetCustomerName);
+  const targetId = norm(targetCustomerId);
+  const bottleName = norm(bottle.customer_name);
+  const bottleAssigned = norm(bottle.assigned_customer);
+  if (!bottleName && !bottleAssigned) return false;
+  const matchesTargetName =
+    !!targetName && (bottleName === targetName || bottleAssigned === targetName);
+  const matchesTargetId =
+    !!targetId && (bottleAssigned === targetId || bottleName === targetId);
+  return !(matchesTargetName || matchesTargetId);
+}
+
 // formatDate: DB timestamps are parsed as UTC when no offset (see parseDbTimestamp)
 function formatDate(dt, timeZone) {
   if (!dt) return '';
@@ -772,16 +845,6 @@ export default function ImportApprovals() {
   const [productCodeToAssetInfo, setProductCodeToAssetInfo] = useState({});
   const [rentalWarningDialog, setRentalWarningDialog] = useState({ open: false, warnings: [], onConfirm: null });
   const [restoreRejectedDialog, setRestoreRejectedDialog] = useState({ open: false, orderNumber: '', loading: false });
-  // Enhanced verification statistics
-  const [verificationStats, setVerificationStats] = useState({
-    total: 0,
-    pending: 0,
-    verified: 0,
-    exceptions: 0,
-    investigating: 0,
-    processing: 0
-  });
-
   // Automatic scanning state
   const [autoScanning, setAutoScanning] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
@@ -1102,6 +1165,58 @@ export default function ImportApprovals() {
     
     return deduplicated;
   };
+
+  /** Stats use the same dedupe as the list so Total Records matches "X imports showing". */
+  const verificationStats = useMemo(() => {
+    const records = deduplicateRecords(pendingInvoices || []);
+    const stats = {
+      total: records.length,
+      pending: 0,
+      verified: 0,
+      exceptions: 0,
+      investigating: 0,
+      processing: 0,
+      scanned_only: 0,
+      quantityDiscrepancies: 0,
+    };
+
+    records.forEach((record) => {
+      const status = determineVerificationStatus(record);
+      switch (status) {
+        case 'PENDING':
+          stats.pending++;
+          break;
+        case 'VERIFIED':
+          stats.verified++;
+          break;
+        case 'EXCEPTION':
+          stats.exceptions++;
+          break;
+        case 'INVESTIGATION':
+          stats.investigating++;
+          break;
+        case 'IN_PROGRESS':
+          stats.processing++;
+          break;
+        case 'SCANNED_ONLY':
+          stats.scanned_only++;
+          break;
+        default:
+          break;
+      }
+
+      const data = parseDataField(record.data);
+      const lineItems = data.rows || data.line_items || data.LineItems || [];
+      const hasQuantityDiscrepancy = lineItems.some((item) => {
+        const shippedQty = item.shipped || item.Shipped || 0;
+        const returnedQty = item.returned || item.Returned || 0;
+        return shippedQty > 0 && shippedQty === returnedQty;
+      });
+      if (hasQuantityDiscrepancy) stats.quantityDiscrepancies++;
+    });
+
+    return stats;
+  }, [pendingInvoices]);
 
   // Get filtered records
   const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
@@ -1729,45 +1844,7 @@ export default function ImportApprovals() {
       
       logger.debug('Final allRecords:', { individualInvoices: individualInvoices.length, individualReceipts: individualReceipts.length, scannedOnly: deduplicatedScannedOnly.length, afterCleanup: cleanedRecords.length });
       
-      // Calculate stats from the actual data being displayed
-      const displayStats = {
-        total: cleanedRecords.length,
-        pending: 0,
-        verified: 0,
-        exceptions: 0,
-        investigating: 0,
-        processing: 0,
-        scanned_only: 0,
-        quantityDiscrepancies: 0
-      };
-      
-      cleanedRecords.forEach(record => {
-        const status = determineVerificationStatus(record);
-        switch (status) {
-          case 'PENDING': displayStats.pending++; break;
-          case 'VERIFIED': displayStats.verified++; break;
-          case 'EXCEPTION': displayStats.exceptions++; break;
-          case 'INVESTIGATION': displayStats.investigating++; break;
-          case 'IN_PROGRESS': displayStats.processing++; break;
-          case 'SCANNED_ONLY': displayStats.scanned_only++; break;
-        }
-        
-        // Check for quantity discrepancies
-        const data = parseDataField(record.data);
-        const lineItems = data.rows || data.line_items || data.LineItems || [];
-        const hasQuantityDiscrepancy = lineItems.some(item => {
-          const shippedQty = item.shipped || item.Shipped || 0;
-          const returnedQty = item.returned || item.Returned || 0;
-          return shippedQty > 0 && shippedQty === returnedQty;
-        });
-        
-        if (hasQuantityDiscrepancy) {
-          displayStats.quantityDiscrepancies++;
-        }
-      });
-      
       logger.debug(`Data fetch completed in ${Date.now() - startTime}ms — ${cleanedRecords.length} records`);
-      setVerificationStats(displayStats);
       setPendingInvoices(cleanedRecords);
       if (!silent) setLoading(false);
       
@@ -1800,16 +1877,6 @@ export default function ImportApprovals() {
         if (fallbackInvoices && fallbackInvoices.length > 0) {
           logger.debug('Fallback data found:', fallbackInvoices.length, 'records');
           setPendingInvoices(fallbackInvoices);
-          setVerificationStats({
-            total: fallbackInvoices.length,
-            pending: fallbackInvoices.length,
-            verified: 0,
-            exceptions: 0,
-            investigating: 0,
-            processing: 0,
-            scanned_only: 0,
-            quantityDiscrepancies: 0
-          });
         }
       } catch (fallbackError) {
         logger.error('❌ Fallback also failed:', fallbackError);
@@ -2219,7 +2286,7 @@ export default function ImportApprovals() {
   }
 
   // Fetch bottle information for an order
-  async function fetchBottleInfoForOrder(orderNumber, customerFilter = null) {
+  async function fetchBottleInfoForOrder(orderNumber, customerFilter = null, targetCustomer = null) {
     try {
       if (!orderNumber) {
         logger.error('No order number provided to fetchBottleInfoForOrder');
@@ -2540,19 +2607,12 @@ export default function ImportApprovals() {
 
           // Build latest global movement per barcode so "current status/customer" reflects reality
           // even when bottles table fields are stale.
-          const normalizeBarcode = (v) => (v == null || v === '') ? '' : (String(v).trim().replace(/^0+/, '') || String(v).trim());
-          const normalizeOrderNum = (num) => {
-            if (num == null || num === '') return '';
-            const s = String(num).trim();
-            if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-            return s;
-          };
+          const normalizeBarcode = normalizeImportBarcode;
+          const normalizeOrderNum = normalizeImportOrderNum;
+          const targetCustomerName = String(targetCustomer?.targetCustomerName || customerFilter?.customerName || '').trim();
+          const targetCustomerId = String(targetCustomer?.targetCustomerId || customerFilter?.customerId || '').trim();
 
-          const { data: globalScanRows } = await supabase
-            .from('bottle_scans')
-            .select('bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id')
-            .eq('organization_id', organization.id)
-            .in('bottle_barcode', barcodeArray);
+          const globalScanRows = await fetchBottleScansByBarcodes(supabase, organization.id, barcodeArray);
 
           const { data: fillRows } = await supabase
             .from('cylinder_fills')
@@ -2571,11 +2631,15 @@ export default function ImportApprovals() {
           };
 
           (globalScanRows || []).forEach((s) => {
-            const raw = s.bottle_barcode || s.barcode_number || s.cylinder_barcode;
+            const raw = getScanRowBarcode(s);
             const mode = (s.mode || '').toString().toUpperCase();
             const action = (s.action || '').toString().toLowerCase();
             const scanType = (s.scan_type || '').toString().toLowerCase();
-            const isReturn = mode === 'RETURN' || mode === 'PICKUP' || scanType === 'pickup' || (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY');
+            const isReturn =
+              mode === 'RETURN' ||
+              mode === 'PICKUP' ||
+              scanType === 'pickup' ||
+              (action === 'in' && mode !== 'SHIP' && mode !== 'DELIVERY');
             const time = new Date(s.created_at || s.timestamp || 0).getTime();
             upsertLatest(raw, {
               time,
@@ -2584,7 +2648,7 @@ export default function ImportApprovals() {
               customer_name: isReturn ? null : (s.customer_name || null),
               assigned_customer: isReturn ? null : (s.customer_id || null),
               location: isReturn ? (s.location || 'In House') : (s.location || null),
-              event_order_norm: normalizeOrderNum(s.order_number)
+              event_order_norm: normalizeOrderNum(s.order_number),
             });
           });
 
@@ -2631,11 +2695,38 @@ export default function ImportApprovals() {
             const scanUserDisplay = scanUserId ? profileById[scanUserId] || scanUserId : '—';
             const movementNow = latestGlobalByBarcode.get(normalizeBarcode(b));
             const hasMovementNow = !!movementNow;
-            const customer_name = hasMovementNow ? movementNow.customer_name : (bottle.customer_name ?? best?.customer_name ?? null);
-            const assigned_customer = hasMovementNow ? movementNow.assigned_customer : (bottle.assigned_customer ?? null);
-            const status = movementNow?.status || bottle.status;
+            let customer_name = hasMovementNow ? movementNow.customer_name : (bottle.customer_name ?? best?.customer_name ?? null);
+            let assigned_customer = hasMovementNow ? movementNow.assigned_customer : (bottle.assigned_customer ?? null);
+            let status = movementNow?.status || bottle.status;
             const location = movementNow?.location || bottle.location;
-            const latestGlobalOnThisOrder = movementNow?.event_order_norm && movementNow.event_order_norm === orderNorm;
+            const latestGlobalOnThisOrder =
+              !!movementNow?.event_order_norm &&
+              movementNow.event_order_norm === orderNorm &&
+              movementNow.status === 'rented';
+
+            const normB = normalizeBarcode(b);
+            const scansForBarcode = (globalScanRows || []).filter(
+              (s) => normalizeBarcode(getScanRowBarcode(s)) === normB
+            );
+            const thisOrderShipTimes = scansForBarcode
+              .filter((s) => !isReturnScanRow(s) && normalizeOrderNum(s.order_number) === orderNorm)
+              .map((s) => new Date(s.created_at || s.timestamp || 0).getTime())
+              .filter((t) => !Number.isNaN(t));
+            const thisOrderShipTime = thisOrderShipTimes.length ? Math.max(...thisOrderShipTimes) : null;
+            const returnRecordedBeforeThisShip =
+              thisOrderShipTime != null &&
+              scansForBarcode.some((s) => {
+                if (!isReturnScanRow(s)) return false;
+                const t = new Date(s.created_at || s.timestamp || 0).getTime();
+                return !Number.isNaN(t) && t <= thisOrderShipTime;
+              });
+
+            if (latestGlobalOnThisOrder && !customer_name && targetCustomerName) {
+              customer_name = targetCustomerName;
+            }
+            if (latestGlobalOnThisOrder && !assigned_customer && targetCustomerId) {
+              assigned_customer = targetCustomerId;
+            }
             
             bottles.push({
               ...bottle,
@@ -2647,7 +2738,8 @@ export default function ImportApprovals() {
               scanDate,
               scanUserId,
               scanUserDisplay,
-              latestGlobalOnThisOrder
+              latestGlobalOnThisOrder,
+              returnRecordedBeforeThisShip,
             });
           });
           
@@ -2706,7 +2798,14 @@ export default function ImportApprovals() {
       targetCustomerId: (customerId || '').toString().trim()
     });
     fetchCustomers();
-    fetchBottleInfoForOrder(orderNumber, isScannedOnly ? { customerName, customerId } : null);
+    fetchBottleInfoForOrder(
+      orderNumber,
+      isScannedOnly ? { customerName, customerId } : null,
+      {
+        targetCustomerName: (customerName || '').toString().trim(),
+        targetCustomerId: (customerId || '').toString().trim(),
+      }
+    );
   }
 
   // Run location fix once when component mounts
@@ -4591,7 +4690,7 @@ export default function ImportApprovals() {
               )}
             </Box>
           </Box>
-          <Badge badgeContent={(pendingInvoices || []).length} color="primary">
+          <Badge badgeContent={verificationStats.total} color="primary">
             <Button variant="outlined" disabled>
               Total Records
             </Button>
@@ -4836,22 +4935,20 @@ export default function ImportApprovals() {
               
               {/* Warning if any bottles are already at customers */}
               {(() => {
-                const norm = (v) => (v != null && v !== '' ? String(v).trim().toLowerCase() : '');
-                const targetCustomerName = norm(bottleInfoDialog?.targetCustomerName);
-                const targetCustomerId = norm(bottleInfoDialog?.targetCustomerId);
-                const isBottleAtDifferentCustomer = (bottle) => {
-                  if (!isBottleAtCustomerByStatus(bottle.status)) return false;
-                  const bottleName = norm(bottle.customer_name);
-                  const bottleAssigned = norm(bottle.assigned_customer);
-                  if (!bottleName && !bottleAssigned) return false;
-                  const matchesTargetName = !!targetCustomerName && (bottleName === targetCustomerName || bottleAssigned === targetCustomerName);
-                  const matchesTargetId = !!targetCustomerId && (bottleAssigned === targetCustomerId || bottleName === targetCustomerId);
-                  return !(matchesTargetName || matchesTargetId);
-                };
+                const targetCustomerName = bottleInfoDialog?.targetCustomerName;
+                const targetCustomerId = bottleInfoDialog?.targetCustomerId;
 
-                const bottlesAtCustomers = (bottleInfoDialog?.bottles || []).filter(b => 
-                  (b.scanAction === 'out' || b.scanAction === 'SHIP' || b.scanAction === 'delivery') && 
-                  isBottleAtDifferentCustomer(b)
+                const bottlesAtCustomers = (bottleInfoDialog?.bottles || []).filter((b) =>
+                  shouldWarnShippedBottleOtherCustomer(b, targetCustomerName, targetCustomerId)
+                );
+
+                const staleAfterReturn = (bottleInfoDialog?.bottles || []).filter(
+                  (b) =>
+                    b.returnRecordedBeforeThisShip &&
+                    (b.scanAction === 'out' ||
+                      b.scanAction === 'SHIP' ||
+                      b.scanAction === 'delivery' ||
+                      String(b.scanAction || '').toUpperCase() === 'DELIVERY')
                 );
                 
                 if (bottlesAtCustomers.length > 0) {
@@ -4883,6 +4980,18 @@ export default function ImportApprovals() {
                     </Alert>
                   );
                 }
+
+                if (staleAfterReturn.length > 0) {
+                  return (
+                    <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
+                      <Typography variant="body2" component="span">
+                        {staleAfterReturn.length} bottle(s) still show a prior customer in inventory, but scan history includes a{' '}
+                        <strong>return before this delivery</strong> (possibly on another order). Approve to sync the bottle row to this order&apos;s customer.
+                      </Typography>
+                    </Alert>
+                  );
+                }
+
                 return null;
               })()}
               
@@ -4953,18 +5062,11 @@ export default function ImportApprovals() {
                             )}
                             {/* Warning if bottle is being shipped but is already at a customer */}
                             {(bottle.scanAction === 'out' || bottle.scanAction === 'SHIP' || bottle.scanAction === 'delivery') &&
-                             (() => {
-                               const norm = (v) => (v != null && v !== '' ? String(v).trim().toLowerCase() : '');
-                               const targetCustomerName = norm(bottleInfoDialog?.targetCustomerName);
-                               const targetCustomerId = norm(bottleInfoDialog?.targetCustomerId);
-                               if (!isBottleAtCustomerByStatus(bottle.status)) return false;
-                               const bottleName = norm(bottle.customer_name);
-                               const bottleAssigned = norm(bottle.assigned_customer);
-                               if (!bottleName && !bottleAssigned) return false;
-                               const matchesTargetName = !!targetCustomerName && (bottleName === targetCustomerName || bottleAssigned === targetCustomerName);
-                               const matchesTargetId = !!targetCustomerId && (bottleAssigned === targetCustomerId || bottleName === targetCustomerId);
-                               return !(matchesTargetName || matchesTargetId);
-                             })() && (
+                             shouldWarnShippedBottleOtherCustomer(
+                               bottle,
+                               bottleInfoDialog?.targetCustomerName,
+                               bottleInfoDialog?.targetCustomerId
+                             ) && (
                               <Chip 
                                 icon={<WarningIcon />}
                                 label="Other customer"
@@ -6959,11 +7061,7 @@ return (
           .eq('organization_id', organization?.id);
 
         // Use latest movement to avoid stale bottle rows falsely lighting the red dot.
-        const { data: globalScanRows } = await supabase
-          .from('bottle_scans')
-          .select('bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, organization_id')
-          .eq('organization_id', organization?.id)
-          .in('bottle_barcode', barcodesArray);
+        const globalScanRows = await fetchBottleScansByBarcodes(supabase, organization?.id, barcodesArray);
         const { data: fillRows } = await supabase
           .from('cylinder_fills')
           .select('barcode_number, fill_date, created_at, organization_id')
@@ -6980,7 +7078,7 @@ return (
           }
         };
         (globalScanRows || []).forEach((s) => {
-          const raw = s.bottle_barcode || s.barcode_number || s.cylinder_barcode;
+          const raw = getScanRowBarcode(s);
           const mode = (s.mode || '').toString().toUpperCase();
           const action = (s.action || '').toString().toLowerCase();
           const scanType = (s.scan_type || '').toString().toLowerCase();
@@ -6990,7 +7088,8 @@ return (
             time,
             status: isReturn ? 'empty' : 'rented',
             customer_name: isReturn ? null : (s.customer_name || null),
-            assigned_customer: isReturn ? null : (s.customer_id || null)
+            assigned_customer: isReturn ? null : (s.customer_id || null),
+            event_order_norm: normalizeImportOrderNum(s.order_number),
           });
         });
         (fillRows || []).forEach((f) => {
@@ -7026,10 +7125,38 @@ return (
         // Check each order to see if any bottles being shipped are already at customers
         // This is the warning condition: shipping bottles that are already assigned to customers
         barcodesByOrder.forEach((barcodes, orderNum) => {
+          const orderNorm = normalizeImportOrderNum(orderNum);
           for (const barcode of barcodes) {
+            const normB = normalizeBarcode(barcode);
+            const movementNow = latestGlobalByBarcode.get(normB);
+            if (
+              movementNow?.status === 'rented' &&
+              movementNow.event_order_norm &&
+              movementNow.event_order_norm === orderNorm
+            ) {
+              continue;
+            }
+
+            const scansForBarcode = (globalScanRows || []).filter(
+              (s) => normalizeBarcode(getScanRowBarcode(s)) === normB
+            );
+            const thisOrderShipTimes = scansForBarcode
+              .filter((s) => !isReturnScanRow(s) && normalizeImportOrderNum(s.order_number) === orderNorm)
+              .map((s) => new Date(s.created_at || s.timestamp || 0).getTime())
+              .filter((t) => !Number.isNaN(t));
+            const thisOrderShipTime = thisOrderShipTimes.length ? Math.max(...thisOrderShipTimes) : null;
+            const returnRecordedBeforeThisShip =
+              thisOrderShipTime != null &&
+              scansForBarcode.some((s) => {
+                if (!isReturnScanRow(s)) return false;
+                const t = new Date(s.created_at || s.timestamp || 0).getTime();
+                return !Number.isNaN(t) && t <= thisOrderShipTime;
+              });
+            if (returnRecordedBeforeThisShip) continue;
+
             if (bottleCustomerMap.get(barcode) === true) {
               ordersWithBottles.add(orderNum);
-              break; // Found at least one warning condition, no need to check more for this order
+              break;
             }
           }
         });
