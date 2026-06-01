@@ -54,6 +54,11 @@ import {
   isActiveCustomerAssignment,
   staleBottleCustomerLabel,
 } from '../utils/bottleCustomerDirectory';
+import {
+  isPendingOrderScanRecord,
+  isScanEffectiveForAssignmentReplay,
+  scanRecordModeFamily,
+} from '../utils/orderScanApprovalStatus';
 /** Exclude deleted rows only when those columns exist on the row (not selected from DB). */
 const isAssignableCustomer = (customer) => {
   if (!customer) return false;
@@ -184,6 +189,7 @@ const replayBottleStateFromTimeline = (timelineAsc) => {
       continue;
     }
     if (modeIndicatesReturn(record) || record?.history_type === 'rental_end') {
+      if (!isScanEffectiveForAssignmentReplay(record)) continue;
       assignedCustomerId = '';
       customerName = '';
       status = 'empty';
@@ -203,6 +209,7 @@ const replayBottleStateFromTimeline = (timelineAsc) => {
       continue;
     }
     if (modeIndicatesDelivery(record) || record?.history_type === 'rental_start') {
+      if (!isScanEffectiveForAssignmentReplay(record)) continue;
       const cid = String(record?.customer_id || record?.assigned_customer || '').trim();
       const cname = String(record?.customer_name || '').trim();
       if (cid || cname) {
@@ -1666,6 +1673,10 @@ export default function AssetDetail() {
                     action = 'Bottle Type Changed';
                   } else if (isRnbRecord) {
                     action = 'RNB (order return — not on open rental)';
+                  } else if (isPendingOrderScanRecord(record) && scanRecordModeFamily(record) === 'SHIP') {
+                    action = 'Ship scan (pending approval)';
+                  } else if (isPendingOrderScanRecord(record) && scanRecordModeFamily(record) === 'RETURN') {
+                    action = 'Return scan (pending approval)';
                   } else if (recordMode === 'SHIP' || record.action === 'SHIP' || record.history_type === 'rental_start') {
                     action = 'Delivery';
                   } else if (recordMode === 'RETURN' || record.action === 'RETURN' || record.history_type === 'rental_end') {
@@ -1704,6 +1715,18 @@ export default function AssetDetail() {
                       '';
                   if (skipSyntheticStaleCustomer) {
                     resultingLocation = 'Customer removed from directory (stale assignment cleared)';
+                  } else if (isPendingOrderScanRecord(record)) {
+                    const orderLabel = record.order_number
+                      ? `Order ${record.order_number}`
+                      : 'Order (pending)';
+                    const custHint =
+                      custNameForDisplay || custIdForDisplay
+                        ? ` · ${custNameForDisplay || custIdForDisplay}`
+                        : '';
+                    resultingLocation =
+                      scanRecordModeFamily(record) === 'RETURN'
+                        ? `${orderLabel}${custHint} · scanned return, inventory not updated yet`
+                        : `${orderLabel}${custHint} · scanned, not assigned yet`;
                   } else if (custNameForDisplay || custIdForDisplay) {
                     const base = custNameForDisplay
                       ? `Customer: ${custNameForDisplay}${custIdForDisplay ? ` (${custIdForDisplay})` : ''}`

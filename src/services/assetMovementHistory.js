@@ -4,6 +4,11 @@ import {
   fetchBottleScansByBarcodes,
   getScanRowBarcode,
 } from '../utils/fetchBottleScansByBarcodes';
+import {
+  fetchOrderApprovalStatusMap,
+  isManualUiScanOrder,
+  normalizeOrderNumForLookup,
+} from '../utils/orderScanApprovalStatus';
 
 export const normalizeAuditDetails = (details) => {
   if (!details) return {};
@@ -212,10 +217,10 @@ export async function fetchMergedAssetMovementHistory(supabase, {
   if (barcodeNumber) {
     const bsData = await fetchBottleScansByBarcodes(supabase, organizationId, [barcodeNumber], {
       limit,
-      broadFallbackLimit: 1000,
     });
     ingestBottleScanRows(bsData, allHistory);
 
+    // Belt-and-suspenders: some deployments only wrote to legacy `scans` via long `.or()` URLs.
     if (bsData.length === 0 && scansBarcodeOrClause) {
       const legacyScans = await runOptionalQuery(
         () =>
@@ -233,9 +238,10 @@ export async function fetchMergedAssetMovementHistory(supabase, {
           ...scan,
           id: scan.id || `legacy_scan_${scan.created_at}`,
           history_type: 'bottle_scan',
-          barcode_number: scan.barcode_number || scan.bottle_barcode || barcodeNumber,
+          barcode_number: getScanRowBarcode(scan) || barcodeNumber,
           action: scan.mode || scan.action || 'SCAN',
           mode: scan.mode || scan.action || 'SCAN',
+          created_at: scan.created_at || scan.timestamp,
         });
       });
     }
@@ -547,6 +553,24 @@ export async function fetchMergedAssetMovementHistory(supabase, {
       assigned_customer: sourceAsset.assigned_customer || null,
     });
   }
+
+  const scanOrderNumbers = allHistory
+    .filter((r) => r.history_type === 'bottle_scan' || r.history_type === 'cylinder_scan')
+    .map((r) => r.order_number)
+    .filter(Boolean);
+  const approvalMap = await fetchOrderApprovalStatusMap(supabase, organizationId, scanOrderNumbers);
+  allHistory.forEach((item) => {
+    if (item.history_type !== 'bottle_scan' && item.history_type !== 'cylinder_scan') return;
+    const on = String(item.order_number || '').trim();
+    if (!on || isManualUiScanOrder(on)) {
+      item.scan_assignment_effective = true;
+      return;
+    }
+    const norm = normalizeOrderNumForLookup(on);
+    const info = approvalMap.get(norm);
+    item.scan_order_status = info?.status || 'scanned_only';
+    item.scan_assignment_effective = Boolean(info?.isApproved);
+  });
 
   const semanticDeduped = dedupeSemanticMovementHistory(allHistory);
 

@@ -25,22 +25,50 @@ export function getScanRowBarcode(s) {
   return (s?.bottle_barcode || s?.barcode_number || s?.cylinder_barcode)?.toString().trim() || '';
 }
 
-function scanMatchesBarcodeVariants(scan, variantNormSet) {
+export function scanMatchesBarcodeVariants(scan, variantNormSet) {
   const raw = getScanRowBarcode(scan);
   if (!raw) return false;
   const norm = normalizeScanBarcode(raw);
   return variantNormSet.has(raw) || variantNormSet.has(norm);
 }
 
+const PAGE_SIZE = 1000;
+const IN_CHUNK_SIZE = 80;
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function fetchPaginatedRows(queryFactory) {
+  const all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await queryFactory(from, from + PAGE_SIZE - 1);
+    if (error) {
+      logger.warn('fetchBottleScansByBarcodes pagination:', error.message);
+      break;
+    }
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 /**
- * Load bottle_scans for barcode(s) using per-column `.in()` queries (reliable vs one large `.or()`).
- * Merges org-scoped rows, legacy null-organization_id rows, and a recent-scan client filter fallback.
+ * Load bottle_scans (and legacy scans) for barcode(s).
+ * Uses per-column `.in()` queries plus a full org scan pass (same strategy as Scanned Orders).
  */
 export async function fetchBottleScansByBarcodes(
   supabaseClient,
   organizationId,
   barcodeArray,
-  { limit = 200, broadFallbackLimit = 500 } = {}
+  { limit = 500 } = {}
 ) {
   if (!barcodeArray?.length || !supabaseClient) return [];
 
@@ -56,45 +84,55 @@ export async function fetchBottleScansByBarcodes(
     });
   };
 
-  const select =
-    'id, bottle_barcode, barcode_number, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id, notes';
+  const perQueryLimit = Math.max(50, Math.min(limit, 1000));
 
-  const runQuery = async (col, orgMode) => {
-    let query = supabaseClient.from('bottle_scans').select(select).in(col, variants).limit(limit);
-    if (orgMode === 'org' && organizationId) {
-      query = query.eq('organization_id', organizationId);
-    } else if (orgMode === 'null') {
-      query = query.is('organization_id', null);
+  const runInQuery = async (table, col, orgMode) => {
+    for (const variantChunk of chunkArray(variants, IN_CHUNK_SIZE)) {
+      let query = supabaseClient.from(table).select('*').in(col, variantChunk).limit(perQueryLimit);
+      if (orgMode === 'org' && organizationId) {
+        query = query.eq('organization_id', organizationId);
+      } else if (orgMode === 'null') {
+        query = query.is('organization_id', null);
+      }
+      const { data, error } = await query;
+      if (error) {
+        logger.warn(`fetchBottleScansByBarcodes (${table}.${col}, ${orgMode}):`, error.message);
+        continue;
+      }
+      addRows(data);
     }
-    const { data, error } = await query;
-    if (error) {
-      logger.warn(`fetchBottleScansByBarcodes (${col}, ${orgMode}):`, error.message);
-      return;
-    }
-    addRows(data);
   };
 
   for (const col of ['bottle_barcode', 'barcode_number', 'cylinder_barcode']) {
     if (organizationId) {
-      await runQuery(col, 'org');
-      await runQuery(col, 'null');
+      await runInQuery('bottle_scans', col, 'org');
+      await runInQuery('bottle_scans', col, 'null');
     } else {
-      await runQuery(col, 'any');
+      await runInQuery('bottle_scans', col, 'any');
     }
   }
 
   if (organizationId) {
-    const { data, error } = await supabaseClient
-      .from('bottle_scans')
-      .select(select)
-      .eq('organization_id', organizationId)
-      .order('created_at', { ascending: false })
-      .limit(Math.max(limit, broadFallbackLimit));
-    if (error) {
-      logger.warn('fetchBottleScansByBarcodes broad fallback:', error.message);
-    } else {
-      addRows((data || []).filter((row) => scanMatchesBarcodeVariants(row, variantNormSet)));
-    }
+    const orgBottleScans = await fetchPaginatedRows((from, to) =>
+      supabaseClient
+        .from('bottle_scans')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .not('order_number', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(from, to)
+    );
+    addRows(orgBottleScans.filter((row) => scanMatchesBarcodeVariants(row, variantNormSet)));
+
+    const legacyScans = await fetchPaginatedRows((from, to) =>
+      supabaseClient
+        .from('scans')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false })
+        .range(from, to)
+    );
+    addRows(legacyScans.filter((row) => scanMatchesBarcodeVariants(row, variantNormSet)));
   }
 
   return Array.from(merged.values()).sort(
