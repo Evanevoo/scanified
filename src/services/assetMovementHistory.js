@@ -1,4 +1,9 @@
 import logger from '../utils/logger';
+import {
+  expandBarcodeLookupVariants,
+  fetchBottleScansByBarcodes,
+  getScanRowBarcode,
+} from '../utils/fetchBottleScansByBarcodes';
 
 export const normalizeAuditDetails = (details) => {
   if (!details) return {};
@@ -183,19 +188,7 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     }
   };
 
-  const barcodeVariants = (() => {
-    const raw = String(barcodeNumber || '').trim();
-    if (!raw) return [];
-    const stripped = raw.replace(/^0+/, '') || raw;
-    const variants = new Set([raw, stripped]);
-    if (/^\d+$/.test(stripped)) {
-      for (const len of [8, 9, 10, 11, 12, 13]) {
-        if (stripped.length <= len) variants.add(stripped.padStart(len, '0'));
-      }
-    }
-    return [...variants];
-  })();
-
+  const barcodeVariants = expandBarcodeLookupVariants([barcodeNumber]);
   const scansBarcodeOrClause = barcodeVariants
     .flatMap((b) => [
       `bottle_barcode.eq.${b}`,
@@ -209,54 +202,21 @@ export async function fetchMergedAssetMovementHistory(supabase, {
       target.push({
         ...scan,
         history_type: 'bottle_scan',
-        barcode_number: scan.barcode_number || scan.bottle_barcode || scan.cylinder_barcode,
-        action: scan.mode || 'SCAN',
+        barcode_number: getScanRowBarcode(scan) || barcodeNumber,
+        action: scan.mode || scan.action || 'SCAN',
+        created_at: scan.created_at || scan.timestamp,
       });
     });
   };
 
-  if (barcodeNumber && scansBarcodeOrClause) {
-    const mergedScans = new Map();
-    const addScanRows = (rows) => {
-      (rows || []).forEach((scan) => {
-        const key =
-          scan.id ??
-          `${scan.created_at || scan.timestamp || ''}|${scan.mode || ''}|${scan.bottle_barcode || scan.barcode_number || ''}|${scan.order_number || ''}`;
-        if (!mergedScans.has(key)) mergedScans.set(key, scan);
-      });
-    };
-
-    const fetchBottleScanBatch = async (orgFilter) => {
-      let query = supabase
-        .from('bottle_scans')
-        .select('*')
-        .or(scansBarcodeOrClause)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (orgFilter === 'org' && organizationId) {
-        query = query.eq('organization_id', organizationId);
-      } else if (orgFilter === 'null') {
-        query = query.is('organization_id', null);
-      }
-      const { data, error } = await query;
-      if (error) {
-        logger.warn(`Movement history bottle_scans (${orgFilter || 'any'}):`, error.message);
-        return;
-      }
-      addScanRows(data);
-    };
-
-    if (organizationId) {
-      await fetchBottleScanBatch('org');
-      await fetchBottleScanBatch('null');
-    } else {
-      await fetchBottleScanBatch(null);
-    }
-
-    const bsData = Array.from(mergedScans.values());
+  if (barcodeNumber) {
+    const bsData = await fetchBottleScansByBarcodes(supabase, organizationId, [barcodeNumber], {
+      limit,
+      broadFallbackLimit: 1000,
+    });
     ingestBottleScanRows(bsData, allHistory);
 
-    if (bsData.length === 0) {
+    if (bsData.length === 0 && scansBarcodeOrClause) {
       const legacyScans = await runOptionalQuery(
         () =>
           supabase
