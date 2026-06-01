@@ -437,6 +437,7 @@ export default function Subscriptions() {
   const [newSub, setNewSub] = useState({ customer_id: '', billing_period: 'monthly' });
   const [saving, setSaving] = useState(false);
   const [preallocatingNumbers, setPreallocatingNumbers] = useState(false);
+  const resolveInvNoRef = useRef(null);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
   /** Saved invoice template JSON for PDF/email (localStorage; org-scoped). */
@@ -2174,7 +2175,19 @@ export default function Subscriptions() {
             ? '_creditcard'
             : '';
       const monthTag = qbCsvBillingMonth === 'live' ? 'live' : qbCsvBillingMonth;
-      const exported = downloadQuickBooksInvoiceCsv(rows, {
+      const resolveInvNo = resolveInvNoRef.current;
+      const rowsWithInvoiceNumbers = [];
+      if (resolveInvNo) {
+        for (const row of rows) {
+          rowsWithInvoiceNumbers.push({
+            ...row,
+            invoice_number: await resolveInvNo(row),
+          });
+        }
+      } else {
+        rowsWithInvoiceNumbers.push(...rows);
+      }
+      const exported = downloadQuickBooksInvoiceCsv(rowsWithInvoiceNumbers, {
         ...csvOptions,
         filePrefix: `quickbooks_invoices_${period}${cohortSuffix}_${monthTag}`,
         getCurrentCycleRange,
@@ -2190,8 +2203,9 @@ export default function Subscriptions() {
           ? 'current cycle dates, live counts'
           : `billed month ${qbCsvBillingMonth} (month-end snapshot)`;
       setActionSuccess(
-        `Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}; ${monthLabel}).`
+        `Exported ${exported} QuickBooks CSV row${exported === 1 ? '' : 's'} (${period}${cohortLabel}; ${monthLabel}). Invoice numbers match PDF/email (saved cycle numbers).`
       );
+      setInvoiceLookupRefreshKey((k) => k + 1);
     } finally {
       setSaving(false);
     }
@@ -2669,14 +2683,8 @@ export default function Subscriptions() {
   /** Same invoice # for PDF download, email, and bulk email (virtual rows use persisted `invoices` via ensureVirtual). */
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
-      // If user exported QB CSV, always reuse that exact assigned invoice # for PDF/email.
-      // This guarantees "same customer, same cycle" parity across CSV, PDF, and email.
-      const seqMonth = sequenceMonthForSub(sub, qbCsvBillingMonth);
-      const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub, seqMonth);
-      if (fromLastCsv) return fromLastCsv;
-
       const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
-      // Prefer DB (subscription_invoices / invoices) so custom invoice numbers always win over stale sub.invoice_number.
+      // Saved / prep # / subscription_invoices always win over stale browser CSV cache.
       let invNo = '';
       const fromDb = await resolveInvoiceNumberForRentalPdf(
         supabase,
@@ -2686,6 +2694,7 @@ export default function Subscriptions() {
         periodEnd
       );
       if (fromDb) invNo = String(fromDb).trim();
+
       // Reserve the next org-wide sequential # for this billing period (never reuse last month's row).
       if (!invNo && sub?.isVirtual) {
         const v = await ensureVirtualInvoiceNumber(sub);
@@ -2695,8 +2704,16 @@ export default function Subscriptions() {
         const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
         invNo = ensured ? String(ensured).trim() : '';
       }
-      // Preview-only fallback when DB reserve failed (e.g. missing subscription id).
+
+      // Stale browser CSV cache only when DB has no row (must not override invoice_settings counter).
       if (!invNo) {
+        const seqMonth = sequenceMonthForSub(sub, qbCsvBillingMonth);
+        const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub, seqMonth);
+        if (fromLastCsv) invNo = fromLastCsv;
+      }
+
+      // Legacy localStorage W10000+ preview only when org counter could not run.
+      if (!invNo && !organization?.id) {
         const csvPeriod =
           String(sub?.billing_period || 'monthly').toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
         try {
@@ -2725,6 +2742,8 @@ export default function Subscriptions() {
       repairPlaceholderSubscriptionInvoiceNumber,
     ]
   );
+
+  resolveInvNoRef.current = resolveRentalInvoiceNumberForActions;
 
   const openInvoiceNumberDialog = useCallback(
     async (sub) => {
@@ -3730,13 +3749,13 @@ export default function Subscriptions() {
         })
       );
 
-      const prepared = await Promise.all(
-        rows.map(async (row, i) => {
-          const invNo = await resolveRentalInvoiceNumberForActions(row);
-          const label = row.customer?.name || row.customer?.Name || row.customer_id || `Row ${i + 1}`;
-          return { row, invNo, label };
-        })
-      );
+      const prepared = [];
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        const invNo = await resolveRentalInvoiceNumberForActions(row);
+        const label = row.customer?.name || row.customer?.Name || row.customer_id || `Row ${i + 1}`;
+        prepared.push({ row, invNo, label });
+      }
 
       const zipGroupsCache = new Map();
       const pdfBuildOpts = { orgRentalsCache, returnsByPeriodKey, zipGroupsCache };

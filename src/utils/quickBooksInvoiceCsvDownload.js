@@ -88,6 +88,13 @@ export function downloadQuickBooksInvoiceCsv(activeRows, options = {}) {
   const assignedInvoiceByIdx = new Map();
   let nextNumber = startNumber;
   activeRows.forEach((row, idx) => {
+    const preset = String(row?.invoice_number || row?.resolvedInvoiceNumber || '').trim();
+    if (preset) {
+      assignedInvoiceByIdx.set(idx, preset);
+      const parsedNum = parseInvoiceNo(preset);
+      if (Number.isFinite(parsedNum)) usedNumbers.add(parsedNum);
+      return;
+    }
     let existingInvoice = null;
     for (const k of qbCsvInvoiceStorageKeys(row)) {
       const candidate = existingMap[k];
