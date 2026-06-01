@@ -321,22 +321,25 @@ function rowBillingCustomerRemovedFromDirectory(row, customers) {
  * `onDebouncedChange` so the parent only re-renders once typing settles.
  */
 /** Compact row actions — avoids 50+ GradientMenu instances (each was min-h-screen sized). */
-function RentalRowActionsMenu({ items, onAction, disabled }) {
+function RentalRowActionsMenu({ items, onAction, disabled, buttonLabel = 'Actions' }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const open = Boolean(anchorEl);
   return (
     <>
-      <IconButton
+      <Button
         size="small"
-        aria-label="Row actions"
+        variant="outlined"
+        aria-label={buttonLabel}
         disabled={disabled}
+        endIcon={<MoreVert sx={{ fontSize: 16 }} />}
         onClick={(e) => {
           e.stopPropagation();
           setAnchorEl(e.currentTarget);
         }}
+        sx={{ textTransform: 'none', fontWeight: 600, fontSize: '0.75rem', py: 0.35, minWidth: 0 }}
       >
-        <MoreVert fontSize="small" />
-      </IconButton>
+        {buttonLabel}
+      </Button>
       <Menu
         anchorEl={anchorEl}
         open={open}
@@ -3983,6 +3986,10 @@ export default function Subscriptions() {
             Manage customer rentals and billing. Invoice numbers for the current cycle are prepared automatically on the
             last and first day of each month (continuing from the previous counter), or use Prep # anytime.
           </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+            Bulk export: <strong>Export CSV</strong> (QuickBooks) and <strong>Export PDFs (ZIP)</strong> on the right.
+            Per customer: row <strong>⋮</strong> → PDF, Excel, Email.
+          </Typography>
         </Box>
         <Stack
           direction="row"
@@ -4034,32 +4041,62 @@ export default function Subscriptions() {
             alignItems="center"
             flexWrap="wrap"
             useFlexGap
-            spacing={0.5}
-            sx={{
-              flex: '0 0 auto',
-              py: 0.5,
-              px: 0.75,
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: 'action.hover',
-            }}
+            spacing={1}
+            sx={{ flex: '0 0 auto' }}
           >
-            {rentalToolbarMenuItems.map((item) => (
-              <Tooltip key={item.id} title={item.title}>
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={item.disabled}
-                    aria-label={item.title}
-                    onClick={() => handleRentalToolbarAction(item.action)}
-                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
-                  >
-                    {item.icon}
-                  </IconButton>
-                </span>
-              </Tooltip>
-            ))}
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<IoCloudDownloadOutline />}
+              disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
+              onClick={() => handleRentalToolbarAction('csv')}
+              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<IoArchiveOutline />}
+              disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+              onClick={() => handleRentalToolbarAction('zip')}
+              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+            >
+              {zipExporting ? `PDF ZIP ${zipExportProgress.done}/${zipExportProgress.total}` : 'Export PDFs (ZIP)'}
+            </Button>
+            <Stack
+              direction="row"
+              alignItems="center"
+              flexWrap="wrap"
+              useFlexGap
+              spacing={0.5}
+              sx={{
+                py: 0.5,
+                px: 0.75,
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'action.hover',
+              }}
+            >
+              {rentalToolbarMenuItems
+                .filter((item) => item.action !== 'csv' && item.action !== 'zip')
+                .map((item) => (
+                  <Tooltip key={item.id} title={item.title}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        disabled={item.disabled}
+                        aria-label={item.title}
+                        onClick={() => handleRentalToolbarAction(item.action)}
+                        sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                      >
+                        {item.icon}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                ))}
+            </Stack>
           </Stack>
         </Stack>
       </Stack>
@@ -4414,6 +4451,7 @@ export default function Subscriptions() {
                             <RentalRowActionsMenu
                               disabled={saving}
                               items={rowActionItems}
+                              buttonLabel="Export / bill"
                               onAction={(action) => {
                                 switch (action) {
                                   case 'pdf':
