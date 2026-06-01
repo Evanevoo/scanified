@@ -3987,8 +3987,7 @@ export default function Subscriptions() {
             last and first day of each month (continuing from the previous counter), or use Prep # anytime.
           </Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-            Bulk export: <strong>Export CSV</strong> (QuickBooks) and <strong>Export PDFs (ZIP)</strong> on the right.
-            Per customer: row <strong>⋮</strong> → PDF, Excel, Email.
+            Per customer: row <strong>Export / bill</strong> → PDF, Excel, Email.
           </Typography>
         </Box>
         <Stack
@@ -4041,62 +4040,33 @@ export default function Subscriptions() {
             alignItems="center"
             flexWrap="wrap"
             useFlexGap
-            spacing={1}
-            sx={{ flex: '0 0 auto' }}
+            spacing={0.5}
+            sx={{
+              py: 0.5,
+              px: 0.75,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'action.hover',
+            }}
           >
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<IoCloudDownloadOutline />}
-              disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
-              onClick={() => handleRentalToolbarAction('csv')}
-              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
-            >
-              Export CSV
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<IoArchiveOutline />}
-              disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
-              onClick={() => handleRentalToolbarAction('zip')}
-              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
-            >
-              {zipExporting ? `PDF ZIP ${zipExportProgress.done}/${zipExportProgress.total}` : 'Export PDFs (ZIP)'}
-            </Button>
-            <Stack
-              direction="row"
-              alignItems="center"
-              flexWrap="wrap"
-              useFlexGap
-              spacing={0.5}
-              sx={{
-                py: 0.5,
-                px: 0.75,
-                borderRadius: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'action.hover',
-              }}
-            >
-              {rentalToolbarMenuItems
-                .filter((item) => item.action !== 'csv' && item.action !== 'zip')
-                .map((item) => (
-                  <Tooltip key={item.id} title={item.title}>
-                    <span>
-                      <IconButton
-                        size="small"
-                        disabled={item.disabled}
-                        aria-label={item.title}
-                        onClick={() => handleRentalToolbarAction(item.action)}
-                        sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
-                      >
-                        {item.icon}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                ))}
-            </Stack>
+            {rentalToolbarMenuItems
+              .filter((item) => item.action !== 'csv' && item.action !== 'zip')
+              .map((item) => (
+                <Tooltip key={item.id} title={item.title}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      disabled={item.disabled}
+                      aria-label={item.title}
+                      onClick={() => handleRentalToolbarAction(item.action)}
+                      sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                    >
+                      {item.icon}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ))}
           </Stack>
         </Stack>
       </Stack>
@@ -4169,6 +4139,55 @@ export default function Subscriptions() {
           </Grid>
         ))}
       </Grid>
+
+      <Paper
+        elevation={0}
+        sx={{
+          mb: 3,
+          p: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2,
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1.5}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          flexWrap="wrap"
+          useFlexGap
+        >
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mr: { sm: 1 } }}>
+            Bulk export
+          </Typography>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<IoCloudDownloadOutline />}
+            disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
+            onClick={() => handleRentalToolbarAction('csv')}
+            sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+          >
+            Export CSV (QuickBooks)
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<IoArchiveOutline />}
+            disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+            onClick={() => handleRentalToolbarAction('zip')}
+            sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+          >
+            {zipExporting
+              ? `Building PDF ZIP… ${zipExportProgress.done}/${zipExportProgress.total}`
+              : 'Export PDFs (ZIP)'}
+          </Button>
+          <Typography variant="caption" sx={{ color: 'text.secondary', flex: { sm: '1 1 200px' } }}>
+            Uses Month and Terms filters above. Excel is one file per customer via row Export / bill.
+          </Typography>
+        </Stack>
+      </Paper>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
         <Box sx={{ px: 2, pt: 2, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
