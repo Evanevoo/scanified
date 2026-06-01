@@ -50,6 +50,19 @@ export async function resolveInvoiceNumberForRentalPdf(supabaseClient, organizat
     if (si?.invoice_number) return String(si.invoice_number).trim();
   }
 
+  // Rentals table also keys by customer_id; subscription_id on the row may not match prep # rows.
+  const { data: siByCustomer } = await supabaseClient
+    .from('subscription_invoices')
+    .select('invoice_number')
+    .eq('organization_id', organizationId)
+    .eq('customer_id', cid)
+    .eq('period_start', periodStart)
+    .eq('period_end', periodEnd)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (siByCustomer?.invoice_number) return String(siByCustomer.invoice_number).trim();
+
   return null;
 }
 

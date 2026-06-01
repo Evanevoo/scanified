@@ -232,27 +232,6 @@ function computeQbSequentialInvoiceNumber(exportRows, csvOptions, targetSub) {
   return `W${String(startNumber + idx).padStart(5, '0')}`;
 }
 
-function getInvoiceNumberFromLastCsvMap(targetSub, sequenceMonth) {
-  if (!targetSub) return null;
-  const wantSeq = String(sequenceMonth || '').trim();
-  if (!wantSeq) return null;
-  try {
-    const raw = sessionStorage.getItem(QB_CSV_LAST_INV_MAP_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.seqMonth !== wantSeq) return null;
-    const byRowKey = parsed?.byRowKey;
-    if (!byRowKey || typeof byRowKey !== 'object') return null;
-    for (const key of qbCsvInvoiceStorageKeys(targetSub)) {
-      const v = byRowKey[key];
-      if (v) return String(v).trim();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 function daysAtLocationSummaryFromBottles(bottles) {
   const vals = (bottles || [])
     .map((b) => Number(b.days_at_location))
@@ -2684,15 +2663,26 @@ export default function Subscriptions() {
   const resolveRentalInvoiceNumberForActions = useCallback(
     async (sub) => {
       const { periodStart, periodEnd } = getPdfBillingPeriodForSub(sub, qbCsvBillingMonth);
-      // Saved / prep # / subscription_invoices always win over stale browser CSV cache.
+      // Saved / prep # / subscription_invoices always win — never stale browser CSV cache for org users.
       let invNo = '';
-      const fromDb = await resolveInvoiceNumberForRentalPdf(
+      let fromDb = await resolveInvoiceNumberForRentalPdf(
         supabase,
         organization.id,
         sub,
         periodStart,
         periodEnd
       );
+      // Invoice # column uses live cycle; QB month dropdown must not miss prep # rows.
+      if (!fromDb && String(qbCsvBillingMonth || 'live').trim().toLowerCase() !== 'live') {
+        const livePeriod = getPdfBillingPeriodForSub(sub, 'live');
+        fromDb = await resolveInvoiceNumberForRentalPdf(
+          supabase,
+          organization.id,
+          sub,
+          livePeriod.periodStart,
+          livePeriod.periodEnd
+        );
+      }
       if (fromDb) invNo = String(fromDb).trim();
 
       // Reserve the next org-wide sequential # for this billing period (never reuse last month's row).
@@ -2703,13 +2693,6 @@ export default function Subscriptions() {
       if (!invNo && !sub?.isVirtual) {
         const ensured = await ensureSubscriptionCycleInvoiceNumber(sub);
         invNo = ensured ? String(ensured).trim() : '';
-      }
-
-      // Stale browser CSV cache only when DB has no row (must not override invoice_settings counter).
-      if (!invNo) {
-        const seqMonth = sequenceMonthForSub(sub, qbCsvBillingMonth);
-        const fromLastCsv = getInvoiceNumberFromLastCsvMap(sub, seqMonth);
-        if (fromLastCsv) invNo = fromLastCsv;
       }
 
       // Legacy localStorage W10000+ preview only when org counter could not run.
