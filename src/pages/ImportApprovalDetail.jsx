@@ -12,7 +12,6 @@ import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
-import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { coerceImportedRowPkForRpc } from '../utils/coerceImportedRowPk';
@@ -1912,6 +1911,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               }
             }
 
+            const dateRowForReconcile = (importData?.rows || importData?.line_items || []).find(
+              (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
+            );
+            const effectiveDateForReconcile =
+              dateRowForReconcile?.date ||
+              dateRowForReconcile?.Date ||
+              dateRowForReconcile?.invoice_date ||
+              dateRowForReconcile?.InvoiceDate ||
+              null;
+
             const result = await bottleAssignmentService.assignBottles({
               organizationId: organization?.id,
               customerId,
@@ -1921,6 +1930,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               importRecordId: (!isScannedOnly && recordId) ? recordId : null,
               importTable: importTableForRpc,
               orderNumber: orderNum || null,
+              endDate: effectiveDateForReconcile,
             });
 
             if (!result.success) {
@@ -1950,86 +1960,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   .in('bottle_barcode', list);
               }
             }
-
-            // Any return barcode still tied to this order customer after RPC: clear assignment + close rentals.
-            // Use returnBarcodesUnique (not only returnBarcodesOnBalance) so barcodes misclassified as RNB due to
-            // map key drift are still unassigned when they truly match this customer (see getBottleFromBalanceMap).
-            if (returnBarcodesUnique.length > 0 && organization?.id) {
-              let resPostVerify = null;
-              try {
-                resPostVerify =
-                  (custIdStr && (await resolveCustomerListId(supabase, organization.id, custIdStr))) ||
-                  (custNameStr && (await resolveCustomerListId(supabase, organization.id, custNameStr))) ||
-                  null;
-              } catch (_) {
-                /* ignore */
-              }
-              const listPostL = resPostVerify?.customerListId
-                ? String(resPostVerify.customerListId).trim().toLowerCase()
-                : '';
-              const rowPostL = resPostVerify?.id ? String(resPostVerify.id).trim().toLowerCase() : '';
-              const nameSetPost = new Set(
-                [custNameStr, resPostVerify?.name]
-                  .filter(Boolean)
-                  .map((n) => String(n).trim().toLowerCase())
-              );
-
-              for (const rawBc of returnBarcodesUnique) {
-                const bc = String(rawBc || '').trim();
-                if (!bc) continue;
-                const bs = await findBottleRowByScanIdentifier(supabase, organization.id, bc);
-                if (!bs) {
-                  await closeOpenRentalsForBottle(supabase, organization.id, { barcode: bc });
-                  continue;
-                }
-                const ac = String(bs.assigned_customer || '').trim().toLowerCase();
-                const cn = String(bs.customer_name || '').trim().toLowerCase();
-                const stillOnThisCustomer =
-                  (custIdStr && ac === custIdStr.toLowerCase()) ||
-                  (listPostL && ac === listPostL) ||
-                  (rowPostL && ac === rowPostL) ||
-                  (cn && nameSetPost.has(cn)) ||
-                  (ac && nameSetPost.has(ac));
-
-                if (stillOnThisCustomer) {
-                  const { error: upe } = await supabase
-                    .from('bottles')
-                    .update({
-                      assigned_customer: null,
-                      customer_name: null,
-                      status: 'empty',
-                      location: 'In House',
-                      rental_start_date: null,
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', bs.id)
-                    .eq('organization_id', organization.id);
-                  if (upe) {
-                    logger.warn('Post-verify return unassign failed', bc, upe.message);
-                  }
-                }
-
-                const canonicalBc = String(bs.barcode_number || bc).trim();
-                try {
-                  await closeOpenRentalsForBottle(supabase, organization.id, {
-                    bottleId: bs.id,
-                    barcode: canonicalBc,
-                  });
-                } catch (closeErr) {
-                  logger.warn('Post-verify close open rentals failed', canonicalBc, closeErr);
-                }
-              }
-            }
-
-            const dateRowForReconcile = (importData?.rows || importData?.line_items || []).find(
-              (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
-            );
-            const effectiveDateForReconcile =
-              dateRowForReconcile?.date ||
-              dateRowForReconcile?.Date ||
-              dateRowForReconcile?.invoice_date ||
-              dateRowForReconcile?.InvoiceDate ||
-              null;
 
             // Do not run SHIP reconcile for return-latest barcodes: post-verify unassign clears assignment,
             // and reconcile would otherwise treat "unassigned" as missed SHIP and reassign to the verify customer.

@@ -67,7 +67,8 @@ import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetect
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
-import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle';
+import { finalizeVerifiedReturnBarcodes } from '../services/finalizeVerifiedReturnBarcodes';
+import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
@@ -3320,36 +3321,16 @@ export default function ImportApprovals() {
             || scanMode === 'IN'
             || scanAction === 'in';
           if (isReturnScan) {
+            const scanBc = scan.cylinder_barcode || scan.bottle_barcode;
             try {
-              const { data: bottleRow } = await supabase
-                .from('bottles')
-                .select('id, barcode_number')
-                .eq('barcode_number', scan.cylinder_barcode)
-                .eq('organization_id', organization.id)
-                .maybeSingle();
-              await closeOpenRentalsForBottle(supabase, organization.id, {
-                bottleId: bottleRow?.id,
-                barcode: bottleRow?.barcode_number || scan.cylinder_barcode,
+              await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
+                returnBarcodes: [scanBc],
+                customerId: customer?.CustomerListID,
+                customerName: customer?.name,
+                endDate: firstRow?.date,
               });
             } catch (rentalUpdateError) {
               logger.error('Error ending rental record:', rentalUpdateError);
-            }
-
-            // Remove customer assignment and mark as empty for returned bottles
-            const { error: bottleUnassignError } = await supabase
-              .from('bottles')
-              .update({ 
-                assigned_customer: null,
-                customer_name: null,
-                status: 'empty',
-                location: 'In House',
-                last_location_update: new Date().toISOString()
-              })
-              .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-            
-            if (bottleUnassignError) {
-              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
             }
           }
         }
@@ -3602,36 +3583,16 @@ export default function ImportApprovals() {
             || scanMode === 'IN'
             || scanAction === 'in';
           if (isReturnScan) {
+            const scanBc = scan.cylinder_barcode || scan.bottle_barcode;
             try {
-              const { data: bottleRow } = await supabase
-                .from('bottles')
-                .select('id, barcode_number')
-                .eq('barcode_number', scan.cylinder_barcode)
-                .eq('organization_id', organization.id)
-                .maybeSingle();
-              await closeOpenRentalsForBottle(supabase, organization.id, {
-                bottleId: bottleRow?.id,
-                barcode: bottleRow?.barcode_number || scan.cylinder_barcode,
+              await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
+                returnBarcodes: [scanBc],
+                customerId: customer?.CustomerListID,
+                customerName: customer?.name,
+                endDate: firstRow?.date,
               });
             } catch (rentalUpdateError) {
               logger.error('Error ending rental record:', rentalUpdateError);
-            }
-
-            // Remove customer assignment and mark as empty for returned bottles
-            const { error: bottleUnassignError } = await supabase
-              .from('bottles')
-              .update({ 
-                assigned_customer: null,
-                customer_name: null,
-                status: 'empty',
-                location: 'In House',
-                last_location_update: new Date().toISOString()
-              })
-              .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-            
-            if (bottleUnassignError) {
-              logger.error('Error unassigning bottle from customer:', bottleUnassignError);
             }
           }
         }
@@ -4298,18 +4259,18 @@ export default function ImportApprovals() {
   };
   
   // Return asset to inventory (in-house/available)
-  const returnAssetToInventory = async (barcode, orderNumber, customerId = null) => {
+  const returnAssetToInventory = async (barcode, orderNumber, customerId = null, customerName = null, effectiveDate = null) => {
     try {
-      // Find the bottle
-      const { data: bottle, error: bottleError } = await supabase
-        .from('bottles')
-        .select('*')
-        .eq('barcode_number', barcode)
-        .eq('organization_id', organization.id)
-        .single();
-      
-      if (bottleError || !bottle) {
+      const bottle = await findBottleRowByScanIdentifier(supabase, organization.id, barcode);
+      if (!bottle) {
         logger.error('❌ Bottle not found:', barcode);
+        await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
+          returnBarcodes: [barcode],
+          customerId,
+          customerName,
+          orderNumber,
+          endDate: effectiveDate,
+        });
         return;
       }
 
@@ -4318,61 +4279,33 @@ export default function ImportApprovals() {
 
       // If asset is NOT on balance, create exception and mark as physically returned only
       if (!balanceCheck.isOnBalance) {
-        // Still mark asset as physically returned (status update only)
-        // But DO NOT update customer assignment or rental records
         const { error: statusUpdateError } = await supabase
           .from('bottles')
           .update({
-            status: 'empty', // Mark as empty when returned
+            status: 'empty',
             location: 'In House',
-            last_location_update: new Date().toISOString()
-            // NOTE: We intentionally do NOT unassign customer or update rental records
-            // since the asset was not on balance
+            last_location_update: new Date().toISOString(),
           })
           .eq('id', bottle.id);
-        
+
         if (statusUpdateError) {
           logger.error('❌ Error updating bottle status:', statusUpdateError);
         } else {
           logger.debug('✅ Asset marked as physically returned (no balance adjustment)');
         }
-        
-        return; // Exit early - no balance adjustments made
-      }
-      
-      // NORMAL RETURN FLOW: Asset WAS on balance, proceed with standard return processing
-      // Update bottle status to AVAILABLE
-      const { error: updateError } = await supabase
-        .from('bottles')
-        .update({
-          status: 'empty', // Mark as empty when returned
-          location: 'In House',
-          assigned_customer: null,
-          customer_id: null,
-          rental_start_date: null,
-          last_location_update: new Date().toISOString()
-        })
-        .eq('id', bottle.id);
-      
-      if (updateError) {
-        logger.error('❌ Error updating bottle:', updateError);
+
         return;
       }
-      
-      // Update rental record if exists (match bottle_id and barcode — legacy rows may lack bottle_id)
-      try {
-        await closeOpenRentalsForBottle(supabase, organization.id, {
-          bottleId: bottle.id,
-          barcode: bottle.barcode_number || barcode,
-          closedByOrder: orderNumber,
-        });
-      } catch (rentalError) {
-        logger.error('❌ Error closing open rental(s):', rentalError);
-        return;
-      }
-      
-      logger.debug('✅ Asset returned to inventory:', { barcode });
-      
+
+      await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
+        returnBarcodes: [bottle.barcode_number || barcode],
+        customerId: customerId || bottle.assigned_customer,
+        customerName: customerName || bottle.customer_name,
+        orderNumber,
+        endDate: effectiveDate,
+      });
+
+      logger.debug('✅ Asset returned to inventory:', { barcode: bottle.barcode_number || barcode });
     } catch (error) {
       logger.error('❌ Error returning asset:', error);
     }
@@ -7614,6 +7547,7 @@ return (
         shipBarcodes: shipArr,
         returnBarcodes: returnBarcodesOnBalance,
         orderNumber: orderNumber,
+        endDate: effectiveDeliveryDate,
       });
 
       if (rpcResult.success) {
@@ -7712,12 +7646,20 @@ return (
       if (processedBarcodes.has(barcode)) continue;
       processedBarcodes.add(barcode);
 
-      const { data: bottles, error: bottleError } = await supabase
-        .from('bottles').select('*').eq('barcode_number', barcode).eq('organization_id', organization?.id).limit(1);
-      if (bottleError) { logger.error('Error finding bottle:', bottleError); continue; }
-      if (!bottles || bottles.length === 0) { assignmentWarnings.push(`Bottle not found: ${barcode}`); continue; }
+      await finalizeVerifiedReturnBarcodes(supabase, organization?.id, {
+        returnBarcodes: [barcode],
+        customerId: newCustomerId,
+        customerName: newCustomerName,
+        orderNumber,
+        endDate: effectiveDate,
+      });
 
-      const bottle = bottles[0];
+      const bottle = await findBottleRowByScanIdentifier(supabase, organization?.id, barcode);
+      if (!bottle) {
+        assignmentWarnings.push(`Bottle not found: ${barcode}`);
+        continue;
+      }
+
       const currentCustomer = bottle.assigned_customer || bottle.customer_name;
       if (!currentCustomer) continue;
 
@@ -7745,16 +7687,6 @@ return (
 
       assignmentSuccesses.push(`Bottle ${bottle.barcode_number} returned from ${currentCustomer}`);
       await resetDaysAtLocation(bottle.id);
-
-      try {
-        await closeOpenRentalsForBottle(supabase, organization?.id, {
-          bottleId: bottle.id,
-          barcode: bottle.barcode_number || barcode,
-          closedByOrder: orderNumber,
-        });
-      } catch (closeErr) {
-        logger.warn('Manual verify: close open rentals failed', barcode, closeErr);
-      }
 
       // Insert return scan so bottle Movement History shows "Return" from customer (e.g. Prairie Wheel)
       const { error: scanErr } = await supabase.from('bottle_scans').insert({

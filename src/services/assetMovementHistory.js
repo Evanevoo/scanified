@@ -129,6 +129,52 @@ export function dedupeSemanticMovementHistory(items) {
   return out;
 }
 
+function movementHistoryCustomerKey(item) {
+  const id = String(item?.customer_id || item?.assigned_customer || '').trim().toLowerCase();
+  const name = String(item?.customer_name || '').trim().toLowerCase();
+  return id || name || '';
+}
+
+/** Billing close on rental_end often lands on a later day than the handset RETURN scan — hide the duplicate. */
+const RENTAL_END_REDUNDANT_AFTER_SCAN_MS = 45 * 24 * 60 * 60 * 1000;
+
+export function suppressRedundantRentalEndReturns(items) {
+  const list = Array.isArray(items) ? [...items] : [];
+  const returnScans = list.filter(
+    (i) =>
+      (i.history_type === 'bottle_scan' || i.history_type === 'cylinder_scan')
+      && movementActionFamily(i) === 'RETURN',
+  );
+  if (!returnScans.length) return list;
+
+  const scanAnchors = returnScans
+    .map((s) => ({
+      ms: new Date(s.created_at || 0).getTime(),
+      barcode: String(s.barcode_number || '').trim().toUpperCase(),
+      customerKey: movementHistoryCustomerKey(s),
+    }))
+    .filter((s) => Number.isFinite(s.ms) && s.ms > 0);
+
+  if (!scanAnchors.length) return list;
+
+  return list.filter((item) => {
+    if (item.history_type !== 'rental_end') return true;
+    const endMs = new Date(item.created_at || 0).getTime();
+    if (!Number.isFinite(endMs) || endMs <= 0) return true;
+    const barcode = String(item.barcode_number || '').trim().toUpperCase();
+    const customerKey = movementHistoryCustomerKey(item);
+
+    const redundant = scanAnchors.some((scan) => {
+      if (endMs < scan.ms) return false;
+      if (endMs - scan.ms > RENTAL_END_REDUNDANT_AFTER_SCAN_MS) return false;
+      if (barcode && scan.barcode && barcode !== scan.barcode) return false;
+      if (customerKey && scan.customerKey && customerKey !== scan.customerKey) return false;
+      return true;
+    });
+    return !redundant;
+  });
+}
+
 /** Stable key so distinct sources (scan vs rental) are never collapsed together. */
 export function movementHistoryDedupeKey(item) {
   if (item?.id != null && String(item.id).trim() !== '') {
@@ -582,7 +628,9 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     }
   });
 
-  const semanticDeduped = dedupeSemanticMovementHistory(allHistory);
+  const semanticDeduped = suppressRedundantRentalEndReturns(
+    dedupeSemanticMovementHistory(allHistory),
+  );
 
   const seen = new Set();
   const uniqueHistory = [];
