@@ -29,7 +29,13 @@ export function extractOrderNumbersFromImportData(data) {
   add(parsed.order_number);
   add(parsed.reference_number);
   add(parsed.invoice_number);
+  add(parsed.sales_order_number);
+  add(parsed.SalesOrderNumber);
+  add(parsed.po_number);
+  add(parsed.PO);
+  add(parsed.trk_number);
   add(parsed.summary?.reference_number);
+  add(parsed.summary?.order_number);
   (parsed.verified_order_numbers || []).forEach(add);
   const rows = parsed.rows || parsed.line_items || [];
   rows.forEach((row) => {
@@ -37,8 +43,22 @@ export function extractOrderNumbersFromImportData(data) {
     add(row.invoice_number);
     add(row.reference_number);
     add(row.sales_receipt_number);
+    add(row.sales_order_number);
+    add(row.SalesOrderNumber);
+    add(row.po_number);
+    add(row.PO);
   });
   return [...out];
+}
+
+/** RETURN scan can show as completed when inventory already cleared the customer assignment. */
+export function bottleReflectsCompletedReturn(asset) {
+  if (!asset || typeof asset !== 'object') return false;
+  const st = String(asset.status || '').toLowerCase();
+  if (st === 'empty' || st === 'available' || st === 'in house') return true;
+  const assigned = String(asset.assigned_customer || asset.customer_uuid || '').trim();
+  const name = String(asset.customer_name || '').trim();
+  return !assigned && !name;
 }
 
 const APPROVED_IMPORT_STATUSES = new Set(['approved', 'verified']);
@@ -85,6 +105,24 @@ export async function fetchOrderApprovalStatusMap(supabase, organizationId, orde
       continue;
     }
     (data || []).forEach(ingestImportRow);
+  }
+
+  const unresolved = [...targetNorms].filter((norm) => !statusByOrder.get(norm)?.isApproved);
+  if (unresolved.length > 0) {
+    for (const table of ['imported_invoices', 'imported_sales_receipts']) {
+      const { data, error } = await supabase
+        .from(table)
+        .select('id, status, approved_at, verified_at, data')
+        .eq('organization_id', organizationId)
+        .in('status', ['approved', 'verified'])
+        .order('approved_at', { ascending: false })
+        .limit(1000);
+      if (error) {
+        logger.warn(`fetchOrderApprovalStatusMap approved pass (${table}):`, error.message);
+        continue;
+      }
+      (data || []).forEach(ingestImportRow);
+    }
   }
 
   for (const norm of targetNorms) {

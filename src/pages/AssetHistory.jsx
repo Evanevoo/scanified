@@ -83,6 +83,11 @@ function mergedMovementToLogRows(asset, merged) {
               ? `${orderLabel}${custHint} · scanned return, inventory not updated yet`
               : `${orderLabel}${custHint} · scanned, not assigned yet`;
           })()
+        : row.scan_order_status === 'inventory_updated' && scanRecordModeFamily(row) === 'RETURN'
+          ? (() => {
+              const orderLabel = row.order_number ? `Order ${row.order_number}` : 'Order';
+              return `${orderLabel} · return processed (inventory updated)`;
+            })()
         : cname || cid
           ? (() => {
               const base = cname

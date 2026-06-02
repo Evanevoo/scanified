@@ -5,9 +5,11 @@ import {
   getScanRowBarcode,
 } from '../utils/fetchBottleScansByBarcodes';
 import {
+  bottleReflectsCompletedReturn,
   fetchOrderApprovalStatusMap,
   isManualUiScanOrder,
   normalizeOrderNumForLookup,
+  scanRecordModeFamily,
 } from '../utils/orderScanApprovalStatus';
 
 export const normalizeAuditDetails = (details) => {
@@ -570,6 +572,14 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     const info = approvalMap.get(norm);
     item.scan_order_status = info?.status || 'scanned_only';
     item.scan_assignment_effective = Boolean(info?.isApproved);
+    if (
+      !item.scan_assignment_effective
+      && scanRecordModeFamily(item) === 'RETURN'
+      && bottleReflectsCompletedReturn(sourceAsset)
+    ) {
+      item.scan_assignment_effective = true;
+      item.scan_order_status = 'inventory_updated';
+    }
   });
 
   const semanticDeduped = dedupeSemanticMovementHistory(allHistory);

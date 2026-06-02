@@ -12,6 +12,7 @@ import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { coerceImportedRowPkForRpc } from '../utils/coerceImportedRowPk';
@@ -1977,7 +1978,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 const bc = String(rawBc || '').trim();
                 if (!bc) continue;
                 const bs = await findBottleRowByScanIdentifier(supabase, organization.id, bc);
-                if (!bs) continue;
+                if (!bs) {
+                  await closeOpenRentalsForBottle(supabase, organization.id, { barcode: bc });
+                  continue;
+                }
                 const ac = String(bs.assigned_customer || '').trim().toLowerCase();
                 const cn = String(bs.customer_name || '').trim().toLowerCase();
                 const stillOnThisCustomer =
@@ -1986,35 +1990,33 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   (rowPostL && ac === rowPostL) ||
                   (cn && nameSetPost.has(cn)) ||
                   (ac && nameSetPost.has(ac));
-                if (!stillOnThisCustomer) continue;
 
-                const canonicalBc = String(bs.barcode_number || '').trim();
-                const { error: upe } = await supabase
-                  .from('bottles')
-                  .update({
-                    assigned_customer: null,
-                    customer_name: null,
-                    status: 'empty',
-                    location: 'In House',
-                    rental_start_date: null,
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', bs.id)
-                  .eq('organization_id', organization.id);
-                if (upe) {
-                  logger.warn('Post-verify return unassign failed', bc, upe.message);
-                  continue;
-                }
-                if (canonicalBc) {
-                  await supabase
-                    .from('rentals')
+                if (stillOnThisCustomer) {
+                  const { error: upe } = await supabase
+                    .from('bottles')
                     .update({
-                      rental_end_date: new Date().toISOString().split('T')[0],
+                      assigned_customer: null,
+                      customer_name: null,
+                      status: 'empty',
+                      location: 'In House',
+                      rental_start_date: null,
                       updated_at: new Date().toISOString(),
                     })
-                    .eq('bottle_barcode', canonicalBc)
-                    .eq('organization_id', organization.id)
-                    .is('rental_end_date', null);
+                    .eq('id', bs.id)
+                    .eq('organization_id', organization.id);
+                  if (upe) {
+                    logger.warn('Post-verify return unassign failed', bc, upe.message);
+                  }
+                }
+
+                const canonicalBc = String(bs.barcode_number || bc).trim();
+                try {
+                  await closeOpenRentalsForBottle(supabase, organization.id, {
+                    bottleId: bs.id,
+                    barcode: canonicalBc,
+                  });
+                } catch (closeErr) {
+                  logger.warn('Post-verify close open rentals failed', canonicalBc, closeErr);
                 }
               }
             }
