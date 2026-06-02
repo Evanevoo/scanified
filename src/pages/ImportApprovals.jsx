@@ -74,6 +74,7 @@ import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
 import { coerceImportedRowPkForRpc, isValidImportedRowPk } from '../utils/coerceImportedRowPk';
 import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
+import { buildOrderNumberVariants } from '../utils/orderNumberVariants';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -7284,17 +7285,10 @@ return (
   }
 
   // Collect SHIP and RETURN barcodes for a given order from bottle_scans (and optionally from record rows)
-  async function collectBarcodesForOrder(orderNumber, recordRows = null) {
+  async function collectBarcodesForOrder(orderNumber, recordRows = null, recordData = null) {
     const shippedBarcodes = new Set();
     const returnedBarcodes = new Set();
     let bottleScanRows = [];
-
-    const normalizeOrderNum = (num) => {
-      if (num == null || num === '') return '';
-      const s = String(num).trim();
-      if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-      return s;
-    };
 
     const isDelivered = (mode, action) => {
       const modeUpper = (mode || '').toString().toUpperCase();
@@ -7306,9 +7300,7 @@ return (
       return true;
     };
 
-    const orderNumStr = String(orderNumber).trim();
-    const orderNumNorm = normalizeOrderNum(orderNumStr);
-    const orderVariants = [...new Set([orderNumStr, orderNumNorm].filter(Boolean))];
+    const orderVariants = buildOrderNumberVariants(orderNumber, { recordRows, recordData });
 
     const normalizeBarcode = (b) => (b == null || b === '') ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
 
@@ -7414,7 +7406,11 @@ return (
         }
       }
 
-      const { shippedBarcodes, returnedBarcodes, bottleScanRows = [] } = await collectBarcodesForOrder(orderNumber, rows);
+      const { shippedBarcodes, returnedBarcodes, bottleScanRows = [] } = await collectBarcodesForOrder(
+        orderNumber,
+        rows,
+        data
+      );
       logger.debug(`Collected barcodes for order ${orderNumber}: ${shippedBarcodes.size} SHIP, ${returnedBarcodes.size} RETURN`);
 
       const shipArr = Array.from(shippedBarcodes);

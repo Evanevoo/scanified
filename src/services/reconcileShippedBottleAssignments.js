@@ -2,6 +2,7 @@ import logger from '../utils/logger';
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from '../utils/rentalPricing';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
+import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -75,20 +76,7 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
     const barcode = String(rawBc || '').trim();
     if (!barcode) continue;
 
-    const { data: bottles, error } = await supabase
-      .from('bottles')
-      .select(
-        'id, barcode_number, assigned_customer, customer_name, status, location, product_code, category, description, type'
-      )
-      .eq('organization_id', organizationId)
-      .eq('barcode_number', barcode)
-      .limit(1);
-
-    if (error) {
-      logger.warn('reconcileShippedBottleAssignments: fetch bottle', barcode, error);
-      continue;
-    }
-    const bottle = bottles?.[0];
+    const bottle = await findBottleRowByScanIdentifier(supabase, organizationId, barcode);
     if (!bottle) continue;
 
     if (assignmentMatchesVerifyTarget(bottle, assignId, assignName)) {

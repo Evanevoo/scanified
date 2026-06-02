@@ -1091,6 +1091,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         setTimeout(() => setActionMessage(''), 8000);
         return;
       }
+      const shippedCount = result.data?.shipped ?? 0;
+      if (shippedCount === 0) {
+        const detail =
+          result.data?.warnings?.join('; ') ||
+          result.error ||
+          'Assignment returned success but no bottle rows were updated.';
+        setActionMessage(`Retry did not assign any bottles: ${detail}`);
+        setTimeout(() => setActionMessage(''), 10000);
+        return;
+      }
       const dateRowForReconcile = (pdata?.rows || pdata?.line_items || []).find(
         (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
       );
