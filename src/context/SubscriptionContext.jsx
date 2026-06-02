@@ -17,6 +17,7 @@ import {
   defaultUnitRatesFromAssetPricingTable,
 } from '../services/pricingResolution';
 import { backfillOpenRentalsForAssignedBottles } from '../services/backfillOpenRentalsForAssignedBottles';
+import { closeOrphanOpenRentalsForOrg } from '../services/closeOrphanOpenRentalsForOrg';
 
 const SubscriptionContext = createContext(null);
 
@@ -205,6 +206,29 @@ export function SubscriptionProvider({ children }) {
         );
         if (!refetchRentals.error && refetchRentals.data) {
           openRentalsList = refetchRentals.data;
+        }
+      }
+
+      const { closed: orphansClosed, errors: orphanCloseErrors } = await closeOrphanOpenRentalsForOrg(
+        supabase,
+        orgId,
+        {
+          openRentals: openRentalsList,
+          bottles: bottlesList,
+          customers: custRes.data || [],
+          maxCloses: 500,
+        },
+      );
+      if (orphanCloseErrors.length) {
+        console.warn('closeOrphanOpenRentalsForOrg:', orphanCloseErrors.join('; '));
+      }
+      if (orphansClosed > 0) {
+        const refetchAfterOrphans = await safe(
+          'rentals',
+          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+        );
+        if (!refetchAfterOrphans.error && refetchAfterOrphans.data) {
+          openRentalsList = refetchAfterOrphans.data;
         }
       }
 

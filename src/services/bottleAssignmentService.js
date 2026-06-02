@@ -6,6 +6,7 @@
  */
 import { supabase } from '../supabase/client';
 import logger from '../utils/logger';
+import { finalizeVerifiedReturnBarcodes } from './finalizeVerifiedReturnBarcodes';
 import {
   isTemporaryCustomerIdentity,
   resolveCustomerListId,
@@ -231,6 +232,7 @@ export const bottleAssignmentService = {
     defaultRentalAmount = 10,
     defaultTaxRate = 0.11,
     orderNumber = null,
+    endDate = null,
   }) {
     try {
       if (isTemporaryCustomerIdentity(customerId) || isTemporaryCustomerIdentity(customerName)) {
@@ -299,6 +301,15 @@ export const bottleAssignmentService = {
 
         if (!error && !(data && data.success === false)) {
           logger.log('Bottle assignment result:', data);
+          if (hasReturns) {
+            await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
+              returnBarcodes,
+              customerId: resolved.customerListId || resolved.id,
+              customerName: displayName,
+              orderNumber,
+              endDate,
+            });
+          }
           return { success: true, data };
         }
 
@@ -318,13 +329,22 @@ export const bottleAssignmentService = {
             defaultTaxRate,
           });
           if (fb.success) {
+            if (hasReturns) {
+              await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
+                returnBarcodes,
+                customerId: resolved.customerListId || resolved.id,
+                customerName: displayName,
+                orderNumber,
+                endDate,
+              });
+            }
             return {
               success: true,
               data: {
                 ...(fb.data || {}),
                 note:
                   returnBarcodes?.length > 0
-                    ? 'Ship barcodes were assigned via direct ship fallback; return barcodes were not processed by this fallback—re-run verify or fix the RPC.'
+                    ? 'Ship barcodes were assigned via direct ship fallback; return barcodes finalized separately (rentals closed / inventory cleared).'
                     : 'Ship barcodes were assigned via direct ship fallback (RPC vs FK mismatch).',
               },
             };
@@ -354,13 +374,22 @@ export const bottleAssignmentService = {
               defaultTaxRate,
             });
             if (fb.success) {
+              if (hasReturns) {
+                await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
+                  returnBarcodes,
+                  customerId: resolved.customerListId || resolved.id,
+                  customerName: displayName,
+                  orderNumber,
+                  endDate,
+                });
+              }
               return {
                 success: true,
                 data: {
                   ...(fb.data || {}),
                   note:
                     returnBarcodes?.length > 0
-                      ? 'Ship barcodes were assigned via direct ship fallback; return barcodes were not processed by this fallback—re-run verify or fix the RPC.'
+                      ? 'Ship barcodes were assigned via direct ship fallback; return barcodes finalized separately (rentals closed / inventory cleared).'
                       : 'Ship barcodes were assigned via direct ship fallback (RPC vs FK mismatch).',
                 },
               };
