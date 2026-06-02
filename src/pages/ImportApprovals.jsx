@@ -67,6 +67,7 @@ import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetect
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
+import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle';
 import { fetchOrgRentalPricingContext, monthlyRateForNewRental, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/resolveCustomerListId';
@@ -3309,17 +3310,28 @@ export default function ImportApprovals() {
             }
           }
 
-          // End rental for returned bottles (qty_in > 0)
-          if (scan.qty && scan.qty < 0) {
-            const { error: rentalUpdateError } = await supabase
-              .from('rentals')
-              .update({ 
-                rental_end_date: new Date().toISOString().split('T')[0]
-              })
-              .eq('bottle_barcode', scan.cylinder_barcode)
-              .is('rental_end_date', null);
-            
-            if (rentalUpdateError) {
+          // End rental for returned bottles (RETURN scan or negative qty)
+          const scanMode = String(scan.mode || scan.scan_mode || '').toUpperCase();
+          const scanAction = String(scan.action || '').toLowerCase();
+          const isReturnScan =
+            (scan.qty != null && Number(scan.qty) < 0)
+            || scanMode === 'RETURN'
+            || scanMode === 'PICKUP'
+            || scanMode === 'IN'
+            || scanAction === 'in';
+          if (isReturnScan) {
+            try {
+              const { data: bottleRow } = await supabase
+                .from('bottles')
+                .select('id, barcode_number')
+                .eq('barcode_number', scan.cylinder_barcode)
+                .eq('organization_id', organization.id)
+                .maybeSingle();
+              await closeOpenRentalsForBottle(supabase, organization.id, {
+                bottleId: bottleRow?.id,
+                barcode: bottleRow?.barcode_number || scan.cylinder_barcode,
+              });
+            } catch (rentalUpdateError) {
               logger.error('Error ending rental record:', rentalUpdateError);
             }
 
@@ -3580,17 +3592,28 @@ export default function ImportApprovals() {
             }
           }
 
-          // End rental for returned bottles (qty_in > 0)
-          if (scan.qty && scan.qty < 0) {
-            const { error: rentalUpdateError } = await supabase
-              .from('rentals')
-              .update({ 
-                rental_end_date: new Date().toISOString().split('T')[0]
-              })
-              .eq('bottle_barcode', scan.cylinder_barcode)
-              .is('rental_end_date', null);
-            
-            if (rentalUpdateError) {
+          // End rental for returned bottles (RETURN scan or negative qty)
+          const scanMode = String(scan.mode || scan.scan_mode || '').toUpperCase();
+          const scanAction = String(scan.action || '').toLowerCase();
+          const isReturnScan =
+            (scan.qty != null && Number(scan.qty) < 0)
+            || scanMode === 'RETURN'
+            || scanMode === 'PICKUP'
+            || scanMode === 'IN'
+            || scanAction === 'in';
+          if (isReturnScan) {
+            try {
+              const { data: bottleRow } = await supabase
+                .from('bottles')
+                .select('id, barcode_number')
+                .eq('barcode_number', scan.cylinder_barcode)
+                .eq('organization_id', organization.id)
+                .maybeSingle();
+              await closeOpenRentalsForBottle(supabase, organization.id, {
+                bottleId: bottleRow?.id,
+                barcode: bottleRow?.barcode_number || scan.cylinder_barcode,
+              });
+            } catch (rentalUpdateError) {
               logger.error('Error ending rental record:', rentalUpdateError);
             }
 
@@ -4336,20 +4359,15 @@ export default function ImportApprovals() {
         return;
       }
       
-      // Update rental record if exists
-      const { error: rentalError } = await supabase
-        .from('rentals')
-        .update({
-          rental_end_date: new Date().toISOString().split('T')[0],
-          status: 'RETURNED',
-          return_order_number: orderNumber,
-          updated_at: new Date().toISOString()
-        })
-        .eq('bottle_id', bottle.id)
-        .is('rental_end_date', null);
-      
-      if (rentalError) {
-        logger.error('❌ Error updating rental record:', rentalError);
+      // Update rental record if exists (match bottle_id and barcode — legacy rows may lack bottle_id)
+      try {
+        await closeOpenRentalsForBottle(supabase, organization.id, {
+          bottleId: bottle.id,
+          barcode: bottle.barcode_number || barcode,
+          closedByOrder: orderNumber,
+        });
+      } catch (rentalError) {
+        logger.error('❌ Error closing open rental(s):', rentalError);
         return;
       }
       
@@ -7728,13 +7746,14 @@ return (
       assignmentSuccesses.push(`Bottle ${bottle.barcode_number} returned from ${currentCustomer}`);
       await resetDaysAtLocation(bottle.id);
 
-      const { data: activeRentals } = await supabase
-        .from('rentals').select('id').eq('bottle_barcode', barcode).eq('organization_id', organization?.id).is('rental_end_date', null).limit(1);
-      if (activeRentals?.length > 0) {
-        await supabase.from('rentals').update({
-          rental_end_date: new Date().toISOString().split('T')[0],
-          closed_by_order: orderNumber,
-        }).eq('id', activeRentals[0].id);
+      try {
+        await closeOpenRentalsForBottle(supabase, organization?.id, {
+          bottleId: bottle.id,
+          barcode: bottle.barcode_number || barcode,
+          closedByOrder: orderNumber,
+        });
+      } catch (closeErr) {
+        logger.warn('Manual verify: close open rentals failed', barcode, closeErr);
       }
 
       // Insert return scan so bottle Movement History shows "Return" from customer (e.g. Prairie Wheel)

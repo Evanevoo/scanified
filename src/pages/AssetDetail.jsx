@@ -49,6 +49,8 @@ import {
   postAssignmentFromAuditFieldChanges,
   stringifyHistoryDetails,
 } from '../services/assetMovementHistory';
+import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle';
+import { useSubscriptions } from '../context/SubscriptionContext';
 import {
   bottleHasStaleCustomerAssignment,
   isActiveCustomerAssignment,
@@ -327,6 +329,7 @@ export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { profile, organization } = useAuth();
+  const subscriptionCtx = useSubscriptions();
   const organizationId = organization?.id || profile?.organization_id || null;
   const { terms, isReady } = useDynamicAssetTerms();
 
@@ -354,6 +357,7 @@ export default function AssetDetail() {
   const [gasTypes, setGasTypes] = useState([]);
   const staleClearRepairKeyRef = useRef(null);
   const historySyncRepairKeyRef = useRef(null);
+  const orphanRentalsClosedRef = useRef(null);
   const gasTypeOptions = React.useMemo(
     () =>
       [...new Set((gasTypes || []).map((item) => (item?.type || '').trim()).filter(Boolean))]
@@ -494,8 +498,24 @@ export default function AssetDetail() {
         return;
       }
 
-      setAsset((prev) => (prev ? { ...prev, ...updateData, customer_id: null } : prev));
+      const updatedAsset = { ...asset, ...updateData, customer_id: null };
+      setAsset(updatedAsset);
       setCustomerData(null);
+
+      try {
+        const closed = await closeOpenRentalsForBottle(supabase, profile.organization_id, {
+          bottleId: asset.id,
+          barcode: asset.barcode_number,
+        });
+        if (closed > 0) {
+          subscriptionCtx?.refreshSilent?.();
+        }
+      } catch (rentalCloseError) {
+        logger.warn('Close rentals after stale customer clear:', rentalCloseError);
+      }
+
+      await fetchMovementHistory(updatedAsset);
+
       setSuccess(
         `Cleared assignment to removed customer "${staleBottleCustomerLabel(asset)}". Status set to ${updateData.status}.`
       );
@@ -510,6 +530,44 @@ export default function AssetDetail() {
     asset?.customer_id,
     asset?.status,
     customers,
+    profile?.organization_id,
+  ]);
+
+  // Bottles cleared in inventory but still billing (e.g. stale-customer repair before rental close).
+  useEffect(() => {
+    const closeOrphanRentalsForUnassignedBottle = async () => {
+      if (!asset?.id || !profile?.organization_id || !customers.length) return;
+      if (bottleHasStaleCustomerAssignment(asset, customers)) return;
+      const assigned = String(asset.assigned_customer || asset.customer_uuid || '').trim();
+      const name = String(asset.customer_name || '').trim();
+      if (assigned || name) return;
+
+      const repairKey = `orphan-rentals|${asset.id}`;
+      if (orphanRentalsClosedRef.current === repairKey) return;
+      orphanRentalsClosedRef.current = repairKey;
+
+      try {
+        const closed = await closeOpenRentalsForBottle(supabase, profile.organization_id, {
+          bottleId: asset.id,
+          barcode: asset.barcode_number,
+        });
+        if (closed > 0) {
+          subscriptionCtx?.refreshSilent?.();
+          await fetchMovementHistory(asset);
+        }
+      } catch (rentalCloseError) {
+        logger.warn('Close orphan rentals for unassigned bottle:', rentalCloseError);
+      }
+    };
+
+    void closeOrphanRentalsForUnassignedBottle();
+  }, [
+    asset?.id,
+    asset?.assigned_customer,
+    asset?.customer_name,
+    asset?.customer_uuid,
+    asset?.barcode_number,
+    customers.length,
     profile?.organization_id,
   ]);
 
@@ -642,7 +700,14 @@ export default function AssetDetail() {
     if (asset?.barcode_number || asset?.serial_number) {
       fetchMovementHistory();
     }
-  }, [asset?.barcode_number, asset?.serial_number, profile?.organization_id]);
+  }, [
+    asset?.barcode_number,
+    asset?.serial_number,
+    asset?.assigned_customer,
+    asset?.customer_name,
+    asset?.status,
+    profile?.organization_id,
+  ]);
 
   // Fetch customer data when assignment id or display name changes (name-only legacy rows)
   useEffect(() => {
@@ -1186,6 +1251,20 @@ export default function AssetDetail() {
         .eq('organization_id', profile.organization_id);
 
       if (error) throw error;
+
+      if (assignmentChanged && !nextAssign) {
+        try {
+          const closed = await closeOpenRentalsForBottle(supabase, profile.organization_id, {
+            bottleId: bottleRowId,
+            barcode: updateData.barcode_number || asset.barcode_number,
+          });
+          if (closed > 0) {
+            subscriptionCtx?.refreshSilent?.();
+          }
+        } catch (rentalCloseError) {
+          logger.warn('Close rentals after manual unassign:', rentalCloseError);
+        }
+      }
 
       const fieldChanges = buildBottleFieldChanges(asset, updateData);
       if (Object.keys(fieldChanges).length > 0) {
