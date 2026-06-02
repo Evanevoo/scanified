@@ -3914,7 +3914,9 @@ export default function CustomerDetail() {
                         <Typography component="span" color="text.secondary" fontWeight={500}>{asset.barcode_number || 'DNS'}</Typography>
                       ) : asset.barcode_number ? (
                         <Link
-                          to={`/bottle/${asset.id}`}
+                          to={`/bottle/${asset.id}?fromCustomer=${encodeURIComponent(
+                            customer?.CustomerListID || customer?.id || ''
+                          )}`}
                           style={{ color: '#1976d2', textDecoration: 'underline', cursor: 'pointer' }}
                         >
                           {asset.barcode_number}

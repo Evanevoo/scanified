@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Stack,
@@ -328,6 +328,8 @@ const getAuditFieldChangeDisplay = (auditDetails, fieldName, fallbackValue) => {
 export default function AssetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fromCustomerRouteHint = String(searchParams.get('fromCustomer') || '').trim();
   const { profile, organization } = useAuth();
   const subscriptionCtx = useSubscriptions();
   const organizationId = organization?.id || profile?.organization_id || null;
@@ -469,69 +471,10 @@ export default function AssetDetail() {
     return persistedStatusForOwnership(raw, asset?.ownership);
   }, [movementHistory, asset?.status, asset?.ownership, customers]);
 
+  // Never auto-unassign on page load — opening a barcode from Customer Detail was clearing valid assignments.
   useEffect(() => {
-    const clearStaleCustomerAssignment = async () => {
-      if (!asset?.id || !profile?.organization_id || !customers.length) return;
-      if (!bottleHasStaleCustomerAssignment(asset, customers)) return;
-
-      const repairKey = `stale-customer|${asset.id}|${staleBottleCustomerLabel(asset)}`;
-      if (staleClearRepairKeyRef.current === repairKey) return;
-      staleClearRepairKeyRef.current = repairKey;
-
-      const priorStatus = normalizeStatus(asset?.status);
-      const updateData = {
-        assigned_customer: null,
-        customer_name: null,
-        customer_uuid: null,
-        days_at_location: 0,
-        status: priorStatus === 'rented' ? 'empty' : priorStatus,
-      };
-
-      const { error: clearError } = await supabase
-        .from('bottles')
-        .update(updateData)
-        .eq('id', asset.id)
-        .eq('organization_id', profile.organization_id);
-
-      if (clearError) {
-        logger.warn('Clear stale customer assignment failed:', clearError);
-        return;
-      }
-
-      const updatedAsset = { ...asset, ...updateData, customer_id: null };
-      setAsset(updatedAsset);
-      setCustomerData(null);
-
-      try {
-        const closed = await closeOpenRentalsForBottle(supabase, profile.organization_id, {
-          bottleId: asset.id,
-          barcode: asset.barcode_number,
-        });
-        if (closed > 0) {
-          subscriptionCtx?.refreshSilent?.();
-        }
-      } catch (rentalCloseError) {
-        logger.warn('Close rentals after stale customer clear:', rentalCloseError);
-      }
-
-      await fetchMovementHistory(updatedAsset);
-
-      setSuccess(
-        `Cleared assignment to removed customer "${staleBottleCustomerLabel(asset)}". Status set to ${updateData.status}.`
-      );
-    };
-
-    void clearStaleCustomerAssignment();
-  }, [
-    asset?.id,
-    asset?.assigned_customer,
-    asset?.customer_name,
-    asset?.customer_uuid,
-    asset?.customer_id,
-    asset?.status,
-    customers,
-    profile?.organization_id,
-  ]);
+    staleClearRepairKeyRef.current = null;
+  }, [asset?.id]);
 
   // Bottles cleared in inventory but still billing (e.g. stale-customer repair before rental close).
   useEffect(() => {
@@ -582,6 +525,8 @@ export default function AssetDetail() {
       const nextId = String(effectiveAssignedCustomerId || '').trim();
       const nextName = String(effectiveAssignedCustomerName || '').trim();
       if (!isActiveCustomerAssignment(nextId, nextName, customers)) return;
+      // Do not auto-clear renter from timeline replay when the bottle row still has a customer (import assign, etc.).
+      if (!nextId && !nextName && (currentId || currentName)) return;
       const currentStatus = normalizeStatus(asset?.status);
       const needsRepair = currentId !== nextId || currentName !== nextName || currentStatus !== effectiveStatus;
       if (!needsRepair) return;
@@ -831,7 +776,33 @@ export default function AssetDetail() {
         .limit(1000);
 
       if (error) throw error;
-      setCustomers((data || []).filter(isAssignableCustomer));
+      let directory = (data || []).filter(isAssignableCustomer);
+
+      if (fromCustomerRouteHint) {
+        const hint = fromCustomerRouteHint;
+        const inSlice = directory.some(
+          (c) =>
+            String(c.CustomerListID || '').trim() === hint ||
+            String(c.id || '').trim() === hint
+        );
+        if (!inSlice) {
+          let extraQuery = supabase
+            .from('customers')
+            .select(CUSTOMER_ASSIGN_SELECT)
+            .eq('organization_id', organizationId);
+          if (UUID_RE.test(hint)) {
+            extraQuery = extraQuery.eq('id', hint);
+          } else {
+            extraQuery = extraQuery.eq('CustomerListID', hint);
+          }
+          const { data: extra } = await extraQuery.maybeSingle();
+          if (extra && isAssignableCustomer(extra)) {
+            directory = [...directory, extra];
+          }
+        }
+      }
+
+      setCustomers(directory);
     } catch (error) {
       logger.error('Error fetching customers:', error);
       setCustomers([]);
@@ -1583,8 +1554,9 @@ export default function AssetDetail() {
             )}
             {staleCustomerAssignment && (
               <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1, maxWidth: 520 }}>
-                This asset still referenced removed customer &quot;{staleBottleCustomerLabel(asset)}&quot; (deleted from
-                the directory). Clearing stale assignment… or use Edit to assign a current customer.
+                This asset references &quot;{staleBottleCustomerLabel(asset)}&quot;, which does not match an active
+                customer in your directory (deleted, inactive, renamed, or ID mismatch). Use Edit to assign the correct
+                customer — assignments are not changed automatically when you open this page.
               </Typography>
             )}
             {effectiveStatus === 'rented' && !hasActiveCustomerAssignment && !staleCustomerAssignment && (

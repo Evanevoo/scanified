@@ -107,6 +107,7 @@ async function assignShippedBottlesWithCustomerListId({
   const order = orderNumber != null ? String(orderNumber).trim() : '';
   let shipped = 0;
   const errors = [];
+  const skipped = [];
 
   for (const rawBc of shipBarcodes || []) {
     const barcode = String(rawBc || '').trim();
@@ -122,6 +123,7 @@ async function assignShippedBottlesWithCustomerListId({
     const current = String(bottle.assigned_customer || bottle.customer_name || '').trim();
     const isAtHome = !current;
     if (!isAtHome) {
+      skipped.push(`${barcode}: already assigned (${current})`);
       continue;
     }
 
@@ -184,15 +186,25 @@ async function assignShippedBottlesWithCustomerListId({
     }
   }
 
-  if (errors.length && shipped === 0) {
-    return { success: false, error: errors.join('; ') };
+  const warnings = [...errors, ...skipped];
+  const requested = (shipBarcodes || []).filter((b) => String(b || '').trim()).length;
+
+  if (shipped === 0 && requested > 0) {
+    return {
+      success: false,
+      error:
+        warnings.length > 0
+          ? warnings.join('; ')
+          : 'No bottles were assigned. Check barcodes and customer CustomerListID.',
+      data: { shipped: 0, skipped: skipped.length, fallback: 'direct_ship_customer_list_id' },
+    };
   }
   return {
     success: true,
     data: {
       shipped,
       fallback: 'direct_ship_customer_list_id',
-      warnings: errors.length ? errors : undefined,
+      warnings: warnings.length ? warnings : undefined,
     },
   };
 }
