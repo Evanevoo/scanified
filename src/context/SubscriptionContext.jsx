@@ -16,6 +16,7 @@ import {
   computeMRRWithResolution,
   defaultUnitRatesFromAssetPricingTable,
 } from '../services/pricingResolution';
+import { backfillOpenRentalsForAssignedBottles } from '../services/backfillOpenRentalsForAssignedBottles';
 
 const SubscriptionContext = createContext(null);
 
@@ -182,6 +183,31 @@ export function SubscriptionProvider({ children }) {
         if (res.error) throw res.error;
       }
 
+      const bottlesList = (bottlesRes.data || []).map((b) => ({
+        ...b,
+        customer_id: b.customer_id || b.customer_uuid || b.assigned_customer || null,
+      }));
+      let openRentalsList = rentalsRes.data || [];
+
+      const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
+        supabase,
+        orgId,
+        {
+          bottles: bottlesList,
+          openRentals: openRentalsList,
+          customers: custRes.data || [],
+        },
+      );
+      if (backfillInserted > 0) {
+        const refetchRentals = await safe(
+          'rentals',
+          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+        );
+        if (!refetchRentals.error && refetchRentals.data) {
+          openRentalsList = refetchRentals.data;
+        }
+      }
+
       setSubscriptions(subsRes.data || []);
       setSubscriptionItems(itemsRes.data || []);
       setAssetTypePricing(pricingRes.data || []);
@@ -190,11 +216,8 @@ export function SubscriptionProvider({ children }) {
       setInvoices(invoicesRes.data || []);
       setPayments(paymentsRes.data || []);
       setCustomers(custRes.data || []);
-      setBottles((bottlesRes.data || []).map((b) => ({
-        ...b,
-        customer_id: b.customer_id || b.customer_uuid || b.assigned_customer || null,
-      })));
-      setOpenRentals(rentalsRes.data || []);
+      setBottles(bottlesList);
+      setOpenRentals(openRentalsList);
       setLeaseContracts(leaseRes.data || []);
       setLeaseContractItems(leaseItemsRes.data || []);
 
