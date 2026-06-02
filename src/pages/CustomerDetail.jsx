@@ -104,23 +104,7 @@ import { normalizePricingKey } from '../services/pricingResolution';
  * (that misreads as "rental started today"). Prefer explicit bottle rental date, then record creation,
  * then last location touch, then today.
  */
-function inferRentalStartDateFromBottle(bottle) {
-  const toYmd = (v) => {
-    if (v == null || v === '') return '';
-    const s = String(v).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    const ms = Date.parse(s);
-    return Number.isNaN(ms) ? '' : new Date(ms).toISOString().slice(0, 10);
-  };
-  return (
-    toYmd(bottle?.rental_start_date) ||
-    toYmd(bottle?.created_at) ||
-    toYmd(bottle?.last_location_update) ||
-    toYmd(new Date().toISOString())
-  );
-}
-
-/** Prefer customer branch from Locations / customers.location; bottle.location is warehouse routing (e.g. Saskatoon). */
+import { backfillOpenRentalsForAssignedBottles } from '../services/backfillOpenRentalsForAssignedBottles';
 function displayRentalRowLocation(rental, bottle, customer) {
   const pick = (v) => (v == null ? '' : String(v).trim());
   for (const raw of [
@@ -1134,43 +1118,17 @@ export default function CustomerDetail() {
           customerData.id,
           subsidiaryCustomerRows
         );
-        // Backfill: assigned bottles with no rental record (e.g. assigned before rental creation was enforced)
-        const bottleIdsWithRental = new Set(merged.map(r => r.bottle_id).filter(Boolean));
-        const barcodesWithRental = new Set(merged.map(r => r.bottle_barcode).filter(Boolean));
-        const bottlesWithoutRental = (customerAssetsData || []).filter((b) => {
-          if (isCustomerOwnedForBilling(b)) return false;
-          const hasById = b.id && bottleIdsWithRental.has(b.id);
-          const barcode = b.barcode_number || b.barcode;
-          const hasByBarcode = barcode && barcodesWithRental.has(barcode);
-          return !hasById && !hasByBarcode;
-        });
+        const { inserted: backfilledRentalsInserted } = await backfillOpenRentalsForAssignedBottles(
+          supabase,
+          orgId,
+          {
+            bottles: customerAssetsData || [],
+            openRentals: merged,
+            customers: [customerData, ...(subsidiaryCustomerRows || [])],
+          },
+        );
         let openRentalsFinal = merged?.length ?? 0;
-        let backfilledRentalsInserted = 0;
-        if (bottlesWithoutRental.length > 0) {
-          const pricingCtx = await fetchOrgRentalPricingContext(supabase, customerData.organization_id);
-          for (const bottle of bottlesWithoutRental) {
-            const barcode = bottle.barcode_number || bottle.barcode;
-            const rentCustomerId = String(bottle.assigned_customer || '').trim() || customerData.CustomerListID;
-            const rentCustomerName = String(bottle.customer_name || '').trim() || customerData.name;
-            const pricingKey = rentCustomerId || customerData.CustomerListID;
-            const rental_amount = monthlyRateForNewRental(pricingKey, bottle, pricingCtx);
-            await supabase.from('rentals').insert({
-              organization_id: customerData.organization_id,
-              customer_id: rentCustomerId,
-              customer_name: rentCustomerName,
-              bottle_id: bottle.id,
-              bottle_barcode: barcode,
-              rental_start_date: inferRentalStartDateFromBottle(bottle),
-              rental_end_date: null,
-              rental_amount,
-              rental_type: 'monthly',
-              tax_rate: 0.11,
-              location: bottle.location || 'SASKATOON',
-              status: 'active',
-              is_dns: false,
-            });
-          }
-          backfilledRentalsInserted = bottlesWithoutRental.length;
+        if (backfilledRentalsInserted > 0) {
           const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
@@ -1180,6 +1138,9 @@ export default function CustomerDetail() {
           );
           openRentalsFinal = mergedAfterBackfill?.length ?? 0;
           setLocationAssets(mergedAfterBackfill);
+          if (typeof subscriptionCtx?.refreshSilent === 'function') {
+            subscriptionCtx.refreshSilent();
+          }
         } else {
           setLocationAssets(merged);
         }
