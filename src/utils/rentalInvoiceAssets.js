@@ -3,6 +3,7 @@
  * (same spirit as CustomerDetail / billing) so DNS-only and timing gaps still appear.
  */
 
+import { fetchLatestReturnScanDatesByBarcode } from '../services/returnScanEndDate';
 import {
   bottleDisplayProductLabel,
   buildBottleLookupMaps,
@@ -215,27 +216,43 @@ export async function fetchReturnsInInvoicePeriod(supabase, organizationId, row,
 }
 
 async function enrichReturnsWithBottleDetails(supabase, organizationId, returnsRows) {
+  if (!returnsRows?.length) return returnsRows || [];
+
   const ids = [...new Set(returnsRows.map((r) => r.bottle_id).filter(Boolean))];
-  if (ids.length === 0) return returnsRows;
+  let byId = new Map();
+  if (ids.length > 0) {
+    const { data: bottleRows, error } = await supabase
+      .from('bottles')
+      .select('id, serial_number, cylinder_number, barcode_number, barcode, delivery_date, purchase_date, rental_start_date')
+      .eq('organization_id', organizationId)
+      .in('id', ids);
 
-  const { data: bottleRows, error } = await supabase
-    .from('bottles')
-    .select('id, serial_number, cylinder_number, barcode_number, barcode, delivery_date, purchase_date, rental_start_date')
-    .eq('organization_id', organizationId)
-    .in('id', ids);
+    if (!error && bottleRows) {
+      byId = new Map((bottleRows || []).map((b) => [String(b.id), b]));
+    }
+  }
 
-  if (error) return returnsRows;
+  const barcodes = returnsRows
+    .map((r) => {
+      const b = r.bottle_id != null ? byId.get(String(r.bottle_id)) : null;
+      return r.bottle_barcode || b?.barcode_number || b?.barcode || null;
+    })
+    .filter(Boolean);
 
-  const byId = new Map((bottleRows || []).map((b) => [String(b.id), b]));
+  const scanDates = await fetchLatestReturnScanDatesByBarcode(supabase, organizationId, barcodes);
 
   return returnsRows.map((r) => {
     const b = r.bottle_id != null ? byId.get(String(r.bottle_id)) : null;
+    const barcode = r.bottle_barcode || b?.barcode_number || b?.barcode || null;
+    const normBc = barcode ? String(barcode).replace(/^0+/, '') || '0' : '';
+    const returnScanDate = normBc ? scanDates.get(normBc) || null : null;
     const deliveredDate = r.rental_start_date || b?.rental_start_date || b?.delivery_date || b?.purchase_date || null;
     return {
       ...r,
       rental_start_date: deliveredDate,
+      returnScanDate,
       _serial_display: b?.serial_number || b?.cylinder_number || null,
-      _barcode_display: r.bottle_barcode || b?.barcode_number || b?.barcode || null,
+      _barcode_display: barcode,
     };
   });
 }

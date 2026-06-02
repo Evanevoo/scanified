@@ -132,7 +132,7 @@ function inclusiveDaysBetweenYmd(startYmd, endYmd) {
  * Inclusive days a unit was on rent within billing period [ps, pe].
  * @param {string|null|undefined} returnYmdOrNull - rental end; omit when still on rent through period end
  */
-function daysHeldInBillingPeriod(deliveryYmd, returnYmdOrNull, ps, pe) {
+export function daysHeldInBillingPeriod(deliveryYmd, returnYmdOrNull, ps, pe) {
   const del = clipYmd(deliveryYmd);
   if (!del || !ps || !pe) return null;
   const periodStart = del > ps ? del : ps;
@@ -159,7 +159,8 @@ export function averageBillableDaysForInvoiceLine(line, ps, pe, inPeriodBottles,
 
   for (const r of returnsInPeriod || []) {
     if (!returnMatchesLineItem(r, line)) continue;
-    const days = daysHeldInBillingPeriod(r.rental_start_date, r.rental_end_date, ps, pe);
+    const endForDays = r.returnScanDate || r.rental_end_date;
+    const days = daysHeldInBillingPeriod(r.rental_start_date, endForDays, ps, pe);
     if (days != null && days > 0) samples.push(days);
   }
 
@@ -200,7 +201,7 @@ function lineQuantityForInvoice(line) {
  * - Does NOT match when the line is more specific than the asset (box300-16pk line ⊄ box300 return),
  *   so parent-tier returns/shipments are not rolled into pack-size lines (fixes SHIP/RTN columns).
  */
-function assetCodeMatchesInvoiceLineKey(assetNorm, lineKeyNorm) {
+export function assetCodeMatchesInvoiceLineKey(assetNorm, lineKeyNorm) {
   if (!assetNorm || !lineKeyNorm) return false;
   if (assetNorm === lineKeyNorm) return true;
   if (assetNorm.startsWith(`${lineKeyNorm}-`)) return true;
@@ -244,10 +245,45 @@ function returnMatchesLineItem(r, line) {
   return false;
 }
 
+function resolveMovementFromCustomerHistoryMap(line, movementByLineKey) {
+  if (!movementByLineKey?.size) return null;
+  const keys = lineProductKeys(line);
+  for (const key of keys) {
+    if (movementByLineKey.has(key)) return movementByLineKey.get(key);
+    for (const [mapKey, val] of movementByLineKey.entries()) {
+      if (assetCodeMatchesInvoiceLineKey(key, mapKey) || assetCodeMatchesInvoiceLineKey(mapKey, key)) {
+        return val;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * SHIP/RTN/END per product line; falls back to invoice-level totals only for a single generic line.
  */
-function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, globalShip, globalRtn, globalOnHand, lineCount) {
+export function movementCountsForLine(
+  line,
+  ps,
+  pe,
+  inPeriodBottles,
+  returnsInPeriod,
+  globalShip,
+  globalRtn,
+  globalOnHand,
+  lineCount,
+  movementByLineKey = null,
+) {
+  const crhHit = resolveMovementFromCustomerHistoryMap(line, movementByLineKey);
+  if (crhHit) {
+    const q = lineQuantityForInvoice(line);
+    return {
+      ship: crhHit.ship,
+      rtn: crhHit.rtn,
+      end: q > 0 ? q : crhHit.end,
+    };
+  }
+
   const shipN = inPeriodBottles.filter((b) => {
     if (!bottleMatchesLineItem(b, line)) return false;
     const d = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);
@@ -269,10 +305,9 @@ function movementCountsForLine(line, ps, pe, inPeriodBottles, returnsInPeriod, g
     return { ship: globalShip, rtn: globalRtn, end: globalOnHand };
   }
   const q = lineQuantityForInvoice(line);
-  // Per-SKU billed lines: STRT column = billed qty (see row renderer). END must match so the grid
-  // reflects the same units as line TOTAL / subtotal (serialized on-hand counts can exceed billed SKUs).
+  // Per-SKU billed lines: STRT/END = billed qty; SHIP/RTN show observed movement in period.
   if (q > 0) {
-    return { ship: 0, rtn: 0, end: q };
+    return { ship: shipN, rtn: rtnN, end: q };
   }
   const anyBottleMatch = inPeriodBottles.some((b) => bottleMatchesLineItem(b, line));
   const endOut = endN > 0 ? endN : (!anyBottleMatch && q > 0 ? q : endN);
@@ -313,6 +348,7 @@ function daysBetween(startIso, endIso) {
  * @param {string} [params.purchaseOrder]
  * @param {Array<object>} params.bottles - on-hand serialized rows (merged bottles + open rentals)
  * @param {Array<object>} [params.returnsInPeriod] - closed rentals whose rental_end_date falls in invoice period
+ * @param {Map<string,{ship:number,rtn:number,end:number,start?:number}>} [params.movementByLineKey] - CRH-derived SHIP/RTN per product key
  * @param {string} [params.invoiceNumber]
  * @param {(n:number)=>string} [params.formatCurrency] - optional UI formatter
  */
@@ -332,6 +368,7 @@ export async function createRentalInvoicePdfDoc(params) {
     purchaseOrder = '—',
     bottles = [],
     returnsInPeriod = [],
+    movementByLineKey = null,
     invoiceNumber,
     formatCurrency = formatMoney,
   } = params;
@@ -700,7 +737,8 @@ export async function createRentalInvoicePdfDoc(params) {
       shipCount,
       rtnCount,
       onHandCount,
-      lineCount
+      lineCount,
+      movementByLineKey,
     );
     drawCenteredInBand(qtyLabel, colStart, wStrt, y);
     drawCenteredInBand(ship, colShip, wShip, y);
@@ -727,7 +765,16 @@ export async function createRentalInvoicePdfDoc(params) {
   doc.rect(tableLeft, summaryTableTop, tableW, y - summaryTableTop, 'S');
   doc.setLineWidth(0.2);
 
-  y += 6;
+  y += 3;
+  doc.setFontSize(5.5);
+  doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
+  doc.text(
+    'STRT/END = billed quantity; SHIP/RTN = units moved in period; DAYS = average billable days in period.',
+    left,
+    y,
+    { maxWidth: contentW },
+  );
+  y += 5;
   doc.setDrawColor(220, 220, 220);
   doc.line(totalsX0, y, right, y);
   y += 5;
@@ -837,6 +884,16 @@ export async function createRentalInvoicePdfDoc(params) {
       doc.text(daysAtLoc, aDays, y);
       y += h;
     });
+    y += 2;
+    doc.setFontSize(5.5);
+    doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
+    doc.text(
+      'DAYS@LOC = days at current location (tenure), not billable days in the invoice period.',
+      left,
+      y,
+      { maxWidth: contentW },
+    );
+    y += 4;
   }
 
   // --- Returns closed during invoice period ---
@@ -853,7 +910,7 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.setFontSize(7);
     doc.setTextColor(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
     doc.text(
-      `Assets returned between ${formatUsDate(period?.start)} and ${formatUsDate(period?.end)}.`,
+      `Return date prefers scan date when available. DAYS IN PERIOD = billable days clipped to ${formatUsDate(period?.start)}–${formatUsDate(period?.end)}.`,
       left,
       y,
       { maxWidth: contentW }
@@ -875,7 +932,7 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.setFontSize(5.5);
     doc.text('RETURN DATE', r1, y);
     doc.text('DELIVERED', r2, y);
-    doc.text('DAYS OUT', r3, y);
+    doc.text('DAYS IN PD', r3, y);
     doc.text('BARCODE', r4, y);
     doc.text('SERIAL', r5, y);
     doc.text('ASSET TYPE', r6, y);
@@ -884,11 +941,13 @@ export async function createRentalInvoicePdfDoc(params) {
     doc.setTextColor(35, 35, 35);
 
     returns.forEach((r) => {
-      const retDate = r.rental_end_date;
+      const retDate = r.returnScanDate || r.rental_end_date;
       const del = r.rental_start_date;
-      const daysOut = inclusiveDaysBetweenYmd(
+      const daysInPeriod = daysHeldInBillingPeriod(
         del ? String(del).slice(0, 10) : null,
-        retDate ? String(retDate).slice(0, 10) : null
+        retDate ? String(retDate).slice(0, 10) : null,
+        ps,
+        pe,
       );
       const barcode = r._barcode_display || r.bottle_barcode || '—';
       const serial = r._serial_display || r.serial_number || '—';
@@ -899,7 +958,7 @@ export async function createRentalInvoicePdfDoc(params) {
       y = ensureY(y, rowH + 2);
       doc.text(formatUsDate(retDate), r1, y);
       doc.text(del ? formatUsDate(del) : '—', r2, y);
-      doc.text(daysOut != null ? String(daysOut) : '—', r3, y);
+      doc.text(daysInPeriod != null ? String(daysInPeriod) : '—', r3, y);
       doc.text(String(barcode), r4, y);
       doc.text(String(serial), r5, y);
       doc.text(typeLines, r6, y);

@@ -20,6 +20,7 @@ import {
   stripRemitInstructionsFromInvoiceEmailBody,
 } from '../utils/invoiceEmailTemplateVars';
 import { logInvoiceEmailSend } from '../services/invoiceEmailHistory';
+import { buildMovementByLineKeyFromCustomerHistory } from '../services/rentalMovementForPeriod';
 import {
   buildOpenAssetRowsForInvoice,
   fetchReturnsInInvoicePeriod,
@@ -45,6 +46,7 @@ import {
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
   isDnsRentalExcludedFromBillableCount,
+  isRentalOpen,
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
 import {
@@ -62,7 +64,7 @@ import {
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip,
   Button, TextField, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
-  Select, MenuItem, Alert, TablePagination, IconButton, Menu,
+  Select, MenuItem, Alert, TablePagination, Menu,
 } from '@mui/material';
 import { MoreVert } from '@mui/icons-material';
 import {
@@ -128,20 +130,36 @@ function subscriptionMatchKeyForInvoiceRow(row, customerRecord) {
   );
 }
 
-function classifyInvoiceTermsForExport(paymentTermsRaw) {
-  const t = String(paymentTermsRaw || '').trim().toLowerCase();
-  if (!t) return 'unknown';
-  if (t.includes('net') && t.includes('30')) return 'net30';
-  if (isCreditCardPaymentTerm(t)) return 'credit_card';
-  return 'other';
+function rowMatchesTermsFilter(row, filter) {
+  if (filter === 'all') return true;
+  const terms = String(row.customer?.payment_terms || '').trim().toLowerCase();
+  if (filter === 'net30') return terms.includes('net') && terms.includes('30');
+  if (filter === 'credit_card') return isCreditCardPaymentTerm(terms);
+  if (filter === 'other') {
+    if (!terms) return true;
+    const isNet30 = terms.includes('net') && terms.includes('30');
+    const isCreditCard = isCreditCardPaymentTerm(terms);
+    return !isNet30 && !isCreditCard;
+  }
+  return true;
 }
 
-function rowMatchesMonthlyQbCohort(row, cohort) {
-  if (cohort === 'all') return true;
-  const cat = classifyInvoiceTermsForExport(row.customer?.payment_terms);
-  if (cohort === 'net30') return cat === 'net30';
-  if (cohort === 'credit_card') return cat === 'credit_card';
-  return true;
+/** Deduped open-rental unit count — same basis as Customer Detail rental history header. */
+function billableItemCountForRentalRow(row, openRentals) {
+  const customer = row?.customer || {};
+  const customerListId = String(
+    row.customer_id || customer.CustomerListID || customer.id || '',
+  ).trim();
+  const customerName = String(customer.name || customer.Name || '').trim();
+  const customerPkId = String(customer.id || '').trim();
+  const merged = mergeOpenRentalsForBillingBasis(
+    (openRentals || []).filter(isRentalOpen),
+    {
+    customerListId,
+    customerName,
+    customerPkId,
+  });
+  return merged.filter((r) => !isDnsRentalExcludedFromBillableCount(r)).length;
 }
 
 /** Maps DB/UI aliases so period tabs stay consistent (e.g. annual → yearly). */
@@ -267,9 +285,10 @@ function RentalRowActionsMenu({ items, onAction, disabled, buttonLabel = 'Action
           e.stopPropagation();
           setAnchorEl(e.currentTarget);
         }}
-        sx={{ textTransform: 'none', fontWeight: 600, fontSize: '0.75rem', py: 0.35, minWidth: 0 }}
+        sx={{ textTransform: 'none', fontWeight: 600, fontSize: '0.75rem', py: 0.35, minWidth: 0, px: 1 }}
       >
-        {buttonLabel}
+        <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Bill</Box>
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{buttonLabel}</Box>
       </Button>
       <Menu
         anchorEl={anchorEl}
@@ -329,9 +348,10 @@ const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchFie
 
   return (
     <Box
-      sx={{
-        ml: 'auto',
-        minWidth: 240,
+        sx={{
+        width: { xs: '100%', sm: 280 },
+        minWidth: 0,
+        flex: { sm: '1 1 auto' },
         display: 'flex',
         alignItems: 'center',
         gap: 1,
@@ -387,8 +407,6 @@ export default function Subscriptions() {
     if (active && typeof active.blur === 'function') active.blur();
   }, []);
   const [termsFilter, setTermsFilter] = useState('all');
-  /** Monthly QuickBooks CSV: all | net30 | credit_card */
-  const [monthlyQbCohort, setMonthlyQbCohort] = useState('all');
   /** QuickBooks CSV / invoice PDF: `live` = same totals as table (default). `YYYY-MM` = counts/pricing as of that month-end. */
   const [qbCsvBillingMonth, setQbCsvBillingMonth] = useState(() => 'live');
   const qbCsvMonthMenuOptions = useMemo(() => {
@@ -911,7 +929,20 @@ export default function Subscriptions() {
           customer,
           { allCustomers: billingData.customers },
         );
-        const groups = groupsRaw;
+        const basisRow = { ...sub, customer, customer_id: sub.customer_id };
+        const basisCount = billableItemCountForRentalRow(basisRow, billingData.rentals);
+        const mergedBasis = mergeOpenRentalsForBillingBasis(
+          (billingData.rentals || []).filter(isRentalOpen),
+          {
+            customerListId: String(
+              sub.customer_id || customer?.CustomerListID || customer?.id || '',
+            ).trim(),
+            customerName: String(customer?.name || customer?.Name || '').trim(),
+            customerPkId: String(customer?.id || '').trim(),
+          },
+        );
+        const basisGroups = summarizeMergedOpenRentalsByProduct(mergedBasis, billingData.bottles);
+        const groups = basisCount > 0 && basisGroups.length > 0 ? basisGroups : groupsRaw;
         totalPerCycle = computeSubscriptionBillingCycleTotal(
           { ...sub, billing_period: effectiveBillingPeriod },
           customer,
@@ -922,7 +953,9 @@ export default function Subscriptions() {
             ...(groups.length > 0 ? { precomputedGroups: groups } : {}),
           },
         );
-        itemCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+        itemCount = basisCount > 0
+          ? basisCount
+          : groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
         if (groups.length > 0) {
           productCounts = {};
           for (const g of groups) {
@@ -1148,8 +1181,9 @@ export default function Subscriptions() {
             bottleIdentifiers: [],
             bottleIds: [],
             productCounts: {},
+            rentalRows: [],
           };
-          cur.itemCount += 1;
+          cur.rentalRows.push(row);
           cur.totalPerCycle += parseFloat(row.rental_amount) || 0;
           const bottleLabel = String(row.bottle_barcode || row.bottle_id || '').trim();
           if (bottleLabel) cur.bottleIdentifiers.push(bottleLabel);
@@ -1171,12 +1205,16 @@ export default function Subscriptions() {
           ),
           parentNameById
         );
+        const basisCount = billableItemCountForRentalRow(
+          { customer: mergedCustomer, customer_id: g.customer_id },
+          ctx.rentals,
+        );
         return {
           id: `legacy-${g.key}`,
           customer: mergedCustomer,
           customer_id: g.customer_id || g.customer_name,
           billing_period: g.billing_period,
-          itemCount: g.itemCount,
+          itemCount: basisCount > 0 ? basisCount : (g.rentalRows || []).length,
           totalPerCycle: g.totalPerCycle,
           bottleIdentifiers: g.bottleIdentifiers || [],
           bottleIds: g.bottleIds || [],
@@ -1254,9 +1292,6 @@ export default function Subscriptions() {
     const legacyTotalsByCustomer = new Map(
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.totalPerCycle) || 0])
     );
-    const legacyCountsByCustomer = new Map(
-      (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), parseFloat(r.itemCount) || 0])
-    );
     const legacyProductCountsByCustomer = new Map(
       (legacyRows || []).map((r) => [normalize(r.customer_id || r.customer?.name), r.productCounts || null])
     );
@@ -1322,15 +1357,20 @@ export default function Subscriptions() {
         ...leaseCoverNameKeys.map((k) => leaseCoveredCountByCustomerKey.get(k) || 0),
         0,
       );
-      if (row.isVirtual) {
-        const legacyCount = legacyCountsByCustomer.get(customerKey) || 0;
-        if (legacyCount > computedItemCount) computedItemCount = legacyCount;
-        if (!effectiveProductCounts) {
-          const legacyMix = legacyProductCountsByCustomer.get(customerKey);
-          if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
-            effectiveProductCounts = legacyMix;
-          }
+      if (row.isVirtual && !effectiveProductCounts) {
+        const legacyMix = legacyProductCountsByCustomer.get(customerKey);
+        if (legacyMix && typeof legacyMix === 'object' && Object.keys(legacyMix).length > 0) {
+          effectiveProductCounts = legacyMix;
         }
+      }
+
+      if (
+        !preserveLeaseContractTotal &&
+        canonicalBillingPeriod(row.billing_period) === 'monthly' &&
+        String(row.customer?.billing_mode || '').toLowerCase() !== 'lease'
+      ) {
+        const basisCount = billableItemCountForRentalRow(row, ctx.rentals);
+        if (basisCount > 0) computedItemCount = basisCount;
       }
 
       // For legacy virtual rows, derive product mix from linked bottle ids first.
@@ -1487,6 +1527,18 @@ export default function Subscriptions() {
       }
 
       if (fullyLeaseCoveredRentalRow) return null;
+      if (
+        effectiveProductCounts
+        && typeof effectiveProductCounts === 'object'
+        && shouldApplyLeaseCoverageToMonthly
+        && leaseCoveredUnits > 0
+      ) {
+        const mixSum = Object.values(effectiveProductCounts).reduce(
+          (s, n) => s + (parseFloat(n) || 0),
+          0,
+        );
+        computedItemCount = mixSum;
+      }
       return { ...row, itemCount: computedItemCount, ...(effectiveProductCounts ? { productCounts: effectiveProductCounts } : {}), totalPerCycle: total };
     }).filter(Boolean).filter((row) => canonicalBillingPeriod(row.billing_period) !== 'yearly');
   }, [
@@ -1563,18 +1615,7 @@ export default function Subscriptions() {
     let list = allRows;
 
     if (termsFilter !== 'all') {
-      list = list.filter((s) => {
-        const terms = String(s.customer?.payment_terms || '').trim().toLowerCase();
-        if (termsFilter === 'net30') return terms.includes('net') && terms.includes('30');
-        if (termsFilter === 'credit_card') return isCreditCardPaymentTerm(terms);
-        if (termsFilter === 'other') {
-          if (!terms) return true;
-          const isNet30 = terms.includes('net') && terms.includes('30');
-          const isCreditCard = isCreditCardPaymentTerm(terms);
-          return !isNet30 && !isCreditCard;
-        }
-        return true;
-      });
+      list = list.filter((s) => rowMatchesTermsFilter(s, termsFilter));
     }
 
     if (debouncedSearch.trim()) {
@@ -1851,7 +1892,7 @@ export default function Subscriptions() {
 
     let rows = base.filter((r) => String(r.billing_period || 'monthly').toLowerCase() === period);
     if (period === 'monthly' && cohort !== 'all') {
-      rows = rows.filter((r) => rowMatchesMonthlyQbCohort(r, cohort));
+      rows = rows.filter((r) => rowMatchesTermsFilter(r, cohort));
     }
 
     let csvOptions = { filePrefix: `quickbooks_invoices_${period}` };
@@ -2027,7 +2068,9 @@ export default function Subscriptions() {
             ? ' (NET 30 terms only — check customer payment terms on import)'
             : period === 'monthly' && cohort === 'credit_card'
               ? ' (credit card terms, including COD aliases)'
-              : '';
+              : period === 'monthly' && cohort === 'other'
+                ? ' (other / unset payment terms only)'
+                : '';
         const snapHint =
           qbCsvBillingMonth !== 'live'
             ? ' For a past month, no rows had billable units on that month-end (or filters exclude everyone).'
@@ -2041,7 +2084,9 @@ export default function Subscriptions() {
           ? '_net30'
           : period === 'monthly' && cohort === 'credit_card'
             ? '_creditcard'
-            : '';
+            : period === 'monthly' && cohort === 'other'
+              ? '_other'
+              : '';
       const monthTag = qbCsvBillingMonth === 'live' ? 'live' : qbCsvBillingMonth;
       const rowsWithInvoiceNumbers = await attachInvoiceNumbersToExportRows(
         supabase,
@@ -2059,7 +2104,9 @@ export default function Subscriptions() {
           ? ', NET 30 customers only'
           : period === 'monthly' && cohort === 'credit_card'
             ? ', credit card customers only (includes COD)'
-            : '';
+            : period === 'monthly' && cohort === 'other'
+              ? ', other payment terms only'
+              : '';
       const monthLabel =
         qbCsvBillingMonth === 'live'
           ? 'current cycle dates, live counts'
@@ -2716,6 +2763,21 @@ export default function Subscriptions() {
       throw new Error('Invoice number is required. Run Prep # or use Edit Inv # before exporting.');
     }
     const poForPdf = String(customerRecord?.purchase_order ?? row?.customer?.purchase_order ?? '').trim();
+    let movementByLineKey = null;
+    if (billingMode !== 'lease' && periodStart && periodEnd) {
+      try {
+        movementByLineKey = buildMovementByLineKeyFromCustomerHistory({
+          rentals: rentalsForSnapshot,
+          bottles: ctx.bottles || [],
+          customerRecord,
+          allCustomers: ctx.customers || [],
+          periodStart,
+          periodEnd,
+        });
+      } catch (e) {
+        console.warn('Invoice PDF: could not compute CRH movement map', e);
+      }
+    }
     const pdfResult = await createRentalInvoicePdfDoc({
       organization,
       invoiceTemplate: mergedTemplate,
@@ -2731,6 +2793,7 @@ export default function Subscriptions() {
       purchaseOrder: poForPdf || undefined,
       bottles: bottlesForPdf,
       returnsInPeriod,
+      movementByLineKey,
       formatCurrency,
     });
     return {
@@ -3543,76 +3606,6 @@ export default function Subscriptions() {
     }
   }, [organization?.id]);
 
-  const rentalToolbarMenuItems = useMemo(() => {
-    const emailTitle = bulkEmailing
-      ? `${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
-      : 'Email';
-    const zipTitle = zipExporting
-      ? `${zipExportProgress.done}/${zipExportProgress.total}`
-      : 'ZIP';
-    return [
-      {
-        id: 'refresh',
-        title: rentalsWorkspaceRefreshing ? 'Updating…' : 'Update',
-        action: 'refresh',
-        icon: <IoRefreshOutline />,
-        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'csv',
-        title: 'CSV',
-        action: 'csv',
-        icon: <IoCloudDownloadOutline />,
-        disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'invoices',
-        title: 'Invoices',
-        action: 'invoices',
-        icon: <IoReceiptOutline />,
-        disabled: saving || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'prep-numbers',
-        title: preallocatingNumbers ? '…' : 'Prep #',
-        action: 'prep-numbers',
-        icon: <IoCreateOutline />,
-        disabled: saving || preallocatingNumbers || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'email',
-        title: emailTitle,
-        action: 'email',
-        icon: <IoMailOutline />,
-        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'zip',
-        title: zipTitle,
-        action: 'zip',
-        icon: <IoArchiveOutline />,
-        disabled: saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing,
-      },
-      {
-        id: 'new',
-        title: 'New',
-        action: 'new',
-        icon: <IoAddCircleOutline />,
-      },
-    ];
-  }, [
-    saving,
-    preallocatingNumbers,
-    zipExporting,
-    rentalsWorkspaceRefreshing,
-    bulkEmailing,
-    bulkEmailProgress.sent,
-    bulkEmailProgress.failed,
-    bulkEmailProgress.total,
-    zipExportProgress.done,
-    zipExportProgress.total,
-  ]);
-
   const handleRentalToolbarAction = useCallback(
     (action) => {
       switch (action) {
@@ -3620,7 +3613,7 @@ export default function Subscriptions() {
           void handleRefreshRentalsWorkspace();
           break;
         case 'csv':
-          handleExportQbInvoiceCsv('monthly', monthlyQbCohort);
+          handleExportQbInvoiceCsv('monthly', termsFilter);
           break;
         case 'invoices':
           handleGenerateAllInvoices();
@@ -3645,11 +3638,12 @@ export default function Subscriptions() {
     [
       handleRefreshRentalsWorkspace,
       handleExportQbInvoiceCsv,
-      monthlyQbCohort,
+      termsFilter,
       handleGenerateAllInvoices,
       handlePreallocateCycleInvoiceNumbers,
       handleBulkEmailInvoices,
       handleExportInvoicePdfsZip,
+      blurActiveElement,
     ],
   );
 
@@ -3662,104 +3656,175 @@ export default function Subscriptions() {
     );
   }
 
+  const termsChipOptions = [
+    { key: 'all', label: 'All' },
+    { key: 'net30', label: `NET 30 (${termsCounts.net30})` },
+    { key: 'credit_card', label: `Credit Card (${termsCounts.credit_card})` },
+    { key: 'other', label: `Other (${termsCounts.other})` },
+  ];
+
+  const toolbarBtnSx = { textTransform: 'none', fontWeight: 600, borderRadius: 2, whiteSpace: 'nowrap' };
+  const stickyCustomerColSx = {
+    position: 'sticky',
+    left: 0,
+    bgcolor: 'background.paper',
+    zIndex: 1,
+    minWidth: 140,
+    boxShadow: '2px 0 4px -2px rgba(0,0,0,0.08)',
+  };
+  const hideTermsColSx = { display: { xs: 'none', sm: 'table-cell' } };
+  const hidePoColSx = { display: { xs: 'none', lg: 'table-cell' }, maxWidth: 140 };
+  const hideStatusColSx = { display: { xs: 'none', md: 'table-cell' } };
+
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, minHeight: '100%' }}>
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'stretch', lg: 'flex-start' }}
-        spacing={2}
-        sx={{ mb: 3 }}
-      >
-        <Box sx={{ flexShrink: 0 }}>
+    <Box sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0, width: '100%', boxSizing: 'border-box', minHeight: '100%' }}>
+      <Stack spacing={2} sx={{ mb: 3 }}>
+        <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Manage customer rentals and billing. Invoice numbers for the current cycle are prepared automatically on the
-            last and first day of each month (continuing from the previous counter), or use Prep # anytime.
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-            Per customer: row <strong>Export / bill</strong> → PDF, Excel, Email.
+            Manage customer rentals, invoice numbers, and billing exports.
           </Typography>
         </Box>
-        <Stack
-          direction="row"
-          flexWrap="wrap"
-          useFlexGap
-          spacing={1}
-          alignItems="center"
+
+        <Paper
+          elevation={0}
           sx={{
-            width: { xs: '100%', lg: 'auto' },
-            flex: '0 0 auto',
-            minWidth: 0,
-            justifyContent: { xs: 'flex-start', lg: 'flex-end' },
-            rowGap: 1,
-            columnGap: 1,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 2,
+            p: { xs: 1.5, sm: 2 },
+            bgcolor: 'background.paper',
           }}
         >
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="qb-csv-billing-month-label">Month</InputLabel>
-            <Select
-              labelId="qb-csv-billing-month-label"
-              label="Month"
-              value={qbCsvBillingMonth}
-              onChange={(e) => setQbCsvBillingMonth(e.target.value)}
-              sx={{ fontSize: '0.8125rem', '& .MuiSelect-select': { py: 0.6 } }}
-              MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
-            >
-              {qbCsvMonthMenuOptions.map((o) => (
-                <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 112 }}>
-            <InputLabel id="monthly-qb-cohort-label">Terms</InputLabel>
-            <Select
-              labelId="monthly-qb-cohort-label"
-              label="Terms"
-              value={monthlyQbCohort}
-              onChange={(e) => setMonthlyQbCohort(e.target.value)}
-              sx={{ fontSize: '0.8125rem', '& .MuiSelect-select': { py: 0.6 } }}
-              MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
-            >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="net30">NET 30</MenuItem>
-              <MenuItem value="credit_card">Card</MenuItem>
-            </Select>
-          </FormControl>
           <Stack
-            direction="row"
-            alignItems="center"
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1.5}
             flexWrap="wrap"
             useFlexGap
-            spacing={0.5}
-            sx={{
-              py: 0.5,
-              px: 0.75,
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: 'action.hover',
-            }}
+            alignItems={{ md: 'center' }}
+            justifyContent="space-between"
           >
-            {rentalToolbarMenuItems
-              .filter((item) => item.action !== 'csv' && item.action !== 'zip')
-              .map((item) => (
-                <Tooltip key={item.id} title={item.title}>
-                  <span>
-                    <IconButton
-                      size="small"
-                      disabled={item.disabled}
-                      aria-label={item.title}
-                      onClick={() => handleRentalToolbarAction(item.action)}
-                      sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
-                    >
-                      {item.icon}
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              ))}
+            <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 150 } }}>
+                <InputLabel id="qb-csv-billing-month-label">Month</InputLabel>
+                <Select
+                  labelId="qb-csv-billing-month-label"
+                  label="Month"
+                  value={qbCsvBillingMonth}
+                  onChange={(e) => setQbCsvBillingMonth(e.target.value)}
+                  sx={{ fontSize: '0.8125rem', '& .MuiSelect-select': { py: 0.6 } }}
+                  MenuProps={{ disablePortal: false, PaperProps: { sx: { zIndex: 1301 } } }}
+                >
+                  {qbCsvMonthMenuOptions.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.25 }}>
+                  Terms:
+                </Typography>
+                {termsChipOptions.map((opt) => (
+                  <Chip
+                    key={opt.key}
+                    label={opt.label}
+                    size="small"
+                    variant={termsFilter === opt.key ? 'filled' : 'outlined'}
+                    color={termsFilter === opt.key ? 'primary' : 'default'}
+                    onClick={() => setTermsFilter(opt.key)}
+                    sx={{ fontWeight: 600, fontSize: '0.7rem', cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            </Stack>
+
+            <Stack
+              direction="row"
+              flexWrap="wrap"
+              useFlexGap
+              spacing={1}
+              alignItems="center"
+              sx={{ minWidth: 0, justifyContent: { xs: 'flex-start', md: 'flex-end' } }}
+            >
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<IoRefreshOutline />}
+                disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('refresh')}
+                sx={toolbarBtnSx}
+              >
+                {rentalsWorkspaceRefreshing ? 'Updating…' : 'Update'}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<IoCreateOutline />}
+                disabled={saving || preallocatingNumbers || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('prep-numbers')}
+                sx={toolbarBtnSx}
+              >
+                {preallocatingNumbers ? 'Preparing…' : 'Prep #'}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<IoReceiptOutline />}
+                disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('invoices')}
+                sx={toolbarBtnSx}
+              >
+                Invoices
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<IoMailOutline />}
+                disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('email')}
+                sx={toolbarBtnSx}
+              >
+                {bulkEmailing
+                  ? `Email ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
+                  : 'Email'}
+              </Button>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<IoCloudDownloadOutline />}
+                disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('csv')}
+                sx={{ ...toolbarBtnSx, bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
+              >
+                Export CSV
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<IoArchiveOutline />}
+                disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
+                onClick={() => handleRentalToolbarAction('zip')}
+                sx={toolbarBtnSx}
+              >
+                {zipExporting
+                  ? `ZIP ${zipExportProgress.done}/${zipExportProgress.total}`
+                  : 'Export ZIP'}
+              </Button>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<IoAddCircleOutline />}
+                onClick={() => handleRentalToolbarAction('new')}
+                sx={{ ...toolbarBtnSx, bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}
+              >
+                New rental
+              </Button>
+            </Stack>
           </Stack>
-        </Stack>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.25, lineHeight: 1.5 }}>
+            CSV and ZIP respect Month + Terms filters. Per customer: row Bill → PDF, Excel, Email.
+          </Typography>
+        </Paper>
       </Stack>
 
       {actionError && <Alert severity="error" onClose={() => setActionError(null)} sx={{ mb: 2 }}>{actionError}</Alert>}
@@ -3831,100 +3896,43 @@ export default function Subscriptions() {
         ))}
       </Grid>
 
-      <Paper
-        elevation={0}
-        sx={{
-          mb: 3,
-          p: 2,
-          border: '1px solid',
-          borderColor: 'divider',
-          borderRadius: 2,
-          bgcolor: 'background.paper',
-        }}
-      >
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={1.5}
-          alignItems={{ xs: 'stretch', sm: 'center' }}
-          flexWrap="wrap"
-          useFlexGap
-        >
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mr: { sm: 1 } }}>
-            Bulk export
-          </Typography>
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<IoCloudDownloadOutline />}
-            disabled={saving || zipExporting || rentalsWorkspaceRefreshing}
-            onClick={() => handleRentalToolbarAction('csv')}
-            sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden', minWidth: 0 }}>
+        <Box sx={{ px: 2, pt: 2, pb: 1.5, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            flexWrap="wrap"
+            useFlexGap
           >
-            Export CSV (QuickBooks)
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<IoArchiveOutline />}
-            disabled={saving || bulkEmailing || zipExporting || rentalsWorkspaceRefreshing}
-            onClick={() => handleRentalToolbarAction('zip')}
-            sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
-          >
-            {zipExporting
-              ? `Building PDF ZIP… ${zipExportProgress.done}/${zipExportProgress.total}`
-              : 'Export PDFs (ZIP)'}
-          </Button>
-          <Typography variant="caption" sx={{ color: 'text.secondary', flex: { sm: '1 1 200px' } }}>
-            Uses Month and Terms filters above. Excel is one file per customer via row Export / bill.
-          </Typography>
-        </Stack>
-      </Paper>
-
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ px: 2, pt: 2, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap" sx={{ mr: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
-              Monthly rentals ({allRows.length})
-            </Typography>
-            <Button size="small" variant="outlined" component={Link} to="/lease-agreements" sx={{ borderRadius: 999, textTransform: 'none', fontSize: '0.75rem' }}>
-              Yearly leases & billing
-            </Button>
-          </Stack>
-          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ ml: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>Terms:</Typography>
-            {[
-              { key: 'all', label: 'All' },
-              { key: 'net30', label: `NET 30 (${termsCounts.net30})` },
-              { key: 'credit_card', label: `Credit Card (${termsCounts.credit_card})` },
-              { key: 'other', label: `Other (${termsCounts.other})` },
-            ].map((opt) => (
-              <Chip
-                key={opt.key}
-                label={opt.label}
+            <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap" useFlexGap>
+              <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                Rentals ({allRows.length})
+              </Typography>
+              <Button
                 size="small"
-                variant={termsFilter === opt.key ? 'filled' : 'outlined'}
-                color={termsFilter === opt.key ? 'primary' : 'default'}
-                onClick={() => setTermsFilter(opt.key)}
-                sx={{ fontWeight: 600, fontSize: '0.7rem', cursor: 'pointer' }}
-              />
-            ))}
+                variant="outlined"
+                component={Link}
+                to="/lease-agreements"
+                sx={{ borderRadius: 999, textTransform: 'none', fontSize: '0.75rem' }}
+              >
+                Yearly leases & billing
+              </Button>
+            </Stack>
+            <SubscriptionsSearchField
+              ref={searchFieldRef}
+              onDebouncedChange={setDebouncedSearch}
+            />
           </Stack>
-          <SubscriptionsSearchField
-            ref={searchFieldRef}
-            onDebouncedChange={setDebouncedSearch}
-          />
-          </Box>
         </Box>
 
-        <TableContainer>
-          <Table size="small">
+        <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%' }}>
+          <Table size="small" sx={{ minWidth: 760 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', color: 'text.secondary', letterSpacing: '0.05em' } }}>
-                <TableCell>Customer</TableCell>
-                <TableCell>Period</TableCell>
-                <TableCell>Terms</TableCell>
-                <TableCell sx={{ maxWidth: 140 }}>P.O.</TableCell>
+                <TableCell sx={stickyCustomerColSx}>Customer</TableCell>
+                <TableCell sx={hideTermsColSx}>Terms</TableCell>
+                <TableCell sx={hidePoColSx}>P.O.</TableCell>
                 <TableCell align="center">
                   <Tooltip
                     title="Billable units for this subscription (bottles + open rentals, billable rules). Invoice PDF and QB month export use Customer Detail–style merged open rentals (billing basis) as of period end."
@@ -3937,14 +3945,14 @@ export default function Subscriptions() {
                 </TableCell>
                 <TableCell align="right">Total / Cycle</TableCell>
                 <TableCell>Invoice #</TableCell>
-                <TableCell>Status</TableCell>
+                <TableCell sx={hideStatusColSx}>Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                     {allRows.length === 0 ? (
                       'No rentals found yet.'
                     ) : (
@@ -3971,7 +3979,7 @@ export default function Subscriptions() {
                 </TableRow>
               ) : pagedFiltered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     <Stack spacing={1} alignItems="center">
                       <Typography variant="body2">
                         No rows on this page ({filtered.length} match filters). Try page 1 or change rows per page.
@@ -3990,7 +3998,7 @@ export default function Subscriptions() {
                     sx={{ cursor: sub.isVirtual ? 'default' : 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
-                    <TableCell>
+                    <TableCell sx={stickyCustomerColSx}>
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>
                         {getCustomerDisplayLabel(sub.customer, parentNameById) || sub.customer_id}
                       </Typography>
@@ -4002,10 +4010,7 @@ export default function Subscriptions() {
                         {getCustomerListId(sub.customer, sub.customer_id) || '—'}
                       </Typography>
                     </TableCell>
-                    <TableCell>
-                      <Chip label={sub.billing_period} size="small" variant="outlined" sx={{ textTransform: 'capitalize', fontWeight: 600 }} />
-                    </TableCell>
-                    <TableCell>
+                    <TableCell sx={hideTermsColSx}>
                       {(() => {
                         const t = String(sub.customer?.payment_terms || '').trim();
                         if (!t) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>;
@@ -4023,7 +4028,7 @@ export default function Subscriptions() {
                         );
                       })()}
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 140 }}>
+                    <TableCell sx={hidePoColSx}>
                       {(() => {
                         const po = String(sub?.customer?.purchase_order ?? '').trim();
                         return po ? (
@@ -4037,7 +4042,7 @@ export default function Subscriptions() {
                     </TableCell>
                     <TableCell align="center">{sub.itemCount}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(sub.totalPerCycle)}</TableCell>
-                    <TableCell>
+                    <TableCell sx={{ maxWidth: 120 }}>
                       {(() => {
                         const cid = String(sub.customer_id || '').trim();
                         const sid = String(sub.id || '').trim();
@@ -4057,9 +4062,16 @@ export default function Subscriptions() {
                         const invNo = String(cycleInv?.invoice_number || '').trim();
                         const st = String(cycleInv?.status || '').toLowerCase();
                         return (
-                          <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
+                          <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="nowrap">
                             {invNo ? (
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{invNo}</Typography>
+                              <Typography
+                                variant="body2"
+                                noWrap
+                                title={invNo}
+                                sx={{ fontFamily: 'monospace', fontWeight: 600, maxWidth: 72 }}
+                              >
+                                {invNo}
+                              </Typography>
                             ) : cid ? (
                               <Typography variant="caption" sx={{ color: 'text.disabled' }}>Not set</Typography>
                             ) : (
@@ -4080,7 +4092,7 @@ export default function Subscriptions() {
                         );
                       })()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={hideStatusColSx}>
                       <Chip
                         label={sub.status}
                         size="small"
