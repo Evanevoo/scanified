@@ -731,6 +731,7 @@ export default function VerifiedOrders() {
         setUnverifyDialogOpen(false);
         setSelectedOrder(null);
         fetchVerifiedOrders();
+        navigate('/import-approvals', { state: { refetch: true } });
         return;
       }
 
@@ -860,6 +861,7 @@ export default function VerifiedOrders() {
       setUnverifyDialogOpen(false);
       setSelectedOrder(null);
       fetchVerifiedOrders();
+      navigate('/import-approvals', { state: { refetch: true } });
     } catch (error) {
       logger.error('Error unverifying order:', error);
       setSnackbar({ 
