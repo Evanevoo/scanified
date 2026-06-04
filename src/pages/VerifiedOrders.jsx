@@ -40,6 +40,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import logger from '../utils/logger';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { dedupeVerifiedOrdersByOrderNumber } from '../utils/verifiedOrdersDedup';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
@@ -377,34 +378,8 @@ export default function VerifiedOrders() {
         }
       }
 
-      // Deduplicate: keep only the most recently verified entry per order number + customer.
-      // Duplicate records can exist from re-imports; all get marked approved but we only show one.
-      const normalizeOrderNum = (num) => {
-        if (num == null || num === '') return '';
-        const s = String(num).trim();
-        if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
-        return s;
-      };
-      const orderMap = new Map();
-      allOrders.forEach(order => {
-        let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
-        if (!orderNum && order.data_parsed?.rows?.[0]) {
-          const r = order.data_parsed.rows[0];
-          orderNum = r.order_number || r.invoice_number || r.reference_number || r.sales_receipt_number;
-        }
-        const norm = normalizeOrderNum(orderNum);
-        const custName = (getCustomerName(order) || '').trim();
-        const key = norm ? `${norm}\t${custName}` : `_id_${order.id}`;
-        const existing = orderMap.get(key);
-        if (!existing) {
-          orderMap.set(key, order);
-        } else {
-          const existingTime = new Date(existing.approved_at || existing.verified_at || existing.created_at || 0).getTime();
-          const newTime = new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
-          if (newTime > existingTime) orderMap.set(key, order);
-        }
-      });
-      const deduplicatedOrders = Array.from(orderMap.values());
+      // One row per order number; invoice beats scanned when names differ (e.g. QB vs scan customer).
+      const deduplicatedOrders = dedupeVerifiedOrdersByOrderNumber(allOrders);
       // Sort by latest first (approved_at / verified_at / created_at descending)
       const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
       deduplicatedOrders.sort((a, b) => getOrderDate(b) - getOrderDate(a));
