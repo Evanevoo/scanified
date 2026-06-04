@@ -105,6 +105,26 @@ import { normalizePricingKey } from '../services/pricingResolution';
  * then last location touch, then today.
  */
 import { backfillOpenRentalsForAssignedBottles } from '../services/backfillOpenRentalsForAssignedBottles';
+import { closeOrphanOpenRentalsForOrg } from '../services/closeOrphanOpenRentalsForOrg';
+
+function normalizeInventoryBottleStatus(status) {
+  const v = String(status ?? '').toLowerCase().trim();
+  if (['filled', 'full', 'available'].includes(v)) return 'filled';
+  if (v === 'rented') return 'rented';
+  if (v === 'empty') return 'empty';
+  return v || 'unknown';
+}
+
+function displayInventoryStatusChip(asset, statusIsRented) {
+  if (statusIsRented) return 'Rented';
+  const st = normalizeInventoryBottleStatus(asset?.status);
+  if (st === 'empty') return 'Returned';
+  if (st === 'filled') return 'Filled';
+  if (st === 'rented') return 'Rented';
+  if (asset?.status) return String(asset.status);
+  return 'Unknown';
+}
+
 function displayRentalRowLocation(rental, bottle, customer) {
   const pick = (v) => (v == null ? '' : String(v).trim());
   for (const raw of [
@@ -1127,23 +1147,41 @@ export default function CustomerDetail() {
             customers: [customerData, ...(subsidiaryCustomerRows || [])],
           },
         );
+        let openRentalsWorking = merged;
         let openRentalsFinal = merged?.length ?? 0;
         if (backfilledRentalsInserted > 0) {
-          const mergedAfterBackfill = await fetchMergedOpenRentalsForCustomer(
+          openRentalsWorking = await fetchMergedOpenRentalsForCustomer(
             orgId,
             customerData.name,
             customerData.CustomerListID,
             customerData.id,
             subsidiaryCustomerRows
           );
-          openRentalsFinal = mergedAfterBackfill?.length ?? 0;
-          setLocationAssets(mergedAfterBackfill);
+          openRentalsFinal = openRentalsWorking?.length ?? 0;
           if (typeof subscriptionCtx?.refreshSilent === 'function') {
             subscriptionCtx.refreshSilent();
           }
-        } else {
-          setLocationAssets(merged);
         }
+
+        const { closed: orphansClosed } = await closeOrphanOpenRentalsForOrg(supabase, orgId, {
+          openRentals: openRentalsWorking,
+          bottles: customerAssetsData || [],
+          customers: [customerData, ...(subsidiaryCustomerRows || [])],
+        });
+        if (orphansClosed > 0) {
+          openRentalsWorking = await fetchMergedOpenRentalsForCustomer(
+            orgId,
+            customerData.name,
+            customerData.CustomerListID,
+            customerData.id,
+            subsidiaryCustomerRows
+          );
+          openRentalsFinal = openRentalsWorking?.length ?? 0;
+          if (typeof subscriptionCtx?.refreshSilent === 'function') {
+            subscriptionCtx.refreshSilent();
+          }
+        }
+        setLocationAssets(openRentalsWorking);
       } catch (err) {
         setError(err.message);
       }
@@ -3893,8 +3931,11 @@ export default function CustomerDetail() {
                       (assetBarcodeKey && openRentalBottleKeys.barcodes.has(assetBarcodeKey)) ||
                       (assetSerialKey && openRentalBottleKeys.barcodes.has(assetSerialKey))
                     );
+                  const invStatus = normalizeInventoryBottleStatus(asset?.status);
+                  const returnedToHouse = invStatus === 'empty';
                   const statusIsRented =
-                    hasOpenRental || asset.status === 'rented' || asset.status === 'RENTED';
+                    !returnedToHouse &&
+                    (hasOpenRental || invStatus === 'rented');
                   return (
                   <TableRow key={asset.id} hover selected={!asset.isDns && selectedAssets.includes(asset.id)} sx={asset.isDns ? { backgroundColor: 'action.hover' } : undefined}>
                     <TableCell padding="checkbox">
@@ -3942,9 +3983,7 @@ export default function CustomerDetail() {
                               ? "In-house (no charge)" 
                               : customer?.customer_type === 'TEMPORARY'
                               ? "Rented (temp - needs setup)"
-                              : statusIsRented
-                                ? "Rented" 
-                                : asset.status || "Rented"
+                              : displayInventoryStatusChip(asset, statusIsRented)
                           }
                           color={
                             customer?.customer_type === 'VENDOR' ? 'default' : 

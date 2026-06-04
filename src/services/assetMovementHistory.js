@@ -5,7 +5,6 @@ import {
   getScanRowBarcode,
 } from '../utils/fetchBottleScansByBarcodes';
 import {
-  bottleReflectsCompletedReturn,
   fetchOrderApprovalStatusMap,
   isManualUiScanOrder,
   normalizeOrderNumForLookup,
@@ -617,15 +616,13 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     const norm = normalizeOrderNumForLookup(on);
     const info = approvalMap.get(norm);
     item.scan_order_status = info?.status || 'scanned_only';
-    item.scan_assignment_effective = Boolean(info?.isApproved);
-    if (
-      !item.scan_assignment_effective
-      && scanRecordModeFamily(item) === 'RETURN'
-      && bottleReflectsCompletedReturn(sourceAsset)
-    ) {
+    // RETURN scans unassign at scan time — show as effective even before order verify.
+    if (scanRecordModeFamily(item) === 'RETURN') {
       item.scan_assignment_effective = true;
-      item.scan_order_status = 'inventory_updated';
+      if (!info?.isApproved) item.scan_order_status = 'inventory_updated';
+      return;
     }
+    item.scan_assignment_effective = Boolean(info?.isApproved);
   });
 
   const semanticDeduped = suppressRedundantRentalEndReturns(

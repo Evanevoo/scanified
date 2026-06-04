@@ -263,19 +263,54 @@ export class SyncService {
           scan.synced = true;
           syncedCount++;
 
-          // For RETURN scans, move bottle to in-house immediately (with org_id filter)
+          // For RETURN scans, move bottle to in-house and close open rentals (billing must stop).
           if (mode === 'RETURN' && barcode) {
+            const endDate = (scan.created_at || scan.timestamp || new Date().toISOString()).split('T')[0];
+            const orgId = profile.organization_id;
+            const rentalPatch = {
+              rental_end_date: endDate,
+              updated_at: new Date().toISOString(),
+            };
+            const { data: bottleRow } = await supabase
+              .from('bottles')
+              .select('id, barcode_number')
+              .eq('barcode_number', barcode)
+              .eq('organization_id', orgId)
+              .maybeSingle();
+
+            const closeRentalQuery = (column: 'bottle_id' | 'bottle_barcode', value: string) =>
+              supabase
+                .from('rentals')
+                .update(rentalPatch)
+                .eq('organization_id', orgId)
+                .eq(column, value)
+                .is('rental_end_date', null);
+
+            if (bottleRow?.id) {
+              const { error: rentalErr } = await closeRentalQuery('bottle_id', String(bottleRow.id));
+              if (rentalErr) {
+                logger.warn(`Could not close rentals by bottle_id for ${barcode}:`, rentalErr);
+              }
+            }
+            const { error: rentalBcErr } = await closeRentalQuery('bottle_barcode', barcode);
+            if (rentalBcErr) {
+              logger.warn(`Could not close rentals by barcode for ${barcode}:`, rentalBcErr);
+            }
+
             const { error: updateError } = await supabase
               .from('bottles')
               .update({
                 status: 'empty',
                 assigned_customer: null,
                 customer_id: null,
+                customer_uuid: null,
                 customer_name: null,
                 location: scan.location || 'In House',
+                days_at_location: 0,
+                rental_start_date: null,
               })
               .eq('barcode_number', barcode)
-              .eq('organization_id', profile.organization_id);
+              .eq('organization_id', orgId);
 
             if (updateError) {
               logger.warn(`Could not update bottle status for ${barcode}:`, updateError);

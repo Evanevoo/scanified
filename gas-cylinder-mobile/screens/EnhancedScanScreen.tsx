@@ -1371,7 +1371,14 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
           .eq('mode', mode)
           .maybeSingle();
         if (existingRow) {
-          logger.log('⚠️ Skipping duplicate: barcode already scanned for ' + mode + ' on order ' + orderNum);
+          logger.log('⚠️ Duplicate RETURN scan — ensuring bottle inventory is cleared');
+          if (mode === 'RETURN' && scanResult.action === 'in' && !scanResult.isUnassignedAsset) {
+            try {
+              await updateBottleStatus(scanResult.barcode, scanResult.action);
+            } catch (bottleError) {
+              logger.warn('Duplicate RETURN: bottle status update failed:', bottleError);
+            }
+          }
           return;
         }
       }
@@ -1515,8 +1522,10 @@ export default function EnhancedScanScreen({ route }: { route?: any }) {
         updateData.status = 'empty';
         updateData.assigned_customer = null;
         updateData.customer_id = null;
+        updateData.customer_uuid = null;
         updateData.customer_name = null;
         updateData.location = (location || '').trim() || 'In House';
+        updateData.days_at_location = 0;
         logger.log('Return scan recorded - bottle moved in-house immediately.');
         break;
       case 'locate':

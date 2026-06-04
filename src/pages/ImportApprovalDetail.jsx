@@ -8,6 +8,7 @@ import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptI
 import { CardSkeleton } from '../components/SmoothLoading';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
+import { applyReturnScanInventory } from '../services/applyReturnScanInventory';
 import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
@@ -709,6 +710,22 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           } else {
             returnedBottlesList = bottles || [];
             logger.log(`✅ Found ${returnedBottlesList.length} returned bottles`);
+            for (const bottle of returnedBottlesList) {
+              const stillOut =
+                String(bottle.assigned_customer || '').trim() ||
+                String(bottle.customer_name || '').trim() ||
+                String(bottle.status || '').toLowerCase() === 'rented';
+              if (!stillOut) continue;
+              const repair = await applyReturnScanInventory(supabase, organization.id, {
+                barcode: bottle.barcode_number,
+                orderNumber: orderNumTrimmed || orderNumber,
+              });
+              if (repair.updated) {
+                bottle.assigned_customer = null;
+                bottle.customer_name = null;
+                bottle.status = 'empty';
+              }
+            }
           }
         }
         
@@ -1024,16 +1041,37 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     });
   }, [scannedBottles, importRecord]);
 
-  /** SHIP-delivered bottles on file with no customer on `bottles` — e.g. list Approve ran but assignment failed silently (now throws) or RPC skipped. */
-  const handleRetryMissingDeliveredAssignment = async () => {
-    if (!organization?.id || !importRecord || deliveredBottlesMissingDbAssignment.length === 0) return;
+  /** All SHIP-delivered barcodes on this order (for post-assign reconcile). */
+  const deliveredShipBarcodesForFix = useMemo(
+    () =>
+      (scannedBottles || [])
+        .map((b) => String(b.barcode_number || '').trim())
+        .filter(Boolean),
+    [scannedBottles]
+  );
+
+  /**
+   * Fix delivered bottle rows: assign empty renters, then reconcile all delivered SHIP barcodes
+   * (closes prior-customer rentals and reassigns when return was not recorded).
+   */
+  const handleFixDeliveredBottleAssignments = async () => {
+    const missingCount = deliveredBottlesMissingDbAssignment.length;
+    const mismatchCount = deliveredPriorCustomerMismatches.length;
+    if (
+      !organization?.id ||
+      !importRecord ||
+      (missingCount === 0 && mismatchCount === 0)
+    ) {
+      return;
+    }
+
     const pdata = parseDataField(importRecord.data);
     let customerName = String(getCustomerInfo(pdata) || '').trim();
     if (!customerName || customerName.toLowerCase() === 'unknown') {
       customerName = String(filterCustomerName || '').trim();
     }
     if (!customerName) {
-      setActionMessage('Retry failed: no customer name on this import or URL (?customer=).');
+      setActionMessage('Fix failed: no customer name on this import or URL (?customer=).');
       setTimeout(() => setActionMessage(''), 6000);
       return;
     }
@@ -1044,10 +1082,11 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       pdata.reference_number ||
       null;
     if (!orderNum) {
-      setActionMessage('Retry failed: could not determine order number.');
+      setActionMessage('Fix failed: could not determine order number.');
       setTimeout(() => setActionMessage(''), 6000);
       return;
     }
+
     let customerId = getCustomerId(pdata) || null;
     try {
       const resolved =
@@ -1056,74 +1095,93 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (resolved?.customerListId) {
         customerId = resolved.customerListId;
       } else if (resolved?.id) {
-        // Import JSON may carry a non-customer UUID; always prefer resolved customers.id for the service.
         customerId = resolved.id;
       }
     } catch (e) {
-      logger.warn('Retry assignment: resolve customer', e);
+      logger.warn('Fix delivered assignment: resolve customer', e);
     }
-    const shipBarcodes = deliveredBottlesMissingDbAssignment
+
+    const missingBarcodes = deliveredBottlesMissingDbAssignment
       .map((b) => String(b.barcode_number || '').trim())
       .filter(Boolean);
-    if (shipBarcodes.length === 0) return;
+    const reconcileBarcodes =
+      deliveredShipBarcodesForFix.length > 0 ? deliveredShipBarcodesForFix : missingBarcodes;
 
     const importTable =
       importRecord._resolvedImportTable === 'imported_sales_receipts'
         ? 'imported_sales_receipts'
         : 'imported_invoices';
 
+    const dateRowForReconcile = (pdata?.rows || pdata?.line_items || []).find(
+      (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
+    );
+    const effectiveDateForReconcile =
+      dateRowForReconcile?.date ||
+      dateRowForReconcile?.Date ||
+      dateRowForReconcile?.invoice_date ||
+      dateRowForReconcile?.InvoiceDate ||
+      null;
+
+    const displayCustomerName =
+      customerName && customerName !== 'Unknown' ? customerName : 'Customer';
+
     setRetryMissingAssignmentLoading(true);
     try {
-      const originalId = getOriginalId(invoiceNumber);
-      const recordId = originalId ? coerceImportedRowPkForRpc(originalId) : null;
-      const result = await bottleAssignmentService.assignBottles({
-        organizationId: organization.id,
-        customerId: customerId || customerName,
-        customerName: customerName && customerName !== 'Unknown' ? customerName : 'Customer',
-        shipBarcodes,
-        returnBarcodes: [],
-        importRecordId: recordId,
-        importTable,
-        orderNumber: String(orderNum).trim(),
-      });
-      if (!result.success) {
-        setActionMessage(`Retry failed: ${result.error || 'Unknown error'}`);
-        setTimeout(() => setActionMessage(''), 8000);
-        return;
+      let assignedCount = 0;
+      if (missingBarcodes.length > 0) {
+        const originalId = getOriginalId(invoiceNumber);
+        const recordId = originalId ? coerceImportedRowPkForRpc(originalId) : null;
+        const result = await bottleAssignmentService.assignBottles({
+          organizationId: organization.id,
+          customerId: customerId || customerName,
+          customerName: displayCustomerName,
+          shipBarcodes: missingBarcodes,
+          returnBarcodes: [],
+          importRecordId: recordId,
+          importTable,
+          orderNumber: String(orderNum).trim(),
+        });
+        if (!result.success) {
+          setActionMessage(`Fix failed (assign): ${result.error || 'Unknown error'}`);
+          setTimeout(() => setActionMessage(''), 8000);
+          return;
+        }
+        assignedCount = result.data?.shipped ?? 0;
+        if (assignedCount === 0 && mismatchCount === 0) {
+          const detail =
+            result.data?.warnings?.join('; ') ||
+            result.error ||
+            'Assignment returned success but no bottle rows were updated.';
+          setActionMessage(`Fix did not assign any bottles: ${detail}`);
+          setTimeout(() => setActionMessage(''), 10000);
+          return;
+        }
       }
-      const shippedCount = result.data?.shipped ?? 0;
-      if (shippedCount === 0) {
-        const detail =
-          result.data?.warnings?.join('; ') ||
-          result.error ||
-          'Assignment returned success but no bottle rows were updated.';
-        setActionMessage(`Retry did not assign any bottles: ${detail}`);
-        setTimeout(() => setActionMessage(''), 10000);
-        return;
-      }
-      const dateRowForReconcile = (pdata?.rows || pdata?.line_items || []).find(
-        (row) => row?.date || row?.Date || row?.invoice_date || row?.InvoiceDate
-      );
-      const effectiveDateForReconcile =
-        dateRowForReconcile?.date ||
-        dateRowForReconcile?.Date ||
-        dateRowForReconcile?.invoice_date ||
-        dateRowForReconcile?.InvoiceDate ||
-        null;
-      await reconcileShippedBottleAssignments(supabase, {
+
+      const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
         organizationId: organization.id,
-        shipBarcodes,
+        shipBarcodes: reconcileBarcodes,
         customerId: customerId || customerName,
-        customerName: customerName && customerName !== 'Unknown' ? customerName : 'Customer',
+        customerName: displayCustomerName,
         orderNumber: String(orderNum).trim(),
         effectiveDate: effectiveDateForReconcile,
       });
-      setActionMessage(`Retried assignment for ${shipBarcodes.length} barcode(s). Refreshing list…`);
+
+      const parts = [];
+      if (assignedCount > 0) parts.push(`${assignedCount} newly assigned`);
+      if (reconcileWarnings.length > 0) {
+        parts.push(`${reconcileWarnings.length} reassigned from prior customer`);
+      }
+      setActionMessage(
+        parts.length > 0
+          ? `Fixed delivered assignments (${parts.join('; ')}). Refreshing list…`
+          : 'Delivered assignments already match this order. Refreshing list…'
+      );
       setRefreshScannedBottlesTrigger((t) => t + 1);
-      setTimeout(() => setActionMessage(''), 6000);
+      setTimeout(() => setActionMessage(''), 8000);
     } catch (e) {
-      logger.error('handleRetryMissingDeliveredAssignment', e);
-      setActionMessage(`Retry failed: ${e?.message || e}`);
+      logger.error('handleFixDeliveredBottleAssignments', e);
+      setActionMessage(`Fix failed: ${e?.message || e}`);
       setTimeout(() => setActionMessage(''), 8000);
     } finally {
       setRetryMissingAssignmentLoading(false);
@@ -3832,7 +3890,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                     {deliveredBottlesMissingDbAssignment.length} barcode(s) are listed under Delivered Assets but{' '}
                     <strong>customer_name</strong> and <strong>assigned_customer</strong> are empty on the bottle row.
                     If you already approved this order on the main Import Approvals list, the import row may be updated while bottle assignment did not run or failed—use{' '}
-                    <strong>Retry assigning bottles</strong> below to push this order&apos;s customer ({importOrderCustomerDisplay}) to these barcodes again.
+                    <strong>Fix delivered assignments</strong> below to push this order&apos;s customer ({importOrderCustomerDisplay}) to these barcodes again.
                     Movement history can still show Delivery / Return / Fill from rentals, scans, or audits elsewhere; it is merged from several sources, not only Trackabout scans for this order.
                     You can also use <strong>Verify This Record</strong> when SHP, RTN, and TRK match (or correct assets first).
                   </Typography>
@@ -3840,10 +3898,10 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                     <Button
                       variant="contained"
                       size="small"
-                      onClick={handleRetryMissingDeliveredAssignment}
+                      onClick={handleFixDeliveredBottleAssignments}
                       disabled={retryMissingAssignmentLoading}
                     >
-                      {retryMissingAssignmentLoading ? 'Assigning…' : 'Retry assigning bottles'}
+                      {retryMissingAssignmentLoading ? 'Fixing…' : 'Fix delivered assignments'}
                     </Button>
                   </Stack>
                   <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
@@ -3865,8 +3923,19 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     {deliveredPriorCustomerMismatches.length} barcode(s) still show another customer in the database (return may not have been recorded).
-                    When you verify this order, they will be reassigned to this order&apos;s customer and open rentals for those bottles will be closed.
+                    Use <strong>Reassign to order customer</strong> below, or verify this order — open rentals for those bottles will be closed and the bottle row will move to{' '}
+                    {importOrderCustomerDisplay || 'this order\'s customer'}.
                   </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleFixDeliveredBottleAssignments}
+                      disabled={retryMissingAssignmentLoading}
+                    >
+                      {retryMissingAssignmentLoading ? 'Fixing…' : 'Reassign to order customer'}
+                    </Button>
+                  </Stack>
                   <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
                     {deliveredPriorCustomerMismatches.slice(0, 12).map((b) => (
                       <li key={b.barcode_number || b.id}>

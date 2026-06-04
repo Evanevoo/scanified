@@ -2,6 +2,8 @@ import {
   extractOrderNumbersFromImportData,
   normalizeOrderNumForLookup,
   bottleReflectsCompletedReturn,
+  isScanEffectiveForAssignmentReplay,
+  scanRecordModeFamily,
 } from '../../utils/orderScanApprovalStatus';
 
 describe('orderScanApprovalStatus', () => {
@@ -35,5 +37,23 @@ describe('orderScanApprovalStatus', () => {
         customer_name: 'Prairie Fleet',
       }),
     ).toBe(false);
+  });
+
+  it('treats RETURN scans as effective for assignment replay before order verify', () => {
+    const pendingReturn = {
+      history_type: 'bottle_scan',
+      mode: 'RETURN',
+      order_number: '74914',
+      scan_assignment_effective: false,
+    };
+    const pendingShip = {
+      history_type: 'bottle_scan',
+      mode: 'SHIP',
+      order_number: '74914',
+      scan_assignment_effective: false,
+    };
+    expect(isScanEffectiveForAssignmentReplay(pendingReturn)).toBe(true);
+    expect(isScanEffectiveForAssignmentReplay(pendingShip)).toBe(false);
+    expect(scanRecordModeFamily(pendingReturn)).toBe('RETURN');
   });
 });

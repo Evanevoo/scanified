@@ -88,6 +88,11 @@ export function bottleAssignedToRentalCustomer(bottle, rental, customerLookup) {
 export function isOrphanOpenRental(rental, bottle, customerLookup) {
   if (!rental || rental.is_dns) return false;
   if (!bottle) return true;
+  const st = norm(bottle?.status);
+  // Returned / in-house inventory — stop billing even if assignment was not cleared on the row.
+  if (st === 'empty' || st === 'available' || st === 'in_house' || st === 'in-house') {
+    return true;
+  }
   const assigned = norm(bottle.assigned_customer);
   const name = norm(bottle.customer_name);
   if (!assigned && !name) return true;
