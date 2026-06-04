@@ -21,10 +21,12 @@ import {
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useOwnerAccess } from '../../hooks/useOwnerAccess';
+import { roleDisplayName } from '../../constants/roles';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function DataUtilities() {
   const { profile } = useAuth();
-  useOwnerAccess(profile); // Restrict access to owners
+  const { isOwner, loading: ownerAccessLoading } = useOwnerAccess(profile);
 
   const [loading, setLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(false);
@@ -617,6 +619,21 @@ export default function DataUtilities() {
       default: return 'default';
     }
   };
+
+  if (ownerAccessLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!isOwner) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">
+          Access denied. Data utilities are only for Scanified platform owners, not tenant account owners.
+          Your role: {roleDisplayName(profile?.role)}.
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: 3 }}>

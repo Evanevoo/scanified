@@ -1,7 +1,25 @@
 import {
   dedupeSemanticMovementHistory,
+  formatAuditMovementLabel,
+  isSyntheticMovementRow,
   suppressRedundantRentalEndReturns,
 } from '../../services/assetMovementHistory';
+
+describe('assetMovementHistory helpers', () => {
+  it('labels audit status changes clearly', () => {
+    const label = formatAuditMovementLabel({
+      history_type: 'audit',
+      action: 'AUDIT: BOTTLE_UPDATE',
+      details: { field_changes: { status: { from: 'empty', to: 'rented' } } },
+    });
+    expect(label).toContain('Status: empty → rented');
+  });
+
+  it('treats record_update stamps as synthetic', () => {
+    expect(isSyntheticMovementRow({ history_type: 'record_update', id: 'bottle_last_updated' })).toBe(true);
+    expect(isSyntheticMovementRow({ history_type: 'rental_start', id: 'x' })).toBe(false);
+  });
+});
 
 describe('assetMovementHistory dedupe', () => {
   it('keeps RETURN scan and drops rental_end when billing closed days later', () => {

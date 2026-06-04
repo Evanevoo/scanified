@@ -42,9 +42,6 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
       userRole,
     };
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-routes-pre-fix',hypothesisId:'W2',location:'src/components/RoleProtectedRoute.jsx:31',message:'RoleProtectedRoute evaluated',data:{path:window.location.pathname,userRole,allowedRoles,hasAccess},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   // Debug logging (development only)
   if (import.meta.env.DEV) {

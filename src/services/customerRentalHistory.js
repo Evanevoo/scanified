@@ -172,11 +172,22 @@ export function computeCustomerRentalHistory({
 }) {
   const ps = clipYmd(periodStart);
   const pe = clipYmd(periodEnd);
-  if (!ps || !pe || ps > pe) return [];
+  const empty = { rows: [], returnsByProductCode: {} };
+  if (!ps || !pe || ps > pe) return empty;
   const strictKeys = buildStrictCustomerKeys(customerRecord, allCustomers);
-  if (strictKeys.size === 0) return [];
+  if (strictKeys.size === 0) return empty;
 
   const { byId, byBarcode } = buildBottleLookupMaps(bottles);
+
+  /** Units with any rental row — rental ledger owns period semantics; bottle pass only fills gaps. */
+  const rentalUnitKeys = new Set();
+  for (const r of rentals) {
+    if (!rentalBelongsToCustomerStrict(r, strictKeys)) continue;
+    const rs = clipYmd(r.rental_start_date);
+    if (!rs) continue;
+    const uk = rentalUnitKey(r, byId, byBarcode);
+    if (uk) rentalUnitKeys.add(uk);
+  }
   const psDate = new Date(`${ps}T00:00:00`);
   const peDate = new Date(`${pe}T23:59:59`);
   const periodDays = Math.max(
@@ -215,6 +226,7 @@ export function computeCustomerRentalHistory({
     if (isCustomerOwnedForBilling(b)) continue;
     const uk = bottleUnitKey(b);
     if (!uk) continue;
+    if (rentalUnitKeys.has(uk)) continue;
     const code = bottleProductCode(b);
     const u = ensureUnit(uk, code);
     const del = clipYmd(b.rental_start_date || b.delivery_date || b.purchase_date);

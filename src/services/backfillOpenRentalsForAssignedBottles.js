@@ -136,3 +136,70 @@ export async function backfillOpenRentalsForAssignedBottles(
 
   return { inserted, errors };
 }
+
+/**
+ * Insert one open rental for a shipped bottle when none exists (assign / verify paths).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabaseClient
+ * @param {string} organizationId
+ * @param {{ bottle: object, customerId: string, customerName: string, rentalStartDate?: string, orderNumber?: string|null, openRentals?: object[], pricingCtx?: object }} params
+ * @returns {Promise<{ inserted: boolean, skipped: boolean, error?: string }>}
+ */
+export async function createOpenRentalForShippedBottle(supabaseClient, organizationId, params) {
+  const bottle = params?.bottle;
+  if (!supabaseClient || !organizationId || !bottle) {
+    return { inserted: false, skipped: false, error: 'missing_params' };
+  }
+  if (isCustomerOwnedForBilling(bottle) || isBottleLostForBilling(bottle)) {
+    return { inserted: false, skipped: true };
+  }
+
+  const rentalIndex = indexOpenRentals(params.openRentals || []);
+  if (bottleHasOpenRental(bottle, rentalIndex)) {
+    return { inserted: false, skipped: true };
+  }
+
+  const assigned = String(
+    params.customerId || bottle.assigned_customer || bottle.customer_uuid || bottle.customer_id || '',
+  ).trim();
+  if (!assigned) {
+    return { inserted: false, skipped: false, error: 'no_customer_id' };
+  }
+
+  const pricingCtx =
+    params.pricingCtx || (await fetchOrgRentalPricingContext(supabaseClient, organizationId));
+  const rentCustomerName =
+    String(params.customerName || bottle.customer_name || '').trim() || assigned;
+  const barcode = String(bottle.barcode_number || bottle.barcode || '').trim();
+  const pricingKey = assigned;
+  const rental_amount = monthlyRateForNewRental(pricingKey, bottle, pricingCtx);
+  const rentalStartDate =
+    params.rentalStartDate || inferRentalStartDateFromBottle(bottle);
+
+  const insertPayload = {
+    organization_id: organizationId,
+    customer_id: assigned,
+    customer_name: rentCustomerName,
+    bottle_id: bottle.id ?? null,
+    bottle_barcode: barcode || null,
+    rental_start_date: rentalStartDate,
+    rental_end_date: null,
+    rental_amount,
+    rental_type: 'monthly',
+    tax_code: 'GST+PST',
+    tax_rate: 0.11,
+    location: bottle.location || 'SASKATOON',
+    status: 'active',
+    is_dns: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (params.orderNumber != null && String(params.orderNumber).trim() !== '') {
+    insertPayload.rental_order_number = String(params.orderNumber).trim();
+  }
+
+  const { error } = await supabaseClient.from('rentals').insert(insertPayload);
+  if (error) {
+    return { inserted: false, skipped: false, error: error.message };
+  }
+  return { inserted: true, skipped: false };
+}

@@ -23,7 +23,11 @@ import {
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
-import { fetchMergedAssetMovementHistory } from '../services/assetMovementHistory';
+import {
+  fetchMergedAssetMovementHistory,
+  formatAuditMovementLabel,
+  isSyntheticMovementRow,
+} from '../services/assetMovementHistory';
 import {
   isPendingOrderScanRecord,
   scanRecordModeFamily,
@@ -66,7 +70,7 @@ function mergedMovementToLogRows(asset, merged) {
     else if (ht === 'fill' || mode === 'FILL') typeLabel = 'FILL';
     else if (ht === 'transfer') typeLabel = 'TRANSFER';
     else if (ht === 'exception') typeLabel = row.action || 'EXCEPTION';
-    else if (ht === 'audit') typeLabel = row.action || 'AUDIT';
+    else if (ht === 'audit') typeLabel = formatAuditMovementLabel(row);
     else if (ht === 'creation') typeLabel = 'Add New Asset';
     else if (ht === 'record_update') typeLabel = row.action || 'Asset record updated';
     else if (ht === 'cylinder_scan') typeLabel = mode || 'CYLINDER_SCAN';
@@ -232,7 +236,10 @@ export default function AssetHistory() {
           perSourceLimit: 250,
           maxRecords: 800,
         });
-        const merged = mergedMovementToLogRows(assetData, mergedRaw);
+        const merged = mergedMovementToLogRows(
+          assetData,
+          (mergedRaw || []).filter((r) => !isSyntheticMovementRow(r)),
+        );
         setRecords(merged);
       } catch (err) {
         setError(err.message);
@@ -312,7 +319,12 @@ export default function AssetHistory() {
           perSourceLimit: 250,
           maxRecords: 800,
         });
-        setRecords(mergedMovementToLogRows(asset, mergedRaw));
+        setRecords(
+          mergedMovementToLogRows(
+            asset,
+            (mergedRaw || []).filter((r) => !isSyntheticMovementRow(r)),
+          ),
+        );
       } catch (e) {
         setError(e?.message || 'Failed to refresh history');
       }

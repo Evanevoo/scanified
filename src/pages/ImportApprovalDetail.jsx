@@ -7,6 +7,8 @@ import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBod
 import { ExpandMore as ExpandMoreIcon, Person as PersonIcon, Receipt as ReceiptIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon } from '@mui/icons-material';
 import { CardSkeleton } from '../components/SmoothLoading';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { createOpenRentalForShippedBottle } from '../services/backfillOpenRentalsForAssignedBottles';
+import { useSubscriptions } from '../context/SubscriptionContext';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
 import { applyReturnScanInventory } from '../services/applyReturnScanInventory';
 import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
@@ -55,6 +57,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   const invoiceNumber = propInvoiceNumber || params.id; // Changed from params.invoiceNumber to params.id
   const navigate = useNavigate();
   const { organization, profile } = useAuth();
+  const { refreshSilent } = useSubscriptions();
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
   const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
   const [importRecord, setImportRecord] = useState(null);
@@ -1178,6 +1181,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           : 'Delivered assignments already match this order. Refreshing list…'
       );
       setRefreshScannedBottlesTrigger((t) => t + 1);
+      if (typeof refreshSilent === 'function') {
+        void refreshSilent();
+      }
       setTimeout(() => setActionMessage(''), 8000);
     } catch (e) {
       logger.error('handleFixDeliveredBottleAssignments', e);
@@ -1456,26 +1462,13 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               .is('rental_end_date', null)
               .limit(1);
 
-            if (!existingRental || existingRental.length === 0) {
-              await supabase
-                .from('rentals')
-                .insert({
-                  bottle_id: newBottle.id,
-                  bottle_barcode: barcode,
-                  customer_id: newCustomerId || newCustomerName,
-                  customer_name: newCustomerName,
-                  rental_start_date: new Date().toISOString().split('T')[0],
-                  rental_end_date: null,
-                  organization_id: organization?.id,
-                  rental_amount: 10,
-                  rental_type: 'monthly',
-                  tax_code: 'GST+PST',
-                  tax_rate: 0.11,
-                  location: 'SASKATOON',
-                  status: 'active',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                });
+            if (organization?.id) {
+              await createOpenRentalForShippedBottle(supabase, organization.id, {
+                bottle: newBottle,
+                customerId: newCustomerId || newCustomerName,
+                customerName: newCustomerName,
+                orderNumber: orderNumTrimmed,
+              });
             }
 
             // Insert bottle_scan record for movement history
@@ -2050,6 +2043,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             });
             if (reconcileWarnings.length > 0) {
               logger.warn('ImportApprovalDetail post-verify reassignment:', reconcileWarnings);
+            }
+            if (typeof refreshSilent === 'function') {
+              void refreshSilent();
             }
             const reconcileNote =
               reconcileWarnings.length > 0

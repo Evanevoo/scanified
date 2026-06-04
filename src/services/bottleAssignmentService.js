@@ -14,6 +14,7 @@ import {
 } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
+import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssignedBottles';
 
 /** Full customer row for RPC (`customers.id`) and direct ship updates. */
 async function resolveCustomerForAssignment(organizationId, customerId, customerName) {
@@ -156,33 +157,16 @@ async function assignShippedBottlesWithCustomerListId({
     }
     shipped += 1;
 
-    const { data: existingRental } = await supabase
-      .from('rentals')
-      .select('id')
-      .eq('bottle_barcode', canonicalBarcode)
-      .eq('organization_id', organizationId)
-      .is('rental_end_date', null)
-      .limit(1);
-
-    if (!existingRental?.length) {
-      const rentalCustomerId = listKey || listId || rowId;
-      await supabase.from('rentals').insert({
-        bottle_id: bottle.id,
-        bottle_barcode: canonicalBarcode,
-        customer_id: rentalCustomerId,
-        customer_name: name,
-        rental_start_date: today,
-        rental_end_date: null,
-        organization_id: organizationId,
-        rental_amount: defaultRentalAmount,
-        rental_type: 'monthly',
-        tax_code: 'GST+PST',
-        tax_rate: defaultTaxRate,
-        location: bottle.location || 'SASKATOON',
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+    const rentalCustomerId = listKey || listId || rowId;
+    const rentalResult = await createOpenRentalForShippedBottle(supabase, organizationId, {
+      bottle: { ...bottle, barcode_number: canonicalBarcode, assigned_customer: rentalCustomerId, customer_name: name },
+      customerId: rentalCustomerId,
+      customerName: name,
+      rentalStartDate: today,
+      orderNumber: order || null,
+    });
+    if (rentalResult.error) {
+      errors.push(`${barcode}: rental ${rentalResult.error}`);
     }
   }
 

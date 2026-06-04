@@ -83,6 +83,8 @@ export function SubscriptionProvider({ children }) {
 
   const fetchAll = useCallback(async (options = {}) => {
     const silent = options.silent === true;
+    /** Backfill/orphan DB writes are expensive — skip on silent/realtime refreshes; run on full refresh & first load. */
+    const reconcileRentals = options.reconcile === true || (options.reconcile !== false && !silent);
     if (!orgId) {
       if (mountedRef.current) setClassificationNodes([]);
       if (mountedRef.current && !silent) setLoading(false);
@@ -190,45 +192,47 @@ export function SubscriptionProvider({ children }) {
       }));
       let openRentalsList = rentalsRes.data || [];
 
-      const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
-        supabase,
-        orgId,
-        {
-          bottles: bottlesList,
-          openRentals: openRentalsList,
-          customers: custRes.data || [],
-        },
-      );
-      if (backfillInserted > 0) {
-        const refetchRentals = await safe(
-          'rentals',
-          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+      if (reconcileRentals) {
+        const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
+          supabase,
+          orgId,
+          {
+            bottles: bottlesList,
+            openRentals: openRentalsList,
+            customers: custRes.data || [],
+          },
         );
-        if (!refetchRentals.error && refetchRentals.data) {
-          openRentalsList = refetchRentals.data;
+        if (backfillInserted > 0) {
+          const refetchRentals = await safe(
+            'rentals',
+            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+          );
+          if (!refetchRentals.error && refetchRentals.data) {
+            openRentalsList = refetchRentals.data;
+          }
         }
-      }
 
-      const { closed: orphansClosed, errors: orphanCloseErrors } = await closeOrphanOpenRentalsForOrg(
-        supabase,
-        orgId,
-        {
-          openRentals: openRentalsList,
-          bottles: bottlesList,
-          customers: custRes.data || [],
-          maxCloses: 500,
-        },
-      );
-      if (orphanCloseErrors.length) {
-        console.warn('closeOrphanOpenRentalsForOrg:', orphanCloseErrors.join('; '));
-      }
-      if (orphansClosed > 0) {
-        const refetchAfterOrphans = await safe(
-          'rentals',
-          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+        const { closed: orphansClosed, errors: orphanCloseErrors } = await closeOrphanOpenRentalsForOrg(
+          supabase,
+          orgId,
+          {
+            openRentals: openRentalsList,
+            bottles: bottlesList,
+            customers: custRes.data || [],
+            maxCloses: 500,
+          },
         );
-        if (!refetchAfterOrphans.error && refetchAfterOrphans.data) {
-          openRentalsList = refetchAfterOrphans.data;
+        if (orphanCloseErrors.length) {
+          console.warn('closeOrphanOpenRentalsForOrg:', orphanCloseErrors.join('; '));
+        }
+        if (orphansClosed > 0) {
+          const refetchAfterOrphans = await safe(
+            'rentals',
+            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
+          );
+          if (!refetchAfterOrphans.error && refetchAfterOrphans.data) {
+            openRentalsList = refetchAfterOrphans.data;
+          }
         }
       }
 
@@ -302,7 +306,7 @@ export function SubscriptionProvider({ children }) {
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         fetchAll({ silent: true });
-      }, 2000);
+      }, 4000);
     };
 
     const channel = supabase.channel(`subscription-ctx-${orgId}`);
@@ -444,8 +448,8 @@ export function SubscriptionProvider({ children }) {
     [activeSubscriptions]
   );
 
-  const refresh = useCallback(() => fetchAll({ silent: false }), [fetchAll]);
-  const refreshSilent = useCallback(() => fetchAll({ silent: true }), [fetchAll]);
+  const refresh = useCallback(() => fetchAll({ silent: false, reconcile: true }), [fetchAll]);
+  const refreshSilent = useCallback(() => fetchAll({ silent: true, reconcile: false }), [fetchAll]);
 
   const value = useMemo(() => ({
     loading,

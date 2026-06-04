@@ -1103,23 +1103,22 @@ export default function CustomerSelfService() {
       // SECURITY: Only count bottles from user's organization
       const [cylindersRes, deliveriesRes, invoicesRes] = await Promise.all([
         supabase.from('bottles').select('id', { count: 'exact' }).eq('status', 'active').eq('organization_id', organization.id),
-        supabase.from('deliveries').select('id', { count: 'exact' }).eq('status', 'pending'),
-        supabase.from('invoices').select('id', { count: 'exact' }).eq('status', 'overdue')
+        supabase.from('deliveries').select('id', { count: 'exact' }).eq('status', 'pending').eq('organization_id', organization.id),
+        supabase.from('invoices').select('id', { count: 'exact' }).eq('status', 'overdue').eq('organization_id', organization.id),
       ]);
 
-      // Mock recent activity data
-      const mockActivity = [
-        { type: 'delivery', description: 'Delivery completed - 5 cylinders', date: '2 hours ago', icon: <DeliveryIcon /> },
-        { type: 'service', description: 'Service request submitted', date: '1 day ago', icon: <ScheduleIcon /> },
-        { type: 'delivery', description: 'Delivery scheduled for tomorrow', date: '2 days ago', icon: <DeliveryIcon /> },
-        { type: 'service', description: 'Maintenance completed', date: '3 days ago', icon: <CheckIcon /> }
-      ];
+      const mockActivity = import.meta.env.DEV
+        ? [
+            { type: 'delivery', description: 'Delivery completed - 5 cylinders', date: '2 hours ago', icon: <DeliveryIcon /> },
+            { type: 'service', description: 'Service request submitted', date: '1 day ago', icon: <ScheduleIcon /> },
+          ]
+        : [];
 
       setStats({
         activeCylinders: cylindersRes.count || 0,
         pendingDeliveries: deliveriesRes.count || 0,
         overdueInvoices: invoicesRes.count || 0,
-        recentActivity: mockActivity
+        recentActivity: mockActivity,
       });
 
     } catch (error) {
@@ -1137,6 +1136,11 @@ export default function CustomerSelfService() {
           Recent Activity
         </Typography>
         <List>
+          {stats.recentActivity.length === 0 && (
+            <ListItem>
+              <ListItemText primary="No recent activity to show." secondary="Activity will appear here when delivery and service feeds are connected." />
+            </ListItem>
+          )}
           {stats.recentActivity.map((activity, index) => (
             <ListItem key={index} sx={{ alignItems: 'flex-start', py: 2 }}>
               <ListItemIcon>
@@ -1178,7 +1182,7 @@ export default function CustomerSelfService() {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="warning">
-          Customer account not found. Please contact support to set up your customer portal access.
+          Sign in required. Organization overview is available to signed-in team members.
         </Alert>
       </Box>
     );
@@ -1187,7 +1191,10 @@ export default function CustomerSelfService() {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        Customer Portal
+        Organization overview
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Org-wide summary for staff. Per-customer billing and open rentals are on Customer Detail and Rentals.
       </Typography>
 
       <Paper sx={{ mb: 3 }}>

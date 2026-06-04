@@ -165,10 +165,10 @@ export default function CustomerPortal() {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        Customer Portal
+        Organization overview
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Welcome back, {profile?.full_name}! Manage your orders, track deliveries, and view your account.
+        Signed-in staff view of org orders and inventory. Use Customer Detail and Rentals for per-account billing.
       </Typography>
 
       {error && (

@@ -105,7 +105,6 @@ const QuickBooksExport = lazy(() => import('./pages/QuickBooksExport'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const InvoiceEmailHistory = lazy(() => import('./pages/InvoiceEmailHistory'));
 const TaxRegionsPage = lazy(() => import('./pages/TaxRegions'));
-const CustomerPortal = lazy(() => import('./pages/CustomerPortal'));
 const BarcodeGenerator = lazy(() => import('./pages/BarcodeGenerator'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const ModernLandingPage = lazy(() => import('./pages/ModernLandingPage'));
@@ -281,7 +280,6 @@ function AppContent() {
                   <Route path="/p/:slug" element={<CustomPageViewer />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   {/* Customer registration route removed per App Store guidelines */}
-                  <Route path="/portal" element={<CustomerPortal />} />
                   <Route path="/fix-organization-link" element={<FixOrganizationLink />} />
                   <Route path="/connect-organization" element={<OAuthOrganizationLink />} />
 
@@ -346,6 +344,7 @@ function AppContent() {
                     <Route path="/lease-agreements" element={<LeaseAgreements />} />
                     <Route path="/industry-analytics" element={<IndustryAnalyticsDashboard />} />
                     <Route path="/custom-reports" element={<CustomReports />} />
+                    <Route path="/portal" element={<Navigate to="/customer-self-service" replace />} />
                     <Route path="/customer-self-service" element={<CustomerSelfService />} />
                     {import.meta.env.DEV && (
                       <Route path="/theme-showcase" element={<ThemeShowcase />} />
@@ -434,8 +433,8 @@ function AppContent() {
                       </RoleProtectedRoute>
                     } />
                     <Route path="/advanced-rentals" element={<Navigate to="/rentals" replace />} />
-                    <Route path="/data-utilities" element={<DataUtilities />} />
-                    
+                    <Route path="/data-utilities" element={<Navigate to="/owner-portal/tools" replace />} />
+
                     {/* Owner-only routes */}
                     <Route element={<OwnerProtectedRoute />}>
                       <Route path="/owner-portal/integration-settings" element={<Navigate to="/settings" replace />} />

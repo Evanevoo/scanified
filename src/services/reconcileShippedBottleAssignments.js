@@ -1,5 +1,6 @@
 import logger from '../utils/logger';
-import { fetchOrgRentalPricingContext, monthlyRateForNewRental } from '../utils/rentalPricing';
+import { fetchOrgRentalPricingContext } from '../utils/rentalPricing';
+import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssignedBottles';
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
@@ -137,42 +138,20 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
       continue;
     }
 
-    const { data: stillOpen } = await supabase
-      .from('rentals')
-      .select('id')
-      .eq('organization_id', organizationId)
-      .is('rental_end_date', null)
-      .or(`bottle_id.eq.${bottle.id},bottle_barcode.eq.${barcode}`)
-      .limit(1);
-
-    if (stillOpen?.length) continue;
-
-    const rentalAmount = assignId
-      ? monthlyRateForNewRental(assignId, bottle, pricingCtx)
-      : monthlyRateForNewRental(assignedCustomerValue, bottle, pricingCtx);
-
-    const insertPayload = {
-      organization_id: organizationId,
-      bottle_id: bottle.id,
-      bottle_barcode: bottle.barcode_number,
-      customer_id: assignedCustomerValue,
-      customer_name: assignName || 'Customer',
-      rental_start_date: shipmentDate,
-      rental_end_date: null,
-      rental_amount: rentalAmount,
-      rental_type: 'monthly',
-      tax_code: 'GST+PST',
-      tax_rate: 0.11,
-      location: bottle.location || 'SASKATOON',
-      status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    if (orderNumber != null) insertPayload.rental_order_number = orderNumber;
-
-    const { error: insErr } = await supabase.from('rentals').insert(insertPayload);
-    if (insErr) {
-      logger.warn('reconcileShippedBottleAssignments: insert rental', barcode, insErr);
+    const rentalResult = await createOpenRentalForShippedBottle(supabase, organizationId, {
+      bottle: {
+        ...bottle,
+        assigned_customer: assignedCustomerValue,
+        customer_name: assignName || bottle.customer_name,
+      },
+      customerId: assignedCustomerValue,
+      customerName: assignName || 'Customer',
+      rentalStartDate: shipmentDate,
+      orderNumber,
+      pricingCtx,
+    });
+    if (rentalResult.error) {
+      logger.warn('reconcileShippedBottleAssignments: insert rental', barcode, rentalResult.error);
     }
   }
 

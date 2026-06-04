@@ -505,9 +505,19 @@ export default function CustomerRentalHistory() {
                                               component={RouterLink}
                                               to={`/bottle/${encodeURIComponent(d.bottleId)}`}
                                               clickable
-                                              label="Open"
+                                              label="Bottle"
                                               variant="outlined"
                                               color="primary"
+                                            />
+                                          ) : d.bottleBarcode ? (
+                                            <Chip
+                                              size="small"
+                                              component={RouterLink}
+                                              to={`/assets/${encodeURIComponent(d.bottleBarcode)}/history`}
+                                              clickable
+                                              label="History"
+                                              variant="outlined"
+                                              color="secondary"
                                             />
                                           ) : (
                                             <Typography variant="caption" color="text.secondary">

@@ -4007,7 +4007,7 @@ export default function CustomerDetail() {
       <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.5 }, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.25, mb: 2 }}>
           <Typography variant="h5" fontWeight={700} color="primary">
-            📋 Rental History ({locationAssets.length} open — billing basis)
+            📋 Open rentals ({locationAssets.length} — billing basis)
           </Typography>
           {locationAssets.length > 0 && (
             <Button

@@ -66,6 +66,8 @@ import ImportApprovalDetail from './ImportApprovalDetail';
 import QuantityDiscrepancyDetector from '../components/QuantityDiscrepancyDetector';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
+import { createOpenRentalForShippedBottle } from '../services/backfillOpenRentalsForAssignedBottles';
+import { useSubscriptions } from '../context/SubscriptionContext';
 import { reconcileShippedBottleAssignments } from '../services/reconcileShippedBottleAssignments';
 import { finalizeVerifiedReturnBarcodes } from '../services/finalizeVerifiedReturnBarcodes';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
@@ -798,6 +800,7 @@ function determineVerificationStatus(record) {
 
 export default function ImportApprovals() {
   const { user, organization, profile } = useAuth();
+  const { refreshSilent } = useSubscriptions();
   const browserTz = typeof Intl !== 'undefined' && Intl.DateTimeFormat?.().resolvedOptions?.().timeZone;
   // Match Scanned Orders: profile first, then browser, then UTC for consistent display
   const displayTimezone = profile?.preferences?.timezone || browserTz || 'UTC';
@@ -7623,6 +7626,10 @@ return (
           await createDNSRentalRecord(record, row, newCustomerName, newCustomerId, orderNumber);
         }
       }
+
+      if (typeof refreshSilent === 'function') {
+        void refreshSilent();
+      }
     } catch (error) {
       logger.error('Error assigning bottles to customer:', error);
       setError('Failed to assign bottles: ' + error.message);
@@ -7826,56 +7833,23 @@ return (
   // Create rental record for assigned bottle (orderNumber so unverify can delete by rental_order_number)
   async function createRentalRecord(bottle, customerName, customerId, row, orderNumber = null) {
     try {
-      const { data: existingRental } = await supabase
-        .from('rentals')
-        .select('id')
-        .eq('bottle_barcode', bottle.barcode_number)
-        .eq('organization_id', organization?.id)
-        .is('rental_end_date', null)
-        .limit(1);
-
-      if (existingRental && existingRental.length > 0) {
-        logger.debug(`Rental record already exists for bottle ${bottle.barcode_number}`);
-        return;
-      }
-
-      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization?.id);
-      // Prefer CustomerListID for customer_id so Customer Detail / reports can find this rental.
+      if (!organization?.id) return;
       let resolvedCustomerId = customerId;
       if (!resolvedCustomerId || !/^[A-Za-z0-9-]+$/.test(resolvedCustomerId)) {
         const resolved =
-          (await resolveCustomerListId(supabase, organization?.id, customerId)) ||
-          (await resolveCustomerListId(supabase, organization?.id, customerName));
+          (await resolveCustomerListId(supabase, organization.id, customerId)) ||
+          (await resolveCustomerListId(supabase, organization.id, customerName));
         if (resolved?.customerListId) resolvedCustomerId = resolved.customerListId;
       }
-      const rental_amount = monthlyRateForNewRental(resolvedCustomerId || customerName, bottle, pricingCtx);
-
-      const insertPayload = {
-        organization_id: organization?.id,
-        bottle_id: bottle.id,
-        bottle_barcode: bottle.barcode_number,
-        customer_id: resolvedCustomerId || customerName,
-        customer_name: customerName,
-        rental_start_date: new Date().toISOString().split('T')[0],
-        rental_end_date: null,
-        rental_amount,
-        rental_type: 'monthly',
-        tax_code: 'GST+PST',
-        tax_rate: 0.11,
-        location: bottle.location || 'SASKATOON',
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      if (orderNumber != null) insertPayload.rental_order_number = orderNumber;
-
-      const { error: rentalError } = await supabase
-        .from('rentals')
-        .insert(insertPayload);
-
-      if (rentalError) {
-        logger.error('Error creating rental record:', rentalError);
-      } else {
+      const rentalResult = await createOpenRentalForShippedBottle(supabase, organization.id, {
+        bottle,
+        customerId: resolvedCustomerId || customerName,
+        customerName,
+        orderNumber,
+      });
+      if (rentalResult.error) {
+        logger.error('Error creating rental record:', rentalResult.error);
+      } else if (rentalResult.inserted) {
         logger.debug(`Created rental record for bottle ${bottle.barcode_number}, customer_id: ${customerId || customerName}`);
       }
     } catch (error) {
