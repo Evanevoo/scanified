@@ -665,14 +665,50 @@ export default function VerifiedOrders() {
         // Also clear verified_order_numbers from any matching imported_invoices/receipts
         try {
           for (const tbl of ['imported_invoices', 'imported_sales_receipts']) {
-            const { data: matchingRecords } = await supabase.from(tbl).select('id, data').eq('organization_id', organization.id);
-            for (const rec of (matchingRecords || [])) {
-              const recData = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
-              if (Array.isArray(recData?.verified_order_numbers) && recData.verified_order_numbers.some(n => normalizeOrderNum(n) === normalizedOrderNum)) {
-                recData.verified_order_numbers = recData.verified_order_numbers.filter(n => normalizeOrderNum(n) !== normalizedOrderNum);
-                await supabase.from(tbl).update({ data: recData }).eq('id', rec.id);
-                logger.log(`✅ Cleared verified_order_numbers for scanned order ${orderNumber} in ${tbl} record ${rec.id}`);
+            const { data: matchingRecords } = await supabase
+              .from(tbl)
+              .select('id, data, status')
+              .eq('organization_id', organization.id);
+            for (const rec of matchingRecords || []) {
+              let recData = rec.data;
+              if (typeof recData === 'string') {
+                try {
+                  recData = JSON.parse(recData);
+                } catch {
+                  recData = {};
+                }
               }
+              recData = recData || {};
+              const vor = Array.isArray(recData.verified_order_numbers)
+                ? recData.verified_order_numbers
+                : [];
+              const hadOrder =
+                vor.some((n) => normalizeOrderNum(n) === normalizedOrderNum) ||
+                (recData.rows || recData.line_items || []).some((row) => {
+                  const ref =
+                    row.order_number ||
+                    row.invoice_number ||
+                    row.reference_number ||
+                    row.sales_receipt_number;
+                  return ref && normalizeOrderNum(ref) === normalizedOrderNum;
+                });
+              if (!hadOrder) continue;
+
+              recData.verified_order_numbers = vor.filter(
+                (n) => normalizeOrderNum(n) !== normalizedOrderNum,
+              );
+              const reopen = {
+                data: recData,
+                status: 'pending',
+                approved_at: null,
+                verified_at: null,
+                verified_by: null,
+              };
+              if (tbl === 'imported_invoices') reopen.auto_approved = false;
+              await supabase.from(tbl).update(reopen).eq('id', rec.id);
+              logger.log(
+                `✅ Reopened ${tbl} record ${rec.id} for unverified scanned order ${orderNumber}`,
+              );
             }
           }
         } catch (vonErr) {

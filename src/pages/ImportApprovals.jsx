@@ -77,6 +77,7 @@ import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/
 import { coerceImportedRowPkForRpc, isValidImportedRowPk } from '../utils/coerceImportedRowPk';
 import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 import { buildOrderNumberVariants } from '../utils/orderNumberVariants';
+import { collectStillVerifiedOrderNormsOnApprovedImports } from '../utils/orderScanApprovalStatus';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -783,16 +784,21 @@ function determineVerificationStatus(record) {
   const orderNumber = data.order_number || data.reference_number;
   const verifiedOrders = data.verified_order_numbers || [];
   const normOrder = (n) => (n != null && n !== '') ? String(n).trim().replace(/^0+/, '') || String(n).trim() : '';
-  if (orderNumber && Array.isArray(verifiedOrders) && verifiedOrders.some(n => normOrder(n) === normOrder(orderNumber))) return 'VERIFIED';
-  
-  // Check verification state - check status field
-  if (
+  if (orderNumber && Array.isArray(verifiedOrders) && verifiedOrders.some(n => normOrder(n) === normOrder(orderNumber))) {
+    return 'VERIFIED';
+  }
+
+  const fileLevelApproved =
     record.status === 'approved' ||
     record.status === 'verified' ||
     record.auto_approved === true ||
     !!record.approved_at ||
-    !!record.verified_at
-  ) return 'VERIFIED';
+    !!record.verified_at;
+  if (fileLevelApproved) {
+    const vor = Array.isArray(verifiedOrders) ? verifiedOrders : [];
+    if (vor.length === 0) return 'VERIFIED';
+    return 'PENDING';
+  }
   if (record.processing) return 'IN_PROGRESS';
   
   return 'PENDING';
@@ -1639,12 +1645,12 @@ export default function ImportApprovals() {
       const [approvedInvoicesResult, approvedReceiptsResult] = await Promise.all([
         supabase
           .from('imported_invoices')
-          .select('data, approved_at, verified_at, auto_approved')
+          .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
           .or('status.in.(approved,verified),auto_approved.eq.true'),
         supabase
           .from('imported_sales_receipts')
-          .select('data, approved_at, verified_at, auto_approved')
+          .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
           .or('status.in.(approved,verified),auto_approved.eq.true')
       ]);
@@ -1652,59 +1658,64 @@ export default function ImportApprovals() {
       const approvedImports = [...(approvedInvoicesResult.data || []), ...(approvedReceiptsResult.data || [])];
       const approvedImportError = approvedInvoicesResult.error || approvedReceiptsResult.error;
       
-      if (!approvedImportError && approvedImports.length > 0) {
-        approvedImports.forEach(imp => {
-          const data = parseDataField(imp.data);
-          // Extract order numbers from all possible locations
-          const rows = data.rows || data.line_items || [];
-          rows.forEach(row => {
-            const orderNum = (row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number || '').toString().trim();
-            if (orderNum) {
-              approvedOrderNumbers.add(normalizeOrderNumForApproval(orderNum));
-            }
-          });
-          // Top-level order number
-          const topOrder = (data.order_number || data.reference_number || data.invoice_number || data.summary?.reference_number || '').toString().trim();
-          if (topOrder) approvedOrderNumbers.add(normalizeOrderNumForApproval(topOrder));
-          // verified_order_numbers array
-          if (Array.isArray(data.verified_order_numbers)) {
-            data.verified_order_numbers.forEach(n => {
-              const norm = normalizeOrderNumForApproval(n);
-              if (norm) approvedOrderNumbers.add(norm);
-            });
-          }
-        });
-      }
-      
-      // Reuse approvedImports (already fetched above) to build approved import order numbers (normalized)
-      const approvedImportOrderNumbers = new Set();
-      if (approvedImports) {
-        approvedImports.forEach(imp => {
-          const data = parseDataField(imp.data);
-          const rows = data.rows || data.line_items || [];
-          rows.forEach(row => {
-            const orderNum = (row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number || '').toString().trim();
-            if (orderNum) {
-              approvedImportOrderNumbers.add(normalizeOrderNumForApproval(orderNum));
-            }
-          });
-        });
-      }
-      
-      // Pre-build approved import lookup (normalized order → approval time) to avoid per-order DB queries
+      const stillVerifiedOnApprovedImports = !approvedImportError
+        ? collectStillVerifiedOrderNormsOnApprovedImports(approvedImports, normalizeOrderNumForApproval)
+        : new Set();
+      stillVerifiedOnApprovedImports.forEach((norm) => approvedOrderNumbers.add(norm));
+
+      const approvedImportOrderNumbers = stillVerifiedOnApprovedImports;
+
       const approvedImportTimestamps = new Map();
-      if (approvedImports) {
-        approvedImports.forEach(imp => {
+      if (!approvedImportError && approvedImports.length > 0) {
+        approvedImports.forEach((imp) => {
           const data = parseDataField(imp.data);
-          const rows = data.rows || data.line_items || [];
+          const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
           const approvalTime = new Date(imp.approved_at || imp.verified_at || 0).getTime();
-          rows.forEach(row => {
-            const orderNum = (row.order_number || row.invoice_number || row.reference_number || row.sales_receipt_number || '').toString().trim();
-            if (orderNum) {
-              const norm = normalizeOrderNumForApproval(orderNum);
-              const existing = approvedImportTimestamps.get(norm) || 0;
-              if (approvalTime > existing) approvedImportTimestamps.set(norm, approvalTime);
-            }
+          const norms =
+            vor.length > 0
+              ? vor.map((n) => normalizeOrderNumForApproval(n)).filter(Boolean)
+              : (data.rows || data.line_items || [])
+                  .map((row) =>
+                    normalizeOrderNumForApproval(
+                      row.order_number ||
+                        row.invoice_number ||
+                        row.reference_number ||
+                        row.sales_receipt_number,
+                    ),
+                  )
+                  .filter(Boolean);
+          norms.forEach((norm) => {
+            const existing = approvedImportTimestamps.get(norm) || 0;
+            if (approvalTime > existing) approvedImportTimestamps.set(norm, approvalTime);
+          });
+        });
+      }
+
+      // Per-order unverify on a still-approved multi-order file: surface cards for orders no longer in vor.
+      const approvedInvoiceIds = new Set((approvedInvoicesResult.data || []).map((r) => r.id));
+      if (!approvedImportError && approvedImports.length > 0) {
+        approvedImports.forEach((importRecord) => {
+          const data = parseDataField(importRecord.data);
+          const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
+          if (vor.length === 0) return;
+          const targetList = approvedInvoiceIds.has(importRecord.id)
+            ? individualInvoices
+            : individualReceipts;
+          const existingNorms = new Set(
+            targetList.map((r) => normalizeOrderNumForApproval(getOrderNumber(parseDataField(r.data)))),
+          );
+          splitImportIntoIndividualRecords(importRecord).forEach((split) => {
+            const norm = normalizeOrderNumForApproval(getOrderNumber(split.data));
+            if (!norm || stillVerifiedOnApprovedImports.has(norm) || existingNorms.has(norm)) return;
+            targetList.push({
+              ...split,
+              status: 'pending',
+              approved_at: null,
+              verified_at: null,
+              auto_approved: false,
+              _reopenedAfterUnverify: true,
+            });
+            existingNorms.add(norm);
           });
         });
       }
