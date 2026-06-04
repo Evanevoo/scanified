@@ -2,6 +2,7 @@ import {
   collectStillVerifiedOrderNormsOnApprovedImports,
   extractOrderNumbersFromImportData,
   importUsesPerOrderVerifiedList,
+  isRecordReopenForVerification,
   normalizeOrderNumForLookup,
   bottleReflectsCompletedReturn,
   isScanEffectiveForAssignmentReplay,
@@ -39,6 +40,15 @@ describe('orderScanApprovalStatus', () => {
         customer_name: 'Prairie Fleet',
       }),
     ).toBe(false);
+  });
+
+  it('treats pending status as reopen even with stale approved_at', () => {
+    expect(
+      isRecordReopenForVerification({
+        status: 'pending',
+        approved_at: '2026-06-04T12:00:00.000Z',
+      }),
+    ).toBe(true);
   });
 
   it('detects per-order verified list even when empty after unverify', () => {

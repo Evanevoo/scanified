@@ -80,6 +80,7 @@ import { buildOrderNumberVariants } from '../utils/orderNumberVariants';
 import {
   collectStillVerifiedOrderNormsOnApprovedImports,
   importUsesPerOrderVerifiedList,
+  isRecordReopenForVerification,
 } from '../utils/orderScanApprovalStatus';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
@@ -791,15 +792,17 @@ function determineVerificationStatus(record) {
     return 'VERIFIED';
   }
 
-  const fileLevelApproved =
-    record.status === 'approved' ||
-    record.status === 'verified' ||
-    record.auto_approved === true ||
-    !!record.approved_at ||
-    !!record.verified_at;
-  if (fileLevelApproved) {
-    if (!importUsesPerOrderVerifiedList(data)) return 'VERIFIED';
-    return 'PENDING';
+  if (!isRecordReopenForVerification(record)) {
+    const fileLevelApproved =
+      record.status === 'approved' ||
+      record.status === 'verified' ||
+      record.auto_approved === true ||
+      !!record.approved_at ||
+      !!record.verified_at;
+    if (fileLevelApproved) {
+      if (!importUsesPerOrderVerifiedList(data)) return 'VERIFIED';
+      return 'PENDING';
+    }
   }
   if (record.processing) return 'IN_PROGRESS';
   
@@ -1115,9 +1118,13 @@ export default function ImportApprovals() {
           return false;
         }
         
-        // CRITICAL: Filter out approved/verified/rejected records - they should NOT appear in Order Verification
         const recordStatusLower = (record.status || '').toLowerCase();
-        if (recordStatusLower === 'approved' || recordStatusLower === 'verified' || recordStatusLower === 'rejected') {
+        if (
+          !isRecordReopenForVerification(record) &&
+          (recordStatusLower === 'approved' ||
+            recordStatusLower === 'verified' ||
+            recordStatusLower === 'rejected')
+        ) {
           logger.debug(`Removing record ${record.id} (${orderNum}): Status is verified`);
           return false;
         }
@@ -1224,6 +1231,42 @@ export default function ImportApprovals() {
   // Get filtered records
   const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
   const filteredReceipts = deduplicateRecords(filterRecords(pendingReceipts));
+
+  // #region agent log
+  useEffect(() => {
+    if (!pendingInvoices?.length) return;
+    const explainNorm = (norm) => {
+      const matches = (pendingInvoices || []).filter(
+        (r) => normalizeOrderNumForApproval(getOrderNumber(parseDataField(r.data))) === norm,
+      );
+      return matches.map((r) => ({
+        displayId: r.displayId,
+        status: r.status,
+        displayStatus: determineVerificationStatus(r),
+        passesFilter: filterRecords([r]).length > 0,
+        passesDedupe: deduplicateRecords(filterRecords([r])).length > 0,
+      }));
+    };
+    try {
+      sessionStorage.setItem(
+        'scanified_ov_filter_debug',
+        JSON.stringify({
+          sessionId: 'fb3b83',
+          runId: 'post-fix-v4',
+          pendingCount: pendingInvoices.length,
+          filteredCount: filteredInvoices.length,
+          statusFilter,
+          search: search || '',
+          probe75764: explainNorm('75764'),
+          probe75794: explainNorm('75794'),
+          timestamp: Date.now(),
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [pendingInvoices, filteredInvoices, search, statusFilter, locationFilter]);
+  // #endregion
 
   /** Stats match the visible import list (same filter + dedupe as "X imports showing"). */
   const verificationStats = useMemo(() => {
@@ -1879,12 +1922,13 @@ export default function ImportApprovals() {
       const cleanedRecords = allRecords.filter(record => {
         const status = (record.status || '').toLowerCase();
         if (
-          status === 'approved' ||
-          status === 'rejected' ||
-          status === 'verified' ||
-          record.auto_approved === true ||
-          !!record.approved_at ||
-          !!record.verified_at
+          !isRecordReopenForVerification(record) &&
+          (status === 'approved' ||
+            status === 'rejected' ||
+            status === 'verified' ||
+            record.auto_approved === true ||
+            !!record.approved_at ||
+            !!record.verified_at)
         ) {
           return false;
         }
@@ -1906,37 +1950,45 @@ export default function ImportApprovals() {
 
       // #region agent log
       {
-        const probe = (norm) =>
-          cleanedRecords.filter((r) => {
-            const n = normalizeOrderNumForApproval(getOrderNumber(parseDataField(r.data)));
-            return n === norm;
-          }).map((r) => ({
-            id: String(r.id || '').slice(0, 24),
-            status: r.status,
-            displayStatus: determineVerificationStatus(r),
-            reopened: Boolean(r._reopenedAfterUnverify),
-            isScannedOnly: Boolean(r.is_scanned_only),
-          }));
+        const probeNorm = (norm) =>
+          cleanedRecords
+            .filter((r) => normalizeOrderNumForApproval(getOrderNumber(parseDataField(r.data))) === norm)
+            .map((r) => ({
+              id: String(r.id || '').slice(0, 24),
+              displayId: String(r.displayId || ''),
+              status: r.status,
+              approved_at: r.approved_at || null,
+              displayStatus: determineVerificationStatus(r),
+              reopen: isRecordReopenForVerification(r),
+              reopened: Boolean(r._reopenedAfterUnverify),
+              isScannedOnly: Boolean(r.is_scanned_only),
+            }));
+        const payload = {
+          sessionId: 'fb3b83',
+          runId: 'post-fix-v4',
+          hypothesisId: 'U4-U5',
+          location: 'ImportApprovals.jsx:fetchVerificationStats',
+          message: 'order verification list assembly',
+          data: {
+            totalCards: cleanedRecords.length,
+            stillVerifiedCount: stillVerifiedOnApprovedImports.size,
+            probe75764: probeNorm('75764'),
+            probe75794: probeNorm('75794'),
+            reopenedCount: cleanedRecords.filter((r) => r._reopenedAfterUnverify).length,
+            afterDedupeWouldBe: deduplicateRecords(cleanedRecords).length,
+          },
+          timestamp: Date.now(),
+        };
+        try {
+          sessionStorage.setItem('scanified_ov_debug', JSON.stringify(payload));
+        } catch {
+          /* ignore */
+        }
         if (typeof fetch === 'function') {
           fetch('http://127.0.0.1:7758/ingest/242000ab-af8f-404d-8cf3-4f163de25904', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fb3b83' },
-            body: JSON.stringify({
-              sessionId: 'fb3b83',
-              runId: 'post-fix-v3',
-              hypothesisId: 'U1-U3',
-              location: 'ImportApprovals.jsx:fetchVerificationStats',
-              message: 'order verification list assembly',
-              data: {
-                totalCards: cleanedRecords.length,
-                stillVerifiedCount: stillVerifiedOnApprovedImports.size,
-                probe75764: probe('75764'),
-                probe75794: probe('75794'),
-                reopenedCount: cleanedRecords.filter((r) => r._reopenedAfterUnverify).length,
-                afterDedupeWouldBe: deduplicateRecords(cleanedRecords).length,
-              },
-              timestamp: Date.now(),
-            }),
+            body: JSON.stringify(payload),
           }).catch(() => {});
         }
       }

@@ -77,6 +77,16 @@ export function importUsesPerOrderVerifiedList(data) {
   return Object.prototype.hasOwnProperty.call(parsed, 'verified_order_numbers');
 }
 
+/** Import row reopened for Order Verification (unverify) — ignore stale approved timestamps. */
+export function isRecordReopenForVerification(record) {
+  const status = String(record?.status || '').toLowerCase();
+  return (
+    status === 'pending' ||
+    status === 'processing' ||
+    record?._reopenedAfterUnverify === true
+  );
+}
+
 /**
  * Order numbers still verified on approved import files.
  * Per-order files: only norms in verified_order_numbers (empty array = none left verified).
