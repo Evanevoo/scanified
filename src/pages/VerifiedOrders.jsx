@@ -43,9 +43,12 @@ import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { dedupeVerifiedOrdersByOrderNumber } from '../utils/verifiedOrdersDedup';
 import {
   collectVerifiedOrderNumbersFromImports,
+  filterScannedOrdersWithoutImportCoverage,
   flattenImportRecordsToOrderRows,
   parseImportDataField,
+  supplementImportRowsForScannedOrders,
 } from '../utils/verifiedOrdersList';
+import { resolveOrderNumberFromListEntry } from '../utils/verifiedOrdersDedup';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
@@ -152,16 +155,15 @@ export default function VerifiedOrders() {
             : 'in',
       }));
 
+      const importRecordSets = [
+        { records: invoices, tableType: 'invoice' },
+        { records: receipts, tableType: 'receipt' },
+        { records: pendingInvoices, tableType: 'invoice' },
+        { records: pendingReceipts, tableType: 'receipt' },
+      ];
+
       // Expand every import file into per-order Invoice/Receipt rows (approved + pending).
-      const importOrderRows = flattenImportRecordsToOrderRows(
-        [
-          { records: invoices, tableType: 'invoice' },
-          { records: receipts, tableType: 'receipt' },
-          { records: pendingInvoices, tableType: 'invoice' },
-          { records: pendingReceipts, tableType: 'receipt' },
-        ],
-        normalizeOrderNumForList,
-      );
+      let importOrderRows = flattenImportRecordsToOrderRows(importRecordSets, normalizeOrderNumForList);
       importOrderRows.forEach((row) => {
         row.icon = row.type === 'invoice' ? <InvoiceIcon /> : <ShippingIcon />;
       });
@@ -225,8 +227,26 @@ export default function VerifiedOrders() {
         [invoices, receipts, pendingInvoices, pendingReceipts],
         normalizeOrderNumForList,
       );
-      const scannedOrders = groupScansByOrder(scansForGroup).filter((o) =>
-        verifiedOrderNums.has(normalizeOrderNumForList(o.order_number))
+      const scannedOrdersRaw = groupScansByOrder(scansForGroup).filter((o) =>
+        verifiedOrderNums.has(normalizeOrderNumForList(o.order_number)),
+      );
+
+      importOrderRows = supplementImportRowsForScannedOrders({
+        importOrderRows,
+        scannedOrders: scannedOrdersRaw,
+        recordSets: importRecordSets,
+        normalizeOrderNum: normalizeOrderNumForList,
+      });
+      importOrderRows.forEach((row) => {
+        if (!row.icon) {
+          row.icon = row.type === 'invoice' ? <InvoiceIcon /> : <ShippingIcon />;
+        }
+      });
+
+      const scannedOrders = filterScannedOrdersWithoutImportCoverage(
+        scannedOrdersRaw,
+        importOrderRows,
+        normalizeOrderNumForList,
       );
 
       const allOrders = [...importOrderRows, ...scannedOrders];
@@ -287,6 +307,40 @@ export default function VerifiedOrders() {
 
       // One row per order number; invoice beats scanned when names differ (e.g. QB vs scan customer).
       const deduplicatedOrders = dedupeVerifiedOrdersByOrderNumber(allOrders);
+
+      // #region agent log
+      {
+        const probeNorm = '75794';
+        const normProbe = (o) =>
+          normalizeOrderNumForList(resolveOrderNumberFromListEntry(o) || o.order_number);
+        const pick = (list) =>
+          (list || [])
+            .filter((o) => normProbe(o) === probeNorm)
+            .map((o) => ({ type: o.type, displayType: o.displayType, id: String(o.id || '').slice(0, 24) }));
+        if (typeof fetch === 'function') {
+          fetch('http://127.0.0.1:7758/ingest/242000ab-af8f-404d-8cf3-4f163de25904', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fb3b83' },
+            body: JSON.stringify({
+              sessionId: 'fb3b83',
+              runId: 'post-fix-v2',
+              hypothesisId: 'V1-V3',
+              location: 'VerifiedOrders.jsx:fetchVerifiedOrders',
+              message: 'verified orders assembly for 75794',
+              data: {
+                importRows: pick(importOrderRows),
+                scannedRaw: pick(scannedOrdersRaw),
+                scannedKept: pick(scannedOrders),
+                deduped: pick(deduplicatedOrders),
+                inVerifiedOrderNums: verifiedOrderNums.has(probeNorm),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+        }
+      }
+      // #endregion
+
       // Sort by latest first (approved_at / verified_at / created_at descending)
       const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
       deduplicatedOrders.sort((a, b) => getOrderDate(b) - getOrderDate(a));
