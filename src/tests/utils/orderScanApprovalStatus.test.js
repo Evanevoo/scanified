@@ -1,6 +1,7 @@
 import {
   collectStillVerifiedOrderNormsOnApprovedImports,
   extractOrderNumbersFromImportData,
+  importUsesPerOrderVerifiedList,
   normalizeOrderNumForLookup,
   bottleReflectsCompletedReturn,
   isScanEffectiveForAssignmentReplay,
@@ -38,6 +39,28 @@ describe('orderScanApprovalStatus', () => {
         customer_name: 'Prairie Fleet',
       }),
     ).toBe(false);
+  });
+
+  it('detects per-order verified list even when empty after unverify', () => {
+    expect(importUsesPerOrderVerifiedList({ verified_order_numbers: [] })).toBe(true);
+    expect(importUsesPerOrderVerifiedList({ rows: [{ reference_number: '1' }] })).toBe(false);
+  });
+
+  it('empty vor on per-order approved import means no orders still verified', () => {
+    const norms = collectStillVerifiedOrderNormsOnApprovedImports(
+      [
+        {
+          status: 'approved',
+          approved_at: '2026-06-04T12:00:00.000Z',
+          data: {
+            verified_order_numbers: [],
+            rows: [{ reference_number: '75764' }, { reference_number: '75794' }],
+          },
+        },
+      ],
+      normalizeOrderNumForLookup,
+    );
+    expect(norms.size).toBe(0);
   });
 
   it('only counts vor entries as verified on per-order approved imports', () => {

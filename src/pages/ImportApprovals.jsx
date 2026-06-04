@@ -77,7 +77,10 @@ import { resolveCustomerListId, clearResolveCustomerListIdMemo } from '../utils/
 import { coerceImportedRowPkForRpc, isValidImportedRowPk } from '../utils/coerceImportedRowPk';
 import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
 import { buildOrderNumberVariants } from '../utils/orderNumberVariants';
-import { collectStillVerifiedOrderNormsOnApprovedImports } from '../utils/orderScanApprovalStatus';
+import {
+  collectStillVerifiedOrderNormsOnApprovedImports,
+  importUsesPerOrderVerifiedList,
+} from '../utils/orderScanApprovalStatus';
 
 /** Normalize numeric SO strings so 071760 matches 71760; alphanumeric (e.g. S47852) stays trimmed only. */
 function normalizeOrderNumForApproval(num) {
@@ -795,8 +798,7 @@ function determineVerificationStatus(record) {
     !!record.approved_at ||
     !!record.verified_at;
   if (fileLevelApproved) {
-    const vor = Array.isArray(verifiedOrders) ? verifiedOrders : [];
-    if (vor.length === 0) return 'VERIFIED';
+    if (!importUsesPerOrderVerifiedList(data)) return 'VERIFIED';
     return 'PENDING';
   }
   if (record.processing) return 'IN_PROGRESS';
@@ -1581,16 +1583,6 @@ export default function ImportApprovals() {
         individualReceipts.push(...splitRecords);
       });
       
-      // Build import order numbers set from split records FIRST (for consistent deduplication)
-      const importOrderNumbers = new Set();
-      [...individualInvoices, ...individualReceipts].forEach(record => {
-        const data = parseDataField(record.data);
-        const orderNum = getOrderNumber(data);
-        if (orderNum) {
-          importOrderNumbers.add(orderNum.toString().trim());
-        }
-      });
-      
       // Handle errors gracefully - if bottle_scans query fails, continue with empty array
       if (scannedError) {
         logger.warn('⚠️ Scanned rows query error (bottle_scans):', scannedError);
@@ -1669,21 +1661,23 @@ export default function ImportApprovals() {
       if (!approvedImportError && approvedImports.length > 0) {
         approvedImports.forEach((imp) => {
           const data = parseDataField(imp.data);
-          const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
           const approvalTime = new Date(imp.approved_at || imp.verified_at || 0).getTime();
-          const norms =
-            vor.length > 0
-              ? vor.map((n) => normalizeOrderNumForApproval(n)).filter(Boolean)
-              : (data.rows || data.line_items || [])
-                  .map((row) =>
-                    normalizeOrderNumForApproval(
-                      row.order_number ||
-                        row.invoice_number ||
-                        row.reference_number ||
-                        row.sales_receipt_number,
-                    ),
-                  )
-                  .filter(Boolean);
+          let norms = [];
+          if (importUsesPerOrderVerifiedList(data)) {
+            const vor = Array.isArray(data.verified_order_numbers) ? data.verified_order_numbers : [];
+            norms = vor.map((n) => normalizeOrderNumForApproval(n)).filter(Boolean);
+          } else {
+            norms = (data.rows || data.line_items || [])
+              .map((row) =>
+                normalizeOrderNumForApproval(
+                  row.order_number ||
+                    row.invoice_number ||
+                    row.reference_number ||
+                    row.sales_receipt_number,
+                ),
+              )
+              .filter(Boolean);
+          }
           norms.forEach((norm) => {
             const existing = approvedImportTimestamps.get(norm) || 0;
             if (approvalTime > existing) approvedImportTimestamps.set(norm, approvalTime);
@@ -1691,13 +1685,12 @@ export default function ImportApprovals() {
         });
       }
 
-      // Per-order unverify on a still-approved multi-order file: surface cards for orders no longer in vor.
+      // Per-order unverify on a still-approved file: surface cards for orders no longer in vor.
       const approvedInvoiceIds = new Set((approvedInvoicesResult.data || []).map((r) => r.id));
       if (!approvedImportError && approvedImports.length > 0) {
         approvedImports.forEach((importRecord) => {
           const data = parseDataField(importRecord.data);
-          const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
-          if (vor.length === 0) return;
+          if (!importUsesPerOrderVerifiedList(data)) return;
           const targetList = approvedInvoiceIds.has(importRecord.id)
             ? individualInvoices
             : individualReceipts;
@@ -1719,6 +1712,13 @@ export default function ImportApprovals() {
           });
         });
       }
+
+      const importOrderNumbers = new Set();
+      [...individualInvoices, ...individualReceipts].forEach((record) => {
+        const data = parseDataField(record.data);
+        const orderNum = getOrderNumber(data);
+        if (orderNum) importOrderNumbers.add(orderNum.toString().trim());
+      });
       
       const scannedOnlyRecords = Object.entries(orderGroups)
           .filter(([groupKey, scans]) => {
@@ -1890,6 +1890,44 @@ export default function ImportApprovals() {
       logger.debug('Final allRecords:', { individualInvoices: individualInvoices.length, individualReceipts: individualReceipts.length, scannedOnly: deduplicatedScannedOnly.length, afterCleanup: cleanedRecords.length });
       
       logger.debug(`Data fetch completed in ${Date.now() - startTime}ms — ${cleanedRecords.length} records`);
+
+      // #region agent log
+      {
+        const probe = (norm) =>
+          cleanedRecords.filter((r) => {
+            const n = normalizeOrderNumForApproval(getOrderNumber(parseDataField(r.data)));
+            return n === norm;
+          }).map((r) => ({
+            id: String(r.id || '').slice(0, 24),
+            status: r.status,
+            displayStatus: determineVerificationStatus(r),
+            reopened: Boolean(r._reopenedAfterUnverify),
+            isScannedOnly: Boolean(r.is_scanned_only),
+          }));
+        if (typeof fetch === 'function') {
+          fetch('http://127.0.0.1:7758/ingest/242000ab-af8f-404d-8cf3-4f163de25904', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fb3b83' },
+            body: JSON.stringify({
+              sessionId: 'fb3b83',
+              runId: 'post-fix-v3',
+              hypothesisId: 'U1-U3',
+              location: 'ImportApprovals.jsx:fetchVerificationStats',
+              message: 'order verification list assembly',
+              data: {
+                totalCards: cleanedRecords.length,
+                stillVerifiedCount: stillVerifiedOnApprovedImports.size,
+                probe75764: probe('75764'),
+                probe75794: probe('75794'),
+                reopenedCount: cleanedRecords.filter((r) => r._reopenedAfterUnverify).length,
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+        }
+      }
+      // #endregion
+
       setPendingInvoices(cleanedRecords);
       if (!silent) setLoading(false);
       
