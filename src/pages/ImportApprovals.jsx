@@ -784,11 +784,20 @@ function determineVerificationStatus(record) {
   // Check for warnings
   if (data.warnings && data.warnings.length > 0) return 'INVESTIGATION';
   
+  if (record._reopenedAfterUnverify) {
+    return 'PENDING';
+  }
+
   // Per-order verification: this order may have been verified in a multi-order import
   const orderNumber = data.order_number || data.reference_number;
   const verifiedOrders = data.verified_order_numbers || [];
   const normOrder = (n) => (n != null && n !== '') ? String(n).trim().replace(/^0+/, '') || String(n).trim() : '';
-  if (orderNumber && Array.isArray(verifiedOrders) && verifiedOrders.some(n => normOrder(n) === normOrder(orderNumber))) {
+  if (
+    !isRecordReopenForVerification(record) &&
+    orderNumber &&
+    Array.isArray(verifiedOrders) &&
+    verifiedOrders.some((n) => normOrder(n) === normOrder(orderNumber))
+  ) {
     return 'VERIFIED';
   }
 
@@ -1252,7 +1261,7 @@ export default function ImportApprovals() {
         'scanified_ov_filter_debug',
         JSON.stringify({
           sessionId: 'fb3b83',
-          runId: 'post-fix-v4',
+          runId: 'post-fix-v5',
           pendingCount: pendingInvoices.length,
           filteredCount: filteredInvoices.length,
           statusFilter,
@@ -1583,16 +1592,12 @@ export default function ImportApprovals() {
           .from('imported_invoices')
           .select('*')
           .eq('organization_id', organization.id)
-          .neq('status', 'approved')
-          .neq('status', 'verified')
-          .neq('status', 'rejected'),
+          .not('status', 'eq', 'rejected'),
         supabase
           .from('imported_sales_receipts')
           .select('*')
           .eq('organization_id', organization.id)
-          .neq('status', 'approved')
-          .neq('status', 'verified')
-          .neq('status', 'rejected'),
+          .not('status', 'eq', 'rejected'),
         supabase
           .from('bottle_scans')
           .select('*')
@@ -1756,6 +1761,12 @@ export default function ImportApprovals() {
           splitImportIntoIndividualRecords(importRecord).forEach((split) => {
             const norm = normalizeOrderNumForApproval(getOrderNumber(split.data));
             if (!norm || stillVerifiedOnApprovedImports.has(norm) || existingNorms.has(norm)) return;
+            const splitData = parseDataField(split.data);
+            const sanitizedVor = (
+              Array.isArray(splitData?.verified_order_numbers)
+                ? splitData.verified_order_numbers
+                : []
+            ).filter((n) => normalizeOrderNumForApproval(n) !== norm);
             targetList.push({
               ...split,
               status: 'pending',
@@ -1763,6 +1774,10 @@ export default function ImportApprovals() {
               verified_at: null,
               auto_approved: false,
               _reopenedAfterUnverify: true,
+              data: {
+                ...splitData,
+                verified_order_numbers: sanitizedVor,
+              },
             });
             existingNorms.add(norm);
           });
@@ -1770,12 +1785,20 @@ export default function ImportApprovals() {
       }
 
       const importOrderNumbers = new Set();
+      const importOrderNorms = new Set();
       [...individualInvoices, ...individualReceipts].forEach((record) => {
         const data = parseDataField(record.data);
         const orderNum = getOrderNumber(data);
         if (orderNum) importOrderNumbers.add(orderNum.toString().trim());
+        const norm = normalizeOrderNumForApproval(orderNum);
+        if (norm) importOrderNorms.add(norm);
       });
-      
+      const hasImportForOrderNorm = (orderNumber) => {
+        const raw = String(orderNumber ?? '').trim();
+        const norm = normalizeOrderNumForApproval(raw);
+        return (raw && importOrderNumbers.has(raw)) || (norm && importOrderNorms.has(norm));
+      };
+
       const scannedOnlyRecords = Object.entries(orderGroups)
           .filter(([groupKey, scans]) => {
             const orderNumber = groupKey.split('\t')[0];
@@ -1790,7 +1813,7 @@ export default function ImportApprovals() {
         const firstScan = preferScanWithCustomerId(scans);
         const customerName = firstScan.customer_name || firstScan.customer || 'Unknown Customer';
         const customerId = firstScan.customer_id || firstScan.CustomerID || firstScan.CustomerId || firstScan.CustomerListID || null;
-        const hasMatchingImport = importOrderNumbers.has(orderNumber);
+        const hasMatchingImport = hasImportForOrderNorm(orderNumber);
         const safeCustomerSuffix = (customerId || customerName || 'u').toString().replace(/[\t\n]/g, '_').slice(0, 80);
         
         // Deduplicate scans by barcode+mode (same barcode can have both SHIP and RETURN)
@@ -1885,11 +1908,10 @@ export default function ImportApprovals() {
           return true; // Keep records without order numbers (shouldn't happen)
         }
         
-        const orderNumStr = orderNum.toString().trim();
-        const orderNumNorm = normalizeOrderNumForApproval(orderNumStr);
-        const hasMatchingImport = importOrderNumbers.has(orderNumStr);
-        const hasMatchingApprovedImport = approvedOrderNumbers.has(orderNumNorm);
-        
+        const orderNumNorm = normalizeOrderNumForApproval(orderNum);
+        const hasMatchingImport = hasImportForOrderNorm(orderNum);
+        const hasMatchingApprovedImport = orderNumNorm && approvedOrderNumbers.has(orderNumNorm);
+
         return !hasMatchingImport && !hasMatchingApprovedImport;
       });
       
@@ -1936,7 +1958,11 @@ export default function ImportApprovals() {
         const orderNum = getOrderNumber(data);
         if (orderNum) {
           const norm = normalizeOrderNumForApproval(orderNum);
-          if (norm && approvedOrderNumbers.has(norm)) {
+          if (
+            norm &&
+            approvedOrderNumbers.has(norm) &&
+            !isRecordReopenForVerification(record)
+          ) {
             logger.debug(`Removing record ${record.id} (order ${orderNum}): order is in approvedOrderNumbers`);
             return false;
           }
@@ -1965,8 +1991,8 @@ export default function ImportApprovals() {
             }));
         const payload = {
           sessionId: 'fb3b83',
-          runId: 'post-fix-v4',
-          hypothesisId: 'U4-U5',
+              runId: 'post-fix-v5',
+              hypothesisId: 'U6-U8',
           location: 'ImportApprovals.jsx:fetchVerificationStats',
           message: 'order verification list assembly',
           data: {
