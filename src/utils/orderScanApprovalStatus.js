@@ -71,10 +71,16 @@ export function isImportRowFileLevelApproved(imp) {
   );
 }
 
+/** True when import JSON tracks per-order verify (even if the array is empty after unverify). */
+export function importUsesPerOrderVerifiedList(data) {
+  const parsed = parseImportData(data);
+  return Object.prototype.hasOwnProperty.call(parsed, 'verified_order_numbers');
+}
+
 /**
  * Order numbers still verified on approved import files.
- * When verified_order_numbers is used (per-order verify), only those norms count — not every row on the file.
- * Legacy whole-file approval (empty vor) still exposes all line order refs.
+ * Per-order files: only norms in verified_order_numbers (empty array = none left verified).
+ * Legacy whole-file approval (no verified_order_numbers key): all line order refs stay verified.
  */
 export function collectStillVerifiedOrderNormsOnApprovedImports(
   approvedImports,
@@ -84,8 +90,8 @@ export function collectStillVerifiedOrderNormsOnApprovedImports(
   for (const imp of approvedImports || []) {
     if (!isImportRowFileLevelApproved(imp)) continue;
     const data = parseImportData(imp.data);
-    const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
-    if (vor.length > 0) {
+    if (importUsesPerOrderVerifiedList(data)) {
+      const vor = Array.isArray(data.verified_order_numbers) ? data.verified_order_numbers : [];
       for (const n of vor) {
         const norm = normalize(String(n ?? '').trim());
         if (norm) norms.add(norm);
