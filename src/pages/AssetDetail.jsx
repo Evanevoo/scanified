@@ -55,6 +55,7 @@ import {
   bottleHasStaleCustomerAssignment,
   isActiveCustomerAssignment,
   staleBottleCustomerLabel,
+  mergeCustomerIntoAssignDirectory,
 } from '../utils/bottleCustomerDirectory';
 import {
   isPendingOrderScanRecord,
@@ -107,6 +108,37 @@ const customerOptionLabel = (option) => {
   if (name && listId) return `${name} (${listId})${suffix}`;
   if (name) return `${name}${suffix}`;
   return listId;
+};
+
+/** ID persisted on bottles.assigned_customer — prefer QB list id, else row UUID. */
+const customerAssignStorageId = (customer) => {
+  if (!customer) return null;
+  const listId = String(customer.CustomerListID ?? '').trim();
+  if (listId) return listId;
+  const rowId = String(customer.id ?? '').trim();
+  return rowId || null;
+};
+
+const customerRowMatchesAssignId = (customer, assignId) => {
+  const id = String(assignId ?? '').trim();
+  if (!id || !customer) return false;
+  return (
+    String(customer.CustomerListID ?? '').trim() === id ||
+    String(customer.id ?? '').trim() === id ||
+    String(customer.name ?? '').trim() === id ||
+    String(customer.Name ?? '').trim() === id
+  );
+};
+
+const findCustomerByAssignId = (assignId, ...pools) => {
+  const id = String(assignId ?? '').trim();
+  if (!id) return null;
+  for (const pool of pools) {
+    if (!pool?.length) continue;
+    const hit = pool.find((c) => customerRowMatchesAssignId(c, id));
+    if (hit) return hit;
+  }
+  return null;
 };
 const normalizeStatus = (s) => {
   if (s == null || s === '') return 'empty';
@@ -356,6 +388,7 @@ export default function AssetDetail() {
   const [customerAssignSearchError, setCustomerAssignSearchError] = useState('');
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const customerSearchTimerRef = useRef(null);
+  const editAssignedCustomerRef = useRef('');
   const [gasTypes, setGasTypes] = useState([]);
   const staleClearRepairKeyRef = useRef(null);
   const historySyncRepairKeyRef = useRef(null);
@@ -483,7 +516,7 @@ export default function AssetDetail() {
       if (bottleHasStaleCustomerAssignment(asset, customers)) return;
       const assigned = String(asset.assigned_customer || asset.customer_uuid || '').trim();
       const name = String(asset.customer_name || '').trim();
-      if (assigned || name) return;
+      if ((assigned || name) && effectiveStatus !== 'empty') return;
 
       const repairKey = `orphan-rentals|${asset.id}`;
       if (orphanRentalsClosedRef.current === repairKey) return;
@@ -510,6 +543,7 @@ export default function AssetDetail() {
     asset?.customer_name,
     asset?.customer_uuid,
     asset?.barcode_number,
+    effectiveStatus,
     customers.length,
     profile?.organization_id,
   ]);
@@ -525,8 +559,9 @@ export default function AssetDetail() {
       const nextId = String(effectiveAssignedCustomerId || '').trim();
       const nextName = String(effectiveAssignedCustomerName || '').trim();
       if (!isActiveCustomerAssignment(nextId, nextName, customers)) return;
-      // Do not auto-clear renter from timeline replay when the bottle row still has a customer (import assign, etc.).
-      if (!nextId && !nextName && (currentId || currentName)) return;
+      // Do not auto-clear renter from timeline replay when the bottle row still has a customer (import assign, etc.),
+      // except when replay shows returned/empty — then clear stale assignment after a RETURN.
+      if (!nextId && !nextName && (currentId || currentName) && effectiveStatus !== 'empty') return;
       const currentStatus = normalizeStatus(asset?.status);
       const needsRepair = currentId !== nextId || currentName !== nextName || currentStatus !== effectiveStatus;
       if (!needsRepair) return;
@@ -620,7 +655,66 @@ export default function AssetDetail() {
     asset?.days_at_location
   ]);
 
-  const displayStatus = movementHistory.length ? effectiveStatus : normalizeStatus(asset?.status);
+  const displayStatus = React.useMemo(() => {
+    const fromDb = normalizeStatus(asset?.status);
+    if (!movementHistory.length) return fromDb;
+    const replayed = effectiveStatus;
+    const hasDbAssignment =
+      String(asset?.assigned_customer || '').trim() ||
+      String(asset?.customer_name || '').trim();
+    if (
+      !staleCustomerAssignment &&
+      hasDbAssignment &&
+      fromDb === 'rented' &&
+      replayed === 'empty'
+    ) {
+      return 'rented';
+    }
+    return replayed;
+  }, [
+    movementHistory.length,
+    effectiveStatus,
+    asset?.status,
+    asset?.assigned_customer,
+    asset?.customer_name,
+    staleCustomerAssignment,
+  ]);
+
+  const ensureAssignCustomerInDirectory = useCallback(
+    async (hints = []) => {
+      if (!organizationId) return;
+      const seen = new Set();
+      for (const raw of hints) {
+        const hint = String(raw || '').trim();
+        if (!hint || seen.has(hint.toLowerCase())) continue;
+        seen.add(hint.toLowerCase());
+
+        let query = supabase
+          .from('customers')
+          .select(CUSTOMER_ASSIGN_SELECT)
+          .eq('organization_id', organizationId);
+
+        if (UUID_RE.test(hint)) {
+          query = query.eq('id', hint);
+        } else if (/^\d{6,}-/i.test(hint)) {
+          query = query.eq('CustomerListID', hint);
+        } else {
+          query = query.ilike('name', hint);
+        }
+
+        const { data: row, error } = await query.maybeSingle();
+        if (error) {
+          logger.warn('ensureAssignCustomerInDirectory:', error.message);
+          continue;
+        }
+        if (!row || !isAssignableCustomer(row)) continue;
+
+        setCustomers((prev) => mergeCustomerIntoAssignDirectory(prev, row));
+        return;
+      }
+    },
+    [organizationId]
+  );
 
   useEffect(() => {
     fetchAssetDetail();
@@ -631,6 +725,24 @@ export default function AssetDetail() {
       fetchOwnershipValues();
     }
   }, [id, profile?.organization_id]);
+
+  useEffect(() => {
+    if (!asset || !organizationId) return;
+    void ensureAssignCustomerInDirectory([
+      asset.assigned_customer,
+      asset.customer_uuid,
+      asset.customer_name,
+      fromCustomerRouteHint,
+    ]);
+  }, [
+    asset?.id,
+    asset?.assigned_customer,
+    asset?.customer_uuid,
+    asset?.customer_name,
+    fromCustomerRouteHint,
+    organizationId,
+    ensureAssignCustomerInDirectory,
+  ]);
 
   useEffect(() => {
     if (asset?.id && profile?.organization_id) {
@@ -837,11 +949,14 @@ export default function AssetDetail() {
 
       if (q.length < CUSTOMER_ASSIGN_SEARCH_MIN) {
         const seed = directoryActive.slice(0, 50);
-        const assignedId = String(editData.assigned_customer || '').trim();
-        if (assignedId && !seed.some((c) => c.CustomerListID === assignedId)) {
+        const assignedId = editAssignedCustomerRef.current;
+        if (
+          assignedId &&
+          !seed.some((c) => customerRowMatchesAssignId(c, assignedId))
+        ) {
           const match =
-            directoryActive.find((c) => c.CustomerListID === assignedId) ||
-            directory.find((c) => c.CustomerListID === assignedId);
+            directoryActive.find((c) => customerRowMatchesAssignId(c, assignedId)) ||
+            directory.find((c) => customerRowMatchesAssignId(c, assignedId));
           if (match) seed.unshift(match);
         }
         setCustomerAssignOptions(seed);
@@ -905,27 +1020,32 @@ export default function AssetDetail() {
         setLoadingCustomers(false);
       }
     },
-    [
-      organizationId,
-      activeCustomers,
-      customers,
-      editData.assigned_customer,
-      filterCustomersLocally,
-    ]
+    [organizationId, activeCustomers, customers, filterCustomersLocally]
   );
+
+  useEffect(() => {
+    editAssignedCustomerRef.current = String(editData.assigned_customer || '').trim();
+  }, [editData.assigned_customer]);
 
   useEffect(() => {
     if (!editDialog) {
       setCustomerAssignInput('');
       return undefined;
     }
+    const assignedId = editAssignedCustomerRef.current;
+    const matched = findCustomerByAssignId(assignedId, customers, activeCustomers);
+    setCustomerAssignInput(
+      matched ? customerOptionLabel(matched) : String(editData.customer_name || '').trim()
+    );
     void searchCustomerAssignOptions('');
     return () => {
       if (customerSearchTimerRef.current) {
         clearTimeout(customerSearchTimerRef.current);
       }
     };
-  }, [editDialog, searchCustomerAssignOptions]);
+    // Only when dialog opens — not when assignment changes mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editDialog]);
 
   // Load gas type catalog so gas type can drive product code automatically.
   const fetchGasTypes = async () => {
@@ -1129,7 +1249,7 @@ export default function AssetDetail() {
         // Only override status when assignment actually changed
         if (editData.assigned_customer && editData.assigned_customer.trim()) {
           // Assigning to customer
-          const customer = customers.find(c => c.CustomerListID === editData.assigned_customer);
+          const customer = findCustomerByAssignId(editData.assigned_customer, customers);
           if (customer?.customer_type === 'VENDOR' || isCustomerOwned) {
             finalStatus = isCustomerOwned ? CUSTOMER_OWNED_STORED_STATUS : 'filled';
           } else {
@@ -1151,7 +1271,7 @@ export default function AssetDetail() {
       }
 
       const customerForSave = editData.assigned_customer
-        ? customers.find((c) => c.CustomerListID === editData.assigned_customer)
+        ? findCustomerByAssignId(editData.assigned_customer, customers)
         : null;
       const shouldSyncBottleLocationFromCustomer = Boolean(
         editData.assigned_customer &&
@@ -1332,6 +1452,11 @@ export default function AssetDetail() {
       const freshAsset = await fetchAssetDetail();
       if (freshAsset) {
         await fetchMovementHistory(freshAsset);
+        await ensureAssignCustomerInDirectory([
+          freshAsset.assigned_customer,
+          freshAsset.customer_uuid,
+          freshAsset.customer_name,
+        ]);
       }
       setEditDialog(false);
       setSuccess('Bottle updated successfully');
@@ -2090,8 +2215,20 @@ export default function AssetDetail() {
                 clearOnEscape
                 inputValue={customerAssignInput}
                 onInputChange={(_, value, reason) => {
-                  if (reason === 'reset') return;
+                  if (reason === 'reset') {
+                    setCustomerAssignInput(value ?? '');
+                    return;
+                  }
+                  if (reason === 'clear') {
+                    setCustomerAssignInput('');
+                    setCustomerAssignSearchError('');
+                    if (customerSearchTimerRef.current) {
+                      clearTimeout(customerSearchTimerRef.current);
+                    }
+                    return;
+                  }
                   setCustomerAssignInput(value || '');
+                  if (reason !== 'input') return;
                   if (customerSearchTimerRef.current) {
                     clearTimeout(customerSearchTimerRef.current);
                   }
@@ -2100,19 +2237,33 @@ export default function AssetDetail() {
                   }, 300);
                 }}
                 value={
-                  customerAssignOptions.find((c) => c.CustomerListID === editData.assigned_customer) ||
-                  activeCustomers.find((c) => c.CustomerListID === editData.assigned_customer) ||
+                  findCustomerByAssignId(
+                    editData.assigned_customer,
+                    customerAssignOptions,
+                    activeCustomers,
+                    customers
+                  ) ||
                   (editData.assigned_customer
                     ? {
-                        CustomerListID: editData.assigned_customer,
+                        CustomerListID: UUID_RE.test(String(editData.assigned_customer))
+                          ? ''
+                          : editData.assigned_customer,
+                        id: UUID_RE.test(String(editData.assigned_customer))
+                          ? editData.assigned_customer
+                          : undefined,
                         name: editData.customer_name || editData.assigned_customer,
                         customer_type: null,
                       }
                     : null)
                 }
-                isOptionEqualToValue={(option, value) =>
-                  String(option?.CustomerListID || '') === String(value?.CustomerListID || '')
-                }
+                isOptionEqualToValue={(option, value) => {
+                  if (!option || !value) return option === value;
+                  const oId = customerAssignStorageId(option);
+                  const vId =
+                    customerAssignStorageId(value) ||
+                    String(value.CustomerListID || value.id || '').trim();
+                  return Boolean(oId && vId && oId === vId);
+                }}
                 getOptionLabel={customerOptionLabel}
                 filterOptions={(options) => options}
                 noOptionsText={
@@ -2121,7 +2272,11 @@ export default function AssetDetail() {
                     : customerAssignSearchError || 'No customers found'
                 }
                 onChange={(_, selectedCustomer) => {
-                  const customerId = selectedCustomer?.CustomerListID || null;
+                  if (customerSearchTimerRef.current) {
+                    clearTimeout(customerSearchTimerRef.current);
+                  }
+                  const customerId = customerAssignStorageId(selectedCustomer);
+                  editAssignedCustomerRef.current = String(customerId || '').trim();
                   const next = {
                     ...editData,
                     assigned_customer: customerId,

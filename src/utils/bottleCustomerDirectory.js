@@ -176,6 +176,25 @@ export async function bottleHasStaleCustomerAssignmentConfirmed(
   return !active;
 }
 
+/**
+ * Asset Detail loads only the first N customers by name; merge the bottle's assignee so
+ * stale checks and timeline replay do not treat a valid List ID as "deleted".
+ */
+export function mergeCustomerIntoAssignDirectory(directory, customer) {
+  if (!customer) return directory || [];
+  const list = [...(directory || [])];
+  const rowId = String(customer.id ?? '').trim();
+  const listId = String(customer.CustomerListID ?? '').trim();
+  const exists = list.some((c) => {
+    if (rowId && String(c.id ?? '').trim() === rowId) return true;
+    if (listId && String(c.CustomerListID ?? '').trim() === listId) return true;
+    return false;
+  });
+  if (exists) return list;
+  list.push(customer);
+  return list;
+}
+
 /** Label for UI when assignment points at a removed customer (name preferred). */
 export function staleBottleCustomerLabel(bottle) {
   const name = String(bottle?.customer_name || '').trim();

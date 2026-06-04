@@ -165,6 +165,10 @@ export function isScanEffectiveForAssignmentReplay(record) {
   }
   if (record?.history_type === 'rental_rnb') return true;
   if (isManualUiScanOrder(record?.order_number)) return true;
-  if (isOrderScanRecord(record)) return record.scan_assignment_effective === true;
+  if (isOrderScanRecord(record)) {
+    // RETURN scans clear inventory immediately at scan time (mobile + repair paths).
+    if (scanRecordModeFamily(record) === 'RETURN') return true;
+    return record.scan_assignment_effective === true;
+  }
   return true;
 }

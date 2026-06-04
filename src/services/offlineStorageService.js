@@ -247,6 +247,16 @@ const syncScanOperation = async (supabase, operation) => {
     throw error;
   }
 
+  const mode = scanRecord.mode;
+  if (mode === 'RETURN' && scanRecord.bottle_barcode && operation.organizationId) {
+    const { applyReturnScanInventory } = await import('./applyReturnScanInventory');
+    await applyReturnScanInventory(supabase, operation.organizationId, {
+      barcode: scanRecord.bottle_barcode,
+      orderNumber: scanRecord.order_number,
+      location: scanRecord.location,
+    });
+  }
+
   logger.log('Scan synced successfully');
 };
 

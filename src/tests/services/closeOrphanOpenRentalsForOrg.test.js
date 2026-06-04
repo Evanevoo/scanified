@@ -33,6 +33,31 @@ describe('closeOrphanOpenRentalsForOrg', () => {
     expect(bottleAssignedToRentalCustomer(bottle, rental, lookup)).toBe(false);
   });
 
+  it('detects orphan when bottle is empty but assignment was not cleared', () => {
+    const rental = {
+      id: 'r1',
+      customer_id: '80000B96-1736549792A',
+      customer_name: 'CAM TRANSPORT',
+      bottle_barcode: '685920305',
+    };
+    const bottle = {
+      id: 'b1',
+      barcode_number: '685920305',
+      assigned_customer: '80000B96-1736549792A',
+      customer_name: 'CAM TRANSPORT',
+      status: 'empty',
+    };
+    const cam = {
+      CustomerListID: '80000B96-1736549792A',
+      name: 'CAM TRANSPORT',
+    };
+    const lookup = new Map([
+      ['80000b96-1736549792a', cam],
+      ['cam transport', cam],
+    ]);
+    expect(isOrphanOpenRental(rental, bottle, lookup)).toBe(true);
+  });
+
   it('keeps rental when bottle still assigned to billing customer', () => {
     const rental = {
       id: 'r1',
