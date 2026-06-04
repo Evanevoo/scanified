@@ -63,6 +63,43 @@ export function bottleReflectsCompletedReturn(asset) {
 
 const APPROVED_IMPORT_STATUSES = new Set(['approved', 'verified']);
 
+export function isImportRowFileLevelApproved(imp) {
+  const status = String(imp?.status || '').toLowerCase();
+  return (
+    APPROVED_IMPORT_STATUSES.has(status) ||
+    Boolean(imp?.auto_approved || imp?.approved_at || imp?.verified_at)
+  );
+}
+
+/**
+ * Order numbers still verified on approved import files.
+ * When verified_order_numbers is used (per-order verify), only those norms count — not every row on the file.
+ * Legacy whole-file approval (empty vor) still exposes all line order refs.
+ */
+export function collectStillVerifiedOrderNormsOnApprovedImports(
+  approvedImports,
+  normalize = normalizeOrderNumForLookup,
+) {
+  const norms = new Set();
+  for (const imp of approvedImports || []) {
+    if (!isImportRowFileLevelApproved(imp)) continue;
+    const data = parseImportData(imp.data);
+    const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
+    if (vor.length > 0) {
+      for (const n of vor) {
+        const norm = normalize(String(n ?? '').trim());
+        if (norm) norms.add(norm);
+      }
+      continue;
+    }
+    for (const raw of extractOrderNumbersFromImportData(data)) {
+      const norm = normalize(String(raw ?? '').trim());
+      if (norm) norms.add(norm);
+    }
+  }
+  return norms;
+}
+
 /**
  * Map normalized order number → { status, isApproved, orderNumber }.
  * Orders with scans but no import row are treated as scanned_only / not approved.

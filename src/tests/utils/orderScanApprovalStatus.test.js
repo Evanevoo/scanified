@@ -1,4 +1,5 @@
 import {
+  collectStillVerifiedOrderNormsOnApprovedImports,
   extractOrderNumbersFromImportData,
   normalizeOrderNumForLookup,
   bottleReflectsCompletedReturn,
@@ -37,6 +38,24 @@ describe('orderScanApprovalStatus', () => {
         customer_name: 'Prairie Fleet',
       }),
     ).toBe(false);
+  });
+
+  it('only counts vor entries as verified on per-order approved imports', () => {
+    const norms = collectStillVerifiedOrderNormsOnApprovedImports(
+      [
+        {
+          status: 'approved',
+          approved_at: '2026-06-04T12:00:00.000Z',
+          data: {
+            verified_order_numbers: ['75794'],
+            rows: [{ reference_number: '75794' }, { reference_number: '75999' }],
+          },
+        },
+      ],
+      normalizeOrderNumForLookup,
+    );
+    expect(norms.has('75794')).toBe(true);
+    expect(norms.has('75999')).toBe(false);
   });
 
   it('treats RETURN scans as effective for assignment replay before order verify', () => {
