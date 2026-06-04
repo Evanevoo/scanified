@@ -15,6 +15,17 @@ export function parseImportDataField(data) {
   return data || {};
 }
 
+const ROW_ORDER_REF_FIELDS = [
+  'reference_number',
+  'order_number',
+  'invoice_number',
+  'sales_receipt_number',
+  'sales_order_number',
+  'SalesOrderNumber',
+  'InvoiceNumber',
+  'ReferenceNumber',
+];
+
 export function orderNormsFromImportData(data, normalizeOrderNum) {
   const norms = new Set();
   const add = (raw) => {
@@ -25,24 +36,31 @@ export function orderNormsFromImportData(data, normalizeOrderNum) {
   for (const vo of vor) add(vo);
   const rows = data?.rows || data?.line_items || [];
   for (const row of rows) {
-    add(
-      row.reference_number ||
-        row.order_number ||
-        row.invoice_number ||
-        row.sales_receipt_number,
-    );
+    for (const field of ROW_ORDER_REF_FIELDS) {
+      if (row?.[field]) add(row[field]);
+    }
   }
-  add(data?.order_number || data?.reference_number || data?.invoice_number);
+  for (const field of ROW_ORDER_REF_FIELDS) {
+    if (data?.[field]) add(data[field]);
+  }
   add(data?.summary?.reference_number);
+  add(data?.summary?.order_number);
   return norms;
 }
 
+function rowOrderNorm(row, normalizeOrderNum) {
+  if (!row) return '';
+  for (const field of ROW_ORDER_REF_FIELDS) {
+    const raw = row[field];
+    if (raw == null || raw === '') continue;
+    const n = normalizeOrderNum(String(raw).trim());
+    if (n) return n;
+  }
+  return '';
+}
+
 function rowSliceForOrderNorm(rows, voNorm, normalizeOrderNum) {
-  const matchingRows = (rows || []).filter((r) => {
-    const ref =
-      r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number;
-    return ref && normalizeOrderNum(String(ref).trim()) === voNorm;
-  });
+  const matchingRows = (rows || []).filter((r) => rowOrderNorm(r, normalizeOrderNum) === voNorm);
   return matchingRows;
 }
 
@@ -159,21 +177,93 @@ export function flattenImportRecordsToOrderRows(recordSets, normalizeOrderNum) {
   return out;
 }
 
-/** Collect normalized order numbers listed in import data (for scanned-order inclusion). */
+/**
+ * Order numbers eligible for scanned-order rows on Verified Orders.
+ * Uses verified_order_numbers only (not every line on a multi-order pending file).
+ * Legacy: fully approved/verified files with no vor list still expose all row order refs.
+ */
 export function collectVerifiedOrderNumbersFromImports(recordsList, normalizeOrderNum) {
   const verifiedOrderNums = new Set();
   for (const records of recordsList) {
     for (const rec of records || []) {
       const data = parseImportDataField(rec.data);
       const vor = Array.isArray(data?.verified_order_numbers) ? data.verified_order_numbers : [];
+      const status = String(rec.status || '').toLowerCase();
+      const fileFullyVerified = status === 'approved' || status === 'verified';
+
       for (const n of vor) {
         const norm = normalizeOrderNum(String(n ?? '').trim());
         if (norm) verifiedOrderNums.add(norm);
       }
-      for (const norm of orderNormsFromImportData(data, normalizeOrderNum)) {
-        verifiedOrderNums.add(norm);
+
+      if (fileFullyVerified && vor.length === 0) {
+        for (const norm of orderNormsFromImportData(data, normalizeOrderNum)) {
+          verifiedOrderNums.add(norm);
+        }
       }
     }
   }
   return verifiedOrderNums;
+}
+
+export function importCoveredOrderNorms(importOrderRows, normalizeOrderNum) {
+  const covered = new Set();
+  for (const row of importOrderRows || []) {
+    const direct = normalizeOrderNum(String(row.order_number || '').trim());
+    if (direct) covered.add(direct);
+    const parsed = row.data_parsed || parseImportDataField(row.data);
+    for (const norm of orderNormsFromImportData(parsed, normalizeOrderNum)) {
+      covered.add(norm);
+    }
+  }
+  return covered;
+}
+
+/** Drop scan bundles when an import row already covers that order number. */
+export function filterScannedOrdersWithoutImportCoverage(
+  scannedOrders,
+  importOrderRows,
+  normalizeOrderNum,
+) {
+  const covered = importCoveredOrderNorms(importOrderRows, normalizeOrderNum);
+  return (scannedOrders || []).filter((o) => {
+    const norm = normalizeOrderNum(String(o.order_number || '').trim());
+    return norm && !covered.has(norm);
+  });
+}
+
+/**
+ * If flatten missed an order on a file (e.g. odd row shape), attach per-order import rows
+ * for scanned orders that still match an import record in the fetched set.
+ */
+export function supplementImportRowsForScannedOrders({
+  importOrderRows,
+  scannedOrders,
+  recordSets,
+  normalizeOrderNum,
+}) {
+  const covered = importCoveredOrderNorms(importOrderRows, normalizeOrderNum);
+  const extras = [];
+  for (const scanned of scannedOrders || []) {
+    const norm = normalizeOrderNum(String(scanned.order_number || '').trim());
+    if (!norm || covered.has(norm)) continue;
+    for (const { records, tableType } of recordSets || []) {
+      let matched = false;
+      for (const rec of records || []) {
+        const data = parseImportDataField(rec.data);
+        if (!orderNormsFromImportData(data, normalizeOrderNum).has(norm)) continue;
+        const expanded = expandImportRecordsToOrderRows(rec, tableType, normalizeOrderNum).filter(
+          (r) => normalizeOrderNum(String(r.order_number || '').trim()) === norm,
+        );
+        if (expanded.length) {
+          extras.push(...expanded);
+          covered.add(norm);
+          matched = true;
+          break;
+        }
+      }
+      if (matched) break;
+    }
+  }
+  return extras.length ? [...importOrderRows, ...extras] : importOrderRows;
 }
