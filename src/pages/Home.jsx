@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../context/PermissionsContext';
 import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
@@ -31,12 +31,15 @@ import {
   Schedule,
   Add as AddIcon,
   Refresh as RefreshIcon,
-  Dashboard as DashboardIcon,
   Security as SecurityIcon,
   ChevronRight,
   QrCodeScanner,
 } from '@mui/icons-material';
 import { commonStyles, brandColors } from '../styles/theme';
+import {
+  countCustomersWithOpenRentals,
+  rentalCoveragePercent,
+} from '../utils/rentalCoverageStats';
 
 const RADIUS_CARD = 12;
 const RADIUS_CONTROL = 8;
@@ -88,15 +91,13 @@ export default function Home() {
       const showFullPageLoader = statsLoadedForOrgRef.current !== orgKey;
       if (showFullPageLoader) setLoading(true);
 
-      const [customersRes, bottlesRes, rentalsRes, activeSubsRes, usersRes] = await Promise.allSettled([
+      const [customersRes, openRentalsRes, usersRes] = await Promise.allSettled([
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', organization.id),
-        supabase.from('bottles').select('assigned_customer, customer_id:customer_uuid, customer_name').eq('organization_id', organization.id),
         supabase
           .from('rentals')
-          .select('customer_id, customer_name')
+          .select('id', { count: 'exact', head: true })
           .eq('organization_id', organization.id)
           .is('rental_end_date', null),
-        Promise.resolve({ count: (subCtx.activeSubscriptions || []).length }),
         isAdmin()
           ? supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organization_id', organization.id)
           : Promise.resolve({ count: 0 }),
@@ -104,27 +105,14 @@ export default function Home() {
 
       if (!active) return;
 
-      const ctxBottleCustomerIds = new Set(
-        (subCtx.bottles || []).map((b) => b.assigned_customer || b.customer_id || b.customer_name).filter(Boolean)
-      );
-      const bottleCustomerIds = new Set(
-        (bottlesRes.status === 'fulfilled' ? (bottlesRes.value.data || []) : [])
-          .map((b) => b.assigned_customer || b.customer_id || b.customer_name)
-          .filter(Boolean)
-      );
-      const rentalCustomerIds = new Set(
-        (rentalsRes.status === 'fulfilled' ? (rentalsRes.value.data || []) : [])
-          .map((r) => r.customer_id || r.customer_name)
-          .filter(Boolean)
-      );
-
       const customersCountFromDb = customersRes.status === 'fulfilled' ? (customersRes.value.count || 0) : 0;
-      const activeSubsCountFromDb = activeSubsRes.status === 'fulfilled' ? (activeSubsRes.value.count || 0) : 0;
+      const openRentalsFromDb = openRentalsRes.status === 'fulfilled' ? (openRentalsRes.value.count ?? 0) : 0;
+      const openRentalsFromCtx = (subCtx.rentals || []).length;
       const totalUsers = usersRes.status === 'fulfilled' ? (usersRes.value.count || 0) : 0;
 
       setStats({
-        customers: Math.max(customersCountFromDb, bottleCustomerIds.size, rentalCustomerIds.size, (subCtx.customers || []).length, ctxBottleCustomerIds.size),
-        activeRentals: Math.max(activeSubsCountFromDb, bottleCustomerIds.size, rentalCustomerIds.size, (subCtx.activeSubscriptions || []).length),
+        customers: customersCountFromDb,
+        activeRentals: openRentalsFromDb > 0 ? openRentalsFromDb : openRentalsFromCtx,
         totalUsers,
       });
       if (showFullPageLoader) {
@@ -137,7 +125,7 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [organization?.id, subCtx.customers.length, subCtx.activeSubscriptions.length, subCtx.bottles.length]);
+  }, [organization?.id, subCtx.rentals?.length, subCtx.customers.length]);
 
   const getQuickActions = () => {
     if (isAdmin()) {
@@ -160,9 +148,8 @@ export default function Home() {
     return [
       { title: 'View Customers', path: '/customers', icon: <People />, color: 'primary' },
       { title: 'Check Inventory', path: '/inventory', icon: <Inventory />, color: 'secondary' },
-      { title: 'Rentals', path: '/rentals', icon: <Schedule />, color: 'success' },
-      { title: 'Rentals & invoices', path: '/rentals', icon: <Receipt />, color: 'warning' },
-      { title: 'Customer Portal', path: '/portal', icon: <DashboardIcon />, color: 'error' },
+      { title: 'Rentals & invoices', path: '/rentals', icon: <Receipt />, color: 'success' },
+      { title: 'Scanned Orders', path: '/scanned-orders', icon: <QrCodeScanner />, color: 'warning' },
     ];
   };
 
@@ -198,7 +185,7 @@ export default function Home() {
         onClick: () => navigate('/customers'),
       },
       {
-        title: 'Active Rentals',
+        title: 'Open rental rows',
         value: stats.activeRentals,
         icon: <Schedule />,
         color: primaryColor,
@@ -231,7 +218,11 @@ export default function Home() {
   const nameParts = displayName.split(/\s+/).filter(Boolean);
   const avatarLetters = nameParts.length ? nameParts.map((n) => n[0]).join('').slice(0, 2).toUpperCase() : '?';
 
-  const rentalLinkRate = stats.customers > 0 ? Math.min(100, Math.round((stats.activeRentals / stats.customers) * 100)) : 0;
+  const customersWithRentalBalance = useMemo(
+    () => countCustomersWithOpenRentals(subCtx.rentals),
+    [subCtx.rentals],
+  );
+  const rentalCoveragePct = rentalCoveragePercent(customersWithRentalBalance, stats.customers);
 
   if (loading) {
     return (
@@ -297,12 +288,12 @@ export default function Home() {
                 RENTAL COVERAGE
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 0.5, lineHeight: 1.45 }}>
-                Active rental balances as a share of customers on file (not a billing rate). Details: use the cards below.
+                Customers with at least one open rental row, divided by total customers on file (not bottle count or billing rate). See the cards below for raw counts.
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', py: 1.5 }}>
                 <CircularProgress
                   variant="determinate"
-                  value={rentalLinkRate}
+                  value={rentalCoveragePct}
                   size={132}
                   thickness={3.2}
                   sx={{
@@ -320,10 +311,10 @@ export default function Home() {
                   }}
                 >
                   <Typography variant="h5" fontWeight={800} sx={{ lineHeight: 1 }}>
-                    {rentalLinkRate}%
+                    {rentalCoveragePct}%
                   </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 0.5 }}>
-                    rental / customer
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 0.5, textAlign: 'center' }}>
+                    {customersWithRentalBalance} / {stats.customers} customers
                   </Typography>
                 </Box>
               </Box>

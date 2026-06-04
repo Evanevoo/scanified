@@ -49,6 +49,39 @@ export function postAssignmentFromAuditFieldChanges(parsedDetails) {
   return { assigned_customer, customer_name };
 }
 
+/** Human-readable label for BOTTLE_UPDATE audit rows in movement timelines. */
+export function formatAuditMovementLabel(record) {
+  const d = normalizeAuditDetails(record?.details);
+  const fc = d?.field_changes;
+  if (!fc || typeof fc !== 'object') {
+    return String(record?.action || '').replace(/^AUDIT:\s*/i, '').trim() || 'Bottle update';
+  }
+  const fmtPair = (chg) => {
+    if (!chg || typeof chg !== 'object') return null;
+    const from = chg.from == null || chg.from === '' ? '—' : String(chg.from);
+    const to = chg.to == null || chg.to === '' ? '—' : String(chg.to);
+    return `${from} → ${to}`;
+  };
+  const parts = [];
+  if (fc.status) {
+    const p = fmtPair(fc.status);
+    if (p) parts.push(`Status: ${p}`);
+  }
+  if (fc.assigned_customer) {
+    const p = fmtPair(fc.assigned_customer);
+    if (p) parts.push(`Assigned: ${p}`);
+  }
+  if (fc.customer_id) {
+    const p = fmtPair(fc.customer_id);
+    if (p) parts.push(`Customer ID: ${p}`);
+  }
+  if (fc.location) {
+    const p = fmtPair(fc.location);
+    if (p) parts.push(`Location: ${p}`);
+  }
+  return parts.length ? parts.join(' · ') : 'Bottle update';
+}
+
 export const stringifyHistoryDetails = (details) => {
   if (!details) return '';
   if (typeof details === 'string') return details;
@@ -66,6 +99,14 @@ export const stringifyHistoryDetails = (details) => {
     return String(details);
   }
 };
+
+/** DB stamp rows — skip timeline display and days-at-location anchors (not chain-of-custody). */
+export function isSyntheticMovementRow(record) {
+  if (!record) return true;
+  if (record.history_type === 'record_update') return true;
+  if (record.id === 'bottle_last_updated') return true;
+  return false;
+}
 
 const movementActionFamily = (item) => {
   const ht = String(item?.history_type || '').toLowerCase();
@@ -581,25 +622,8 @@ export async function fetchMergedAssetMovementHistory(supabase, {
       location: sourceAsset.location,
     });
   }
-  if (
-    sourceAsset.updated_at &&
-    sourceAsset.created_at &&
-    new Date(sourceAsset.updated_at).getTime() !== new Date(sourceAsset.created_at).getTime()
-  ) {
-    allHistory.push({
-      id: 'bottle_last_updated',
-      history_type: 'record_update',
-      barcode_number: barcodeNumber,
-      created_at: sourceAsset.updated_at,
-      // Not a scan workflow — omit `mode` so UIs use `action` (otherwise "UPDATE" masks the real meaning).
-      action: 'Asset record updated',
-      location: sourceAsset.location,
-      // bottles.location is often branch (e.g. SASKATOON) even when assigned_customer is set — include assignment so UI does not show “In-House” incorrectly.
-      customer_name: sourceAsset.customer_name || null,
-      customer_id: sourceAsset.customer_uuid || sourceAsset.customer_id || null,
-      assigned_customer: sourceAsset.assigned_customer || null,
-    });
-  }
+  // Do not inject bottle_last_updated — it looks like a random "update" in the chain-of-custody
+  // timeline; assignment/status changes are already represented by scans, rentals, and BOTTLE_UPDATE audits.
 
   const scanOrderNumbers = allHistory
     .filter((r) => r.history_type === 'bottle_scan' || r.history_type === 'cylinder_scan')
@@ -647,5 +671,6 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     if (diff !== 0) return diff;
     return String(movementHistoryDedupeKey(b)).localeCompare(String(movementHistoryDedupeKey(a)));
   });
+
   return uniqueHistory.slice(0, Math.max(50, Math.min(maxRecords, 1000)));
 }

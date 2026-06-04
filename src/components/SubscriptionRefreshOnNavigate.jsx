@@ -4,8 +4,8 @@ import { useSubscriptions } from '../context/SubscriptionContext';
 
 /** Default: avoid hammering Supabase on every sidebar click (11 parallel large selects). */
 const MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT = 60_000;
-/** Rentals / customer / pricing lists merge subscriptions + bottles + rentals — stale merges feel like “cache”. */
-const MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE = 15_000;
+/** Rentals workspace: silent refresh is read-only now (no backfill); 30s is enough between visits. */
+const MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE = 30_000;
 
 function minMsBetweenRefreshForPath(pathname) {
   if (!pathname) return MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT;
@@ -18,8 +18,8 @@ function minMsBetweenRefreshForPath(pathname) {
   return MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT;
 }
 
-/** Let the destination route paint before starting heavy refetches (reduces “navigation lag”). */
-const REFRESH_DEFER_MS = 280;
+/** Let the destination route paint before starting background refetches. */
+const REFRESH_DEFER_MS = 400;
 
 /**
  * SubscriptionProvider sits outside <Router>, so route changes do not remount it.

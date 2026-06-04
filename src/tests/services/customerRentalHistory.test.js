@@ -88,6 +88,40 @@ describe('computeCustomerRentalHistory', () => {
     expect(bar).toMatchObject({ ship: 1, rtn: 1 });
   });
 
+  it('uses rental ledger only when bottle and rental share the same unit (no start+ship double count)', () => {
+    const bottles = [
+      {
+        id: 'b1',
+        customer_id: 'cust-1',
+        product_code: 'BOX300',
+        rental_start_date: '2026-04-01',
+      },
+    ];
+    const rentals = [
+      {
+        id: 'r1',
+        customer_id: 'cust-1',
+        bottle_id: 'b1',
+        product_code: 'BOX300',
+        rental_start_date: '2026-05-12',
+      },
+    ];
+    const { rows } = computeCustomerRentalHistory({
+      rentals,
+      bottles,
+      customerRecord: customer,
+      allCustomers,
+      periodStart: ps,
+      periodEnd: pe,
+    });
+    const row = rows.find((r) => r.productCode === 'BOX300');
+    expect(row).toBeDefined();
+    expect(row.ship).toBe(1);
+    expect(row.startCount).toBe(0);
+    expect(row.endCount).toBe(1);
+    expect(row.endCount).toBe(row.startCount + row.ship - row.rtn);
+  });
+
   it('clears atEnd when unit returned in period', () => {
     const bottles = [
       {

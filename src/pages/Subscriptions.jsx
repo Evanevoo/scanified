@@ -50,7 +50,9 @@ import {
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
 import {
+  buildOpenRentalsBillingIndex,
   mergeOpenRentalsForBillingBasis,
+  mergeOpenRentalsForBillingBasisFromIndex,
   summarizeMergedOpenRentalsByProduct,
 } from '../services/openRentalsBillingBasis';
 import { useDebounce } from '../utils/performance';
@@ -64,9 +66,9 @@ import {
   TableCell, TableContainer, TableHead, TableRow, Paper, Chip,
   Button, TextField, Tooltip, LinearProgress, CircularProgress, Stack,
   Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel,
-  Select, MenuItem, Alert, TablePagination, Menu,
+  Select, MenuItem, Alert, TablePagination,
 } from '@mui/material';
-import { MoreVert } from '@mui/icons-material';
+import GradientMenu from '../components/ui/gradient-menu';
 import {
   People, Schedule, AccountBalance,
 } from '@mui/icons-material';
@@ -144,21 +146,18 @@ function rowMatchesTermsFilter(row, filter) {
   return true;
 }
 
-/** Deduped open-rental unit count — same basis as Customer Detail rental history header. */
-function billableItemCountForRentalRow(row, openRentals) {
+/** Deduped open-rental unit count — same basis as Customer Detail rental history header (legacy virtual rows). */
+function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = null) {
   const customer = row?.customer || {};
   const customerListId = String(
     row.customer_id || customer.CustomerListID || customer.id || '',
   ).trim();
   const customerName = String(customer.name || customer.Name || '').trim();
   const customerPkId = String(customer.id || '').trim();
-  const merged = mergeOpenRentalsForBillingBasis(
-    (openRentals || []).filter(isRentalOpen),
-    {
-    customerListId,
-    customerName,
-    customerPkId,
-  });
+  const keys = { customerListId, customerName, customerPkId };
+  const merged = rentalsBillingIndex
+    ? mergeOpenRentalsForBillingBasisFromIndex(rentalsBillingIndex, keys)
+    : mergeOpenRentalsForBillingBasis((openRentals || []).filter(isRentalOpen), keys);
   return merged.filter((r) => !isDnsRentalExcludedFromBillableCount(r)).length;
 }
 
@@ -266,53 +265,9 @@ function rowBillingCustomerRemovedFromDirectory(row, customers) {
 /**
  * Isolated search field. Owns its own input state so typing only re-renders
  * this component (not the entire 4000+ line Subscriptions page with 50 table
- * rows × 6 gradient-menu items each). The debounced value is bubbled up via
+ * rows × compact gradient buttons each). The debounced value is bubbled up via
  * `onDebouncedChange` so the parent only re-renders once typing settles.
  */
-/** Compact row actions — avoids 50+ GradientMenu instances (each was min-h-screen sized). */
-function RentalRowActionsMenu({ items, onAction, disabled, buttonLabel = 'Actions' }) {
-  const [anchorEl, setAnchorEl] = useState(null);
-  const open = Boolean(anchorEl);
-  return (
-    <>
-      <Button
-        size="small"
-        variant="outlined"
-        aria-label={buttonLabel}
-        disabled={disabled}
-        endIcon={<MoreVert sx={{ fontSize: 16 }} />}
-        onClick={(e) => {
-          e.stopPropagation();
-          setAnchorEl(e.currentTarget);
-        }}
-        sx={{ textTransform: 'none', fontWeight: 600, fontSize: '0.75rem', py: 0.35, minWidth: 0, px: 1 }}
-      >
-        <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Bill</Box>
-        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{buttonLabel}</Box>
-      </Button>
-      <Menu
-        anchorEl={anchorEl}
-        open={open}
-        onClose={() => setAnchorEl(null)}
-        onClick={(e) => e.stopPropagation()}
-        slotProps={{ paper: { sx: { minWidth: 168 } } }}
-      >
-        {items.map((item) => (
-          <MenuItem
-            key={item.id}
-            disabled={item.disabled}
-            onClick={() => {
-              setAnchorEl(null);
-              if (!item.disabled && item.action) onAction(item.action);
-            }}
-          >
-            {item.title}
-          </MenuItem>
-        ))}
-      </Menu>
-    </>
-  );
-}
 
 const SubscriptionsSearchField = memo(forwardRef(function SubscriptionsSearchField(
   { onDebouncedChange },
@@ -632,6 +587,19 @@ export default function Subscriptions() {
     [ctx.customers]
   );
 
+  const openRentalsBillingIndex = useMemo(
+    () => buildOpenRentalsBillingIndex((ctx.rentals || []).filter(isRentalOpen)),
+    [ctx.rentals],
+  );
+
+  const hasWorkspaceData = useMemo(
+    () =>
+      (ctx.subscriptions?.length || 0) > 0
+      || (ctx.customers?.length || 0) > 0
+      || (ctx.rentals?.length || 0) > 0,
+    [ctx.subscriptions?.length, ctx.customers?.length, ctx.rentals?.length],
+  );
+
   useEffect(() => {
     if (!organization?.id) {
       setInvoiceTemplate(null);
@@ -922,6 +890,14 @@ export default function Subscriptions() {
               customer?.Name ||
               ''
           ).trim() || sub.customer_id;
+        const mergedBasis = mergeOpenRentalsForBillingBasisFromIndex(openRentalsBillingIndex, {
+          customerListId: String(
+            sub.customer_id || customer?.CustomerListID || customer?.id || '',
+          ).trim(),
+          customerName: String(customer?.name || customer?.Name || '').trim(),
+          customerPkId: String(customer?.id || '').trim(),
+        });
+        const basisGroups = summarizeMergedOpenRentalsByProduct(mergedBasis, billingData.bottles);
         const groupsRaw = groupBillableUnitCountsByProductCode(
           billingData.bottles,
           billingData.rentals,
@@ -929,20 +905,7 @@ export default function Subscriptions() {
           customer,
           { allCustomers: billingData.customers },
         );
-        const basisRow = { ...sub, customer, customer_id: sub.customer_id };
-        const basisCount = billableItemCountForRentalRow(basisRow, billingData.rentals);
-        const mergedBasis = mergeOpenRentalsForBillingBasis(
-          (billingData.rentals || []).filter(isRentalOpen),
-          {
-            customerListId: String(
-              sub.customer_id || customer?.CustomerListID || customer?.id || '',
-            ).trim(),
-            customerName: String(customer?.name || customer?.Name || '').trim(),
-            customerPkId: String(customer?.id || '').trim(),
-          },
-        );
-        const basisGroups = summarizeMergedOpenRentalsByProduct(mergedBasis, billingData.bottles);
-        const groups = basisCount > 0 && basisGroups.length > 0 ? basisGroups : groupsRaw;
+        const groups = basisGroups.length > 0 ? basisGroups : groupsRaw;
         totalPerCycle = computeSubscriptionBillingCycleTotal(
           { ...sub, billing_period: effectiveBillingPeriod },
           customer,
@@ -953,9 +916,7 @@ export default function Subscriptions() {
             ...(groups.length > 0 ? { precomputedGroups: groups } : {}),
           },
         );
-        itemCount = basisCount > 0
-          ? basisCount
-          : groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
+        itemCount = groups.reduce((s, g) => s + (Number(g.count) || 0), 0);
         if (groups.length > 0) {
           productCounts = {};
           for (const g of groups) {
@@ -995,6 +956,7 @@ export default function Subscriptions() {
     organization?.id,
     leaseCoveredCountByCustomerKey,
     parentNameById,
+    openRentalsBillingIndex,
   ]);
 
   const customersWithBottlesNoSubscription = useMemo(() => {
@@ -1083,8 +1045,8 @@ export default function Subscriptions() {
           ),
           parentNameById
         );
-        const mergedBillingBasisRows = mergeOpenRentalsForBillingBasis(
-          ctx.rentals || [],
+        const mergedBillingBasisRows = mergeOpenRentalsForBillingBasisFromIndex(
+          openRentalsBillingIndex,
           {
             customerListId: customerIdValue,
             customerName:
@@ -1092,7 +1054,8 @@ export default function Subscriptions() {
               mergedVirtualCustomer?.Name ||
               group.assignedName ||
               '',
-          }
+            customerPkId: String(mergedVirtualCustomer?.id || '').trim(),
+          },
         );
         const rentalSummary = summarizeMergedOpenRentalsByProduct(
           mergedBillingBasisRows,
@@ -1133,7 +1096,7 @@ export default function Subscriptions() {
       })
       .filter(Boolean)
       .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId, parentNameById]);
+  }, [ctx.bottles, ctx.rentals, ctx.subscriptions, ctx.customers, ctx.leaseContracts, customerResolvers, organization?.id, matchCustomerRecordBySubscriptionId, parentNameById, openRentalsBillingIndex]);
 
   /** Legacy “rentals table only” virtual rows — must track `ctx.rentals` (same as SubscriptionContext) so counts stay in sync after refresh/realtime. A one-time fetch on org id alone went stale vs Customer Detail. */
   const legacyRows = useMemo(() => {
@@ -1208,6 +1171,7 @@ export default function Subscriptions() {
         const basisCount = billableItemCountForRentalRow(
           { customer: mergedCustomer, customer_id: g.customer_id },
           ctx.rentals,
+          openRentalsBillingIndex,
         );
         return {
           id: `legacy-${g.key}`,
@@ -1230,7 +1194,7 @@ export default function Subscriptions() {
     }
 
     return rows;
-  }, [ctx.rentals, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId, parentNameById]);
+  }, [ctx.rentals, ctx.bottles, resolveCustomer, matchCustomerRecordBySubscriptionId, parentNameById, openRentalsBillingIndex]);
 
   const allRows = useMemo(() => {
     const activeCustomerIdKeys = new Set(
@@ -1369,7 +1333,7 @@ export default function Subscriptions() {
         canonicalBillingPeriod(row.billing_period) === 'monthly' &&
         String(row.customer?.billing_mode || '').toLowerCase() !== 'lease'
       ) {
-        const basisCount = billableItemCountForRentalRow(row, ctx.rentals);
+        const basisCount = billableItemCountForRentalRow(row, ctx.rentals, openRentalsBillingIndex);
         if (basisCount > 0) computedItemCount = basisCount;
       }
 
@@ -1557,6 +1521,8 @@ export default function Subscriptions() {
     leaseCoveredCountByCustomerKey,
     classificationNodesById,
     productCodeToBottleClassification,
+    openRentalsBillingIndex,
+    ctx.rentals,
   ]);
 
   /** Stable key so invoice-status fetch does not re-run when `allRows` gets a new array reference but same customers/subs. */
@@ -1704,10 +1670,23 @@ export default function Subscriptions() {
       if (!active) return;
       setCycleInvoiceLookup(lookup);
     };
-    loadCycleInvoiceStatus().catch(() => {
-      if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
-    });
-    return () => { active = false; };
+    const scheduleLoad = () => {
+      loadCycleInvoiceStatus().catch(() => {
+        if (active) setCycleInvoiceLookup(emptyCycleInvoiceLookup());
+      });
+    };
+    let cancelDeferred = () => {};
+    if (typeof requestIdleCallback !== 'undefined') {
+      const idleId = requestIdleCallback(scheduleLoad, { timeout: 1200 });
+      cancelDeferred = () => cancelIdleCallback(idleId);
+    } else {
+      const timeoutId = setTimeout(scheduleLoad, 80);
+      cancelDeferred = () => clearTimeout(timeoutId);
+    }
+    return () => {
+      active = false;
+      cancelDeferred();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `cycleInvoiceLookupKey` replaces `allRows` so we do not refetch when row arrays are recreated with the same customers/subscriptions
   }, [organization?.id, cycleInvoiceLookupKey, getCurrentCycleRange, getPdfBillingPeriodForSub, invoiceLookupRefreshKey]);
 
@@ -3565,7 +3544,7 @@ export default function Subscriptions() {
     setActionSuccess(null);
     setRentalsWorkspaceRefreshing(true);
     try {
-      await ctx.refreshSilent();
+      await ctx.refresh();
       setActionSuccess('Rentals and bottle counts updated from the server.');
     } catch (e) {
       setActionError(e?.message || 'Refresh failed.');
@@ -3647,7 +3626,7 @@ export default function Subscriptions() {
     ],
   );
 
-  if (ctx.loading) {
+  if (ctx.loading && !hasWorkspaceData) {
     return (
       <Box sx={{ p: 4 }}>
         <LinearProgress sx={{ borderRadius: 1 }} />
@@ -3678,11 +3657,14 @@ export default function Subscriptions() {
 
   return (
     <Box sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0, width: '100%', boxSizing: 'border-box', minHeight: '100%' }}>
+      {(ctx.loading || rentalsWorkspaceRefreshing) && hasWorkspaceData ? (
+        <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />
+      ) : null}
       <Stack spacing={2} sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Rentals</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Manage customer rentals, invoice numbers, and billing exports.
+            Manage customer rentals, invoice numbers, and billing exports. Item counts use open rental rows and assigned bottles (same basis as Customer Detail).
           </Typography>
         </Box>
 
@@ -3822,7 +3804,7 @@ export default function Subscriptions() {
             </Stack>
           </Stack>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.25, lineHeight: 1.5 }}>
-            CSV and ZIP respect Month + Terms filters. Per customer: row Bill → PDF, Excel, Email.
+            CSV and ZIP respect Month + Terms filters. Per customer: use the row action buttons (PDF, Email, Excel, etc.).
           </Typography>
         </Paper>
       </Stack>
@@ -3946,7 +3928,7 @@ export default function Subscriptions() {
                 <TableCell align="right">Total / Cycle</TableCell>
                 <TableCell>Invoice #</TableCell>
                 <TableCell sx={hideStatusColSx}>Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                <TableCell align="right" sx={{ minWidth: { xs: 280, sm: 360 } }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -4103,7 +4085,7 @@ export default function Subscriptions() {
                     <TableCell
                       align="right"
                       onClick={(e) => e.stopPropagation()}
-                      sx={{ py: 0.75 }}
+                      sx={{ py: 0.75, minWidth: { xs: 280, sm: 360 } }}
                     >
                       {(() => {
                         const billableAmount = parseFloat(sub.totalPerCycle) || 0;
@@ -4168,12 +4150,16 @@ export default function Subscriptions() {
                           });
                         }
 
+                        const menuItems = saving
+                          ? rowActionItems.map((item) => ({ ...item, disabled: true }))
+                          : rowActionItems;
+
                         return (
-                          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <RentalRowActionsMenu
-                              disabled={saving}
-                              items={rowActionItems}
-                              buttonLabel="Export / bill"
+                          <Box sx={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
+                            <GradientMenu
+                              variant="compact"
+                              className="min-h-0 justify-end py-0"
+                              items={menuItems}
                               onAction={(action) => {
                                 switch (action) {
                                   case 'pdf':

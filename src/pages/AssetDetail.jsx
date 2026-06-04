@@ -45,6 +45,8 @@ import {
 } from '../utils/bottleOwnership';
 import {
   fetchMergedAssetMovementHistory,
+  formatAuditMovementLabel,
+  isSyntheticMovementRow,
   normalizeAuditDetails,
   postAssignmentFromAuditFieldChanges,
   stringifyHistoryDetails,
@@ -199,13 +201,8 @@ const timelineSortMs = (record) => {
   return Number.isFinite(t) ? t : 0;
 };
 
-/** Rows that are not scan/rental/audit workflow — skip when inferring current assignment/status from history. */
-const isSyntheticTimelineNoise = (record) => {
-  if (!record) return true;
-  if (record.history_type === 'record_update' || record.history_type === 'creation') return true;
-  if (record.id === 'bottle_last_updated' || record.id === 'bottle_created') return true;
-  return false;
-};
+/** @deprecated use isSyntheticMovementRow from assetMovementHistory */
+const isSyntheticTimelineNoise = isSyntheticMovementRow;
 
 /**
  * Replay decisive events oldest → newest so a RETURN after a DELIVERY on the same day wins (newest-first list alone does not).
@@ -609,13 +606,25 @@ export default function AssetDetail() {
     customers,
   ]);
 
+  const decisiveMovementHistory = React.useMemo(
+    () => movementHistory.filter((r) => !isSyntheticMovementRow(r)),
+    [movementHistory],
+  );
+
+  const movementHistoryForDisplay = React.useMemo(
+    () => movementHistory.filter((r) => !isSyntheticMovementRow(r)),
+    [movementHistory],
+  );
+
   const derivedDaysAtLocation = React.useMemo(() => {
     const today = toStartOfDay(new Date());
     if (!today) return asset?.days_at_location || 0;
 
+    const historyForDays = decisiveMovementHistory;
+
     // Customer-assigned assets: age from latest delivery to this customer.
-    if (effectiveAssignedCustomerId && movementHistory.length) {
-      const latestCustomerDelivery = movementHistory
+    if (effectiveAssignedCustomerId && historyForDays.length) {
+      const latestCustomerDelivery = historyForDays
         .filter((record) => modeIndicatesDelivery(record) && sameCustomer(record, effectiveAssignedCustomerId, effectiveAssignedCustomerName))
         .map((record) => toStartOfDay(record.created_at))
         .filter(Boolean)
@@ -627,9 +636,9 @@ export default function AssetDetail() {
       }
     }
 
-    // In-house / unassigned assets: age from latest known movement event.
-    if (movementHistory.length) {
-      const latestMovementDate = movementHistory
+    // In-house / unassigned assets: age from latest decisive movement (not generic DB stamps).
+    if (historyForDays.length) {
+      const latestMovementDate = historyForDays
         .map((record) => toStartOfDay(record.created_at))
         .filter(Boolean)
         .sort((a, b) => b.getTime() - a.getTime())[0];
@@ -649,7 +658,7 @@ export default function AssetDetail() {
   }, [
     effectiveAssignedCustomerId,
     effectiveAssignedCustomerName,
-    movementHistory,
+    decisiveMovementHistory,
     asset?.updated_at,
     asset?.created_at,
     asset?.days_at_location
@@ -1809,7 +1818,7 @@ export default function AssetDetail() {
           <Box display="flex" justifyContent="center" p={2}>
             <CircularProgress size={24} />
           </Box>
-        ) : movementHistory.length > 0 ? (
+        ) : movementHistoryForDisplay.length > 0 ? (
           <Box sx={{ overflowX: 'auto', borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
               <thead>
@@ -1827,7 +1836,7 @@ export default function AssetDetail() {
                 </tr>
               </thead>
               <tbody>
-                {movementHistory.slice(0, 10).map((record, index) => {
+                {movementHistoryForDisplay.slice(0, 10).map((record, index) => {
                   const auditDetails = normalizeAuditDetails(record.details);
                   const typeChangeFields = ['category', 'group_name', 'type', 'gas_type', 'product_code', 'description'];
                   const isTypeChangeAudit =
@@ -1863,6 +1872,8 @@ export default function AssetDetail() {
                     action = 'Locate Full';
                   } else if (recordMode === 'CREATE' || record.action === 'Add New Asset' || record.history_type === 'creation') {
                     action = 'Add New Asset';
+                  } else if (record.history_type === 'audit') {
+                    action = formatAuditMovementLabel(record);
                   } else if (record.history_type === 'record_update') {
                     action = record.action || 'Asset record updated';
                   } else {
@@ -1985,9 +1996,9 @@ export default function AssetDetail() {
                 })}
               </tbody>
             </table>
-            {movementHistory.length > 10 && (
+            {movementHistoryForDisplay.length > 10 && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Showing 10 of {movementHistory.length} records. Click "View Full History" to see all.
+                Showing 10 of {movementHistoryForDisplay.length} records. Click "View Full History" to see all.
               </Typography>
             )}
           </Box>

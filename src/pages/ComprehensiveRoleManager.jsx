@@ -62,10 +62,9 @@ export default function ComprehensiveRoleManager() {
       items: [
         { id: 'dashboard', title: 'Dashboard', path: '/home' },
         { id: 'customers', title: 'Customers', path: '/customers' },
-        { id: 'temp_customers', title: 'Temp Customers', path: '/temp-customers' },
         { id: 'locations', title: 'Locations', path: '/locations' },
         { id: 'assets', title: 'Assets', path: '/assets' },
-        { id: 'inventory', title: 'Inventory Management', path: '/inventory-management' },
+        { id: 'inventory', title: 'Inventory Management', path: '/assets' },
         { id: 'rentals', title: 'Rentals', path: '/rentals' },
         { id: 'orders', title: 'Orders', path: '/orders' }
       ]
@@ -74,8 +73,8 @@ export default function ComprehensiveRoleManager() {
       title: 'Reports & Analytics',
       icon: <SettingsIcon />,
       items: [
-        { id: 'analytics', title: 'Analytics', path: '/analytics' },
-        { id: 'reports', title: 'Reports', path: '/reports' }
+        { id: 'analytics', title: 'Analytics', path: '/industry-analytics' },
+        { id: 'reports', title: 'Reports', path: '/custom-reports' }
       ]
     }
   };

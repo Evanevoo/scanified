@@ -504,15 +504,9 @@ export default function UserManagement() {
     }
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:472',message:'Delete user started',data:{userId,userEmail,organizationId:organization?.id || null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       // Step 1: Delete from Supabase Auth (permanent deletion)
       const { error: authError } = await supabase.auth.admin.deleteUser(userId);
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:479',message:'Delete user auth admin call completed',data:{userId,authDeleteSucceeded:!authError,authErrorMessage:authError?.message || null,authErrorCode:authError?.code || null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      
+
       if (authError) {
         logger.warn('Could not delete from auth (may not have admin privileges):', authError);
         // Continue with profile deletion even if auth deletion fails
@@ -526,18 +520,12 @@ export default function UserManagement() {
         .delete()
         .eq('id', userId)
         .eq('organization_id', organization.id);
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:488',message:'Delete user profile delete completed',data:{userId,profileDeleteSucceeded:!profileError,profileErrorMessage:profileError?.message || null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       if (profileError) throw profileError;
 
       setSuccess(`User ${userEmail} has been PERMANENTLY DELETED from Supabase. They will need to create a new account to rejoin.`);
       fetchUsers();
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7716/ingest/af979272-15bb-4603-9fe5-a14af47582a2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c23505'},body:JSON.stringify({sessionId:'c23505',runId:'website-user-delete-pre-fix',hypothesisId:'W3',location:'src/pages/UserManagement.jsx:499',message:'Delete user failed',data:{userId,errorMessage:err?.message || String(err)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       logger.error('Error deleting user:', err);
       setError(`Failed to delete user: ${err.message}`);
     }
