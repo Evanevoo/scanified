@@ -41,6 +41,11 @@ import { useNavigate } from 'react-router-dom';
 import logger from '../utils/logger';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { dedupeVerifiedOrdersByOrderNumber } from '../utils/verifiedOrdersDedup';
+import {
+  collectVerifiedOrderNumbersFromImports,
+  flattenImportRecordsToOrderRows,
+  parseImportDataField,
+} from '../utils/verifiedOrdersList';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
@@ -147,94 +152,19 @@ export default function VerifiedOrders() {
             : 'in',
       }));
 
-      /** Per-order verified rows still on pending/processing import files (multi-order verify). */
-      const partialVerifiedOrders = [];
-      const pushPartialFromImport = (rec, tableType) => {
-        const data = parseDataField(rec.data);
-        const vor = data?.verified_order_numbers;
-        if (!Array.isArray(vor) || vor.length === 0) return;
-        const rows = data.rows || data.line_items || [];
-        const topCust =
-          (data.customer_name || data.CustomerName || data.Customer || '').toString().trim() || '';
-        const topId =
-          (data.customer_id || data.CustomerListID || data.CustomerId || '').toString().trim() || '';
-
-        const seenVoNorm = new Set();
-        for (const vo of vor) {
-          const orderStr = String(vo ?? '').trim();
-          if (!orderStr) continue;
-          const voNorm = normalizeOrderNumForList(orderStr);
-          if (seenVoNorm.has(voNorm)) continue;
-          seenVoNorm.add(voNorm);
-          const matchingRows = rows.filter((r) => {
-            const ref =
-              r.reference_number || r.order_number || r.invoice_number || r.sales_receipt_number;
-            return ref && normalizeOrderNumForList(ref) === voNorm;
-          });
-          const first = matchingRows[0] || rows[0];
-          const custName = first
-            ? (
-                first.customer_name ||
-                first.customerName ||
-                first.Customer ||
-                first.CustomerName ||
-                ''
-              )
-                .toString()
-                .trim()
-            : topCust;
-          const custId = first
-            ? (
-                first.customer_id ||
-                first.CustomerListID ||
-                first.CustomerId ||
-                ''
-              )
-                .toString()
-                .trim()
-            : topId;
-          const rowSlice =
-            matchingRows.length > 0
-              ? matchingRows
-              : [
-                  {
-                    order_number: orderStr,
-                    reference_number: orderStr,
-                    customer_name: custName || topCust,
-                    customer_id: custId || topId,
-                    CustomerListID: custId || topId,
-                  },
-                ];
-          // Do not use import row `updated_at` for "verified" time — it reflects re-imports/edits, not Feb verify.
-          const fallbackTs =
-            rec.approved_at || rec.verified_at || rec.created_at || new Date().toISOString();
-          partialVerifiedOrders.push({
-            ...rec,
-            _listKey: `${rec.id}\t${voNorm}\t${tableType}`,
-            id: rec.id,
-            type: tableType,
-            displayType: tableType === 'invoice' ? 'Invoice' : 'Receipt',
-            icon: tableType === 'invoice' ? <InvoiceIcon /> : <ShippingIcon />,
-            order_number: orderStr,
-            status: 'verified',
-            approved_at: rec.approved_at || rec.verified_at || fallbackTs,
-            verified_at: rec.verified_at || rec.approved_at || fallbackTs,
-            created_at: rec.created_at,
-            data_parsed: {
-              ...data,
-              order_number: orderStr,
-              reference_number: orderStr,
-              customer_name: custName || topCust,
-              customer_id: custId || topId,
-              CustomerListID: custId || topId,
-              rows: rowSlice,
-            },
-            _partialVerifiedOnPendingFile: true,
-          });
-        }
-      };
-      (pendingInvoices || []).forEach((r) => pushPartialFromImport(r, 'invoice'));
-      (pendingReceipts || []).forEach((r) => pushPartialFromImport(r, 'receipt'));
+      // Expand every import file into per-order Invoice/Receipt rows (approved + pending).
+      const importOrderRows = flattenImportRecordsToOrderRows(
+        [
+          { records: invoices, tableType: 'invoice' },
+          { records: receipts, tableType: 'receipt' },
+          { records: pendingInvoices, tableType: 'invoice' },
+          { records: pendingReceipts, tableType: 'receipt' },
+        ],
+        normalizeOrderNumForList,
+      );
+      importOrderRows.forEach((row) => {
+        row.icon = row.type === 'invoice' ? <InvoiceIcon /> : <ShippingIcon />;
+      });
 
       const hydratePartialVerifiedEvidenceDates = async (partials, orgId) => {
         if (!partials?.length || !orgId) return;
@@ -289,40 +219,17 @@ export default function VerifiedOrders() {
           }
         }
       };
-      await hydratePartialVerifiedEvidenceDates(partialVerifiedOrders, organization.id);
+      await hydratePartialVerifiedEvidenceDates(importOrderRows, organization.id);
 
-      const verifiedOrderNums = new Set();
-      [...(invoices || []), ...(receipts || []), ...(pendingInvoices || []), ...(pendingReceipts || [])].forEach(
-        (rec) => {
-          const d = parseDataField(rec.data);
-          (Array.isArray(d?.verified_order_numbers) ? d.verified_order_numbers : []).forEach((n) => {
-            const norm = normalizeOrderNumForList(n);
-            if (norm) verifiedOrderNums.add(norm);
-          });
-        }
+      const verifiedOrderNums = collectVerifiedOrderNumbersFromImports(
+        [invoices, receipts, pendingInvoices, pendingReceipts],
+        normalizeOrderNumForList,
       );
       const scannedOrders = groupScansByOrder(scansForGroup).filter((o) =>
         verifiedOrderNums.has(normalizeOrderNumForList(o.order_number))
       );
 
-      const allOrders = [
-        ...(invoices || []).map((inv) => ({
-          ...inv,
-          type: 'invoice',
-          displayType: 'Invoice',
-          icon: <InvoiceIcon />,
-          data_parsed: parseDataField(inv.data),
-        })),
-        ...(receipts || []).map((rec) => ({
-          ...rec,
-          type: 'receipt',
-          displayType: 'Receipt',
-          icon: <ShippingIcon />,
-          data_parsed: parseDataField(rec.data),
-        })),
-        ...partialVerifiedOrders,
-        ...scannedOrders,
-      ];
+      const allOrders = [...importOrderRows, ...scannedOrders];
       
       // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
       for (const order of allOrders) {
@@ -427,16 +334,7 @@ export default function VerifiedOrders() {
     return Object.values(orderGroups);
   };
 
-  const parseDataField = (data) => {
-    if (typeof data === 'string') {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return {};
-      }
-    }
-    return data || {};
-  };
+  const parseDataField = parseImportDataField;
 
   const applyFilters = () => {
     let filtered = [...verifiedOrders];
