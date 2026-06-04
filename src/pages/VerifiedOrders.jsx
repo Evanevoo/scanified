@@ -694,6 +694,9 @@ export default function VerifiedOrders() {
                 });
               if (!hadOrder) continue;
 
+              if (!Object.prototype.hasOwnProperty.call(recData, 'verified_order_numbers')) {
+                recData.verified_order_numbers = [];
+              }
               recData.verified_order_numbers = vor.filter(
                 (n) => normalizeOrderNum(n) !== normalizedOrderNum,
               );
@@ -809,6 +812,9 @@ export default function VerifiedOrders() {
           ].filter(Boolean)
         );
         if (currentData) {
+          if (!Object.prototype.hasOwnProperty.call(currentData, 'verified_order_numbers')) {
+            currentData.verified_order_numbers = [];
+          }
           currentData.verified_order_numbers = vor.filter((n) => !stripNorms.has(normStrip(n)));
         }
 
