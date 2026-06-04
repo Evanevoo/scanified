@@ -1175,20 +1175,33 @@ export default function ImportApprovals() {
     });
   };
 
-  // Deduplicate records by id first, then by order number + customer (so same id never appears twice)
+  /** Split import cards share one DB id — use displayId or id+order so every order can appear. */
+  const recordDedupeKey = (record) => {
+    if (record?.displayId != null && record.displayId !== '') {
+      return String(record.displayId);
+    }
+    const data = parseDataField(record?.data);
+    const orderNum = (getOrderNumber(data) || '').toString().trim();
+    const id = record?.id != null ? String(record.id) : '';
+    if (typeof id === 'string' && id.startsWith('scanned_')) return id;
+    if (id && orderNum) return `${id}\t${orderNum}`;
+    return id || (orderNum ? `_order_${orderNum}` : '');
+  };
+
+  // Deduplicate by stable card key, then by order number + customer
   const deduplicateRecords = (records) => {
     if (!records || !Array.isArray(records)) {
       return [];
     }
     
     const seenByKey = new Map();
-    const seenById = new Set();
+    const seenByCardKey = new Set();
     const deduplicated = [];
     
     records.forEach(record => {
-      const id = record.id != null ? String(record.id) : '';
-      if (id && seenById.has(id)) {
-        logger.debug(`Removing duplicate record by id: ${id}`);
+      const cardKey = recordDedupeKey(record);
+      if (cardKey && seenByCardKey.has(cardKey)) {
+        logger.debug(`Removing duplicate record by card key: ${cardKey}`);
         return;
       }
       const data = parseDataField(record.data);
@@ -1198,7 +1211,7 @@ export default function ImportApprovals() {
       
       if (!seenByKey.has(key)) {
         seenByKey.set(key, record);
-        if (id) seenById.add(id);
+        if (cardKey) seenByCardKey.add(cardKey);
         deduplicated.push(record);
       } else {
         logger.debug(`Removing duplicate record: Order ${orderNum}, Customer ${customerName}`);
@@ -1920,6 +1933,7 @@ export default function ImportApprovals() {
                 probe75764: probe('75764'),
                 probe75794: probe('75794'),
                 reopenedCount: cleanedRecords.filter((r) => r._reopenedAfterUnverify).length,
+                afterDedupeWouldBe: deduplicateRecords(cleanedRecords).length,
               },
               timestamp: Date.now(),
             }),
