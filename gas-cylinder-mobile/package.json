@@ -1,7 +1,7 @@
 {
   "name": "assettrack-pro-ios",
   "license": "0BSD",
-  "version": "1.0.53",
+  "version": "1.0.57",
   "main": "index.js",
   "scripts": {
     "start": "expo start --ios",
@@ -14,7 +14,7 @@
     "build:ios": "eas build --platform ios --profile production",
     "build:ios-dev": "eas build --platform ios --profile development",
     "build:ios-preview": "eas build --platform ios --profile preview",
-    "submit:ios": "eas submit --platform ios --profile production"
+    "submit:ios": "npx eas-cli submit --platform ios --profile production --latest --non-interactive --no-wait"
   },
   "dependencies": {
     "@babel/runtime": "^7.28.4",
