@@ -20,8 +20,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
     // Use PKCE flow for better security (prevents authorization code interception attacks)
     flowType: 'pkce',
-    // Disable debug mode in production
-    debug: import.meta.env.DEV,
+    // Always off in shipped builds (import.meta.env.DEV was incorrectly true in prod bundles).
+    debug: false,
   },
   // Global headers
   global: {
