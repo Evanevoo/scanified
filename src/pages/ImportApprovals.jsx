@@ -12,7 +12,12 @@ import {
   buildBarcodeToProductMap,
   collectBarcodeLookupFromScans,
   trackedQtyMatchesInvoice,
+  resolveImportOrderNumber,
 } from '../utils/importAutoApproveMatch';
+import {
+  buildAutoApproveImportRowUpdate,
+  parseImportDataField,
+} from '../utils/persistVerifiedOrderOnImport';
 import { BOTTLE_SCANS_QTY_SELECT, BOTTLE_SCANS_SELECT } from '../utils/fetchBottleScansByBarcodes';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
@@ -7366,15 +7371,31 @@ return (
         logger.debug(`Skipping auto-approve for scanned-only record ${record.id} (no DB row)`);
         return false;
       }
+
+      const recordId = record.originalId || record.id;
+      const { data: existingRow, error: fetchErr } = await supabase
+        .from(tableName)
+        .select('id, data')
+        .eq('id', recordId)
+        .maybeSingle();
+      if (fetchErr || !existingRow) {
+        logger.error('Auto-approve: could not load import row for verify persistence:', fetchErr);
+        return false;
+      }
+
+      const existingData = parseImportDataField(existingRow.data);
+      const orderNumber =
+        record.data?.order_number ||
+        record.data?.reference_number ||
+        resolveImportOrderNumber(existingData);
+      const { updatePayload } = buildAutoApproveImportRowUpdate(existingData, orderNumber, {
+        verifiedBy: user?.id,
+      });
+
       const { data: updatedRows, error } = await supabase
         .from(tableName)
-        .update({ 
-          status: 'approved', 
-          approved_at: new Date().toISOString(),
-          auto_approved: true,
-          auto_approval_reason: 'Quantities match between invoice and scanned data; shipped bottles are at home or already with the delivery customer'
-        })
-        .eq('id', record.id)
+        .update(updatePayload)
+        .eq('id', recordId)
         .select('id');
       
       if (error || !updatedRows || updatedRows.length === 0) {
