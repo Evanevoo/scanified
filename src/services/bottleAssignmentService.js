@@ -13,6 +13,7 @@ import {
   isCustomerRowUuid,
 } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import { isSameCustomerIdentity } from '../utils/customerIdentityMatch';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssignedBottles';
 
@@ -71,6 +72,53 @@ async function resolveBottleAssignedCustomerKey(supabase, organizationId, custom
   }
 }
 
+/** How many ship barcodes are already on the verify customer's balance. */
+export async function countShipBarcodesOnVerifyCustomer(
+  supabaseClient,
+  organizationId,
+  shipBarcodes,
+  customerId,
+  customerName
+) {
+  let count = 0;
+  for (const rawBc of shipBarcodes || []) {
+    const barcode = String(rawBc || '').trim();
+    if (!barcode) continue;
+    const bottle = await findBottleRowByScanIdentifier(supabaseClient, organizationId, barcode);
+    if (!bottle) continue;
+    const current = String(
+      bottle.assigned_customer || bottle.customer_uuid || bottle.customer_id || bottle.customer_name || '',
+    ).trim();
+    if (!current) continue;
+    if (
+      isSameCustomerIdentity(
+        customerId,
+        customerName,
+        current,
+        bottle.customer_name,
+        bottle.assigned_customer
+      )
+    ) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function bottleAlreadyOnVerifyCustomer(bottle, customerRowId, customerListId, customerName) {
+  const current = String(
+    bottle.assigned_customer || bottle.customer_uuid || bottle.customer_id || bottle.customer_name || '',
+  ).trim();
+  if (!current) return false;
+  return isSameCustomerIdentity(
+    customerListId || customerRowId,
+    customerName,
+    current,
+    bottle.customer_name,
+    bottle.assigned_customer
+  );
+}
+
 /**
  * Ship-only assignment: writes `customers."CustomerListID"` to `bottles.assigned_customer` (standard in this app).
  * `rentals.customer_id` prefers CustomerListID for Customer Detail / reports.
@@ -121,9 +169,25 @@ async function assignShippedBottlesWithCustomerListId({
     }
     const canonicalBarcode = String(bottle.barcode_number || '').trim() || barcode;
 
-    const current = String(bottle.assigned_customer || bottle.customer_name || '').trim();
+    const current = String(
+      bottle.assigned_customer || bottle.customer_uuid || bottle.customer_id || bottle.customer_name || '',
+    ).trim();
     const isAtHome = !current;
     if (!isAtHome) {
+      if (bottleAlreadyOnVerifyCustomer(bottle, rowId, listKey || listId, name)) {
+        if (order) {
+          await supabase
+            .from('bottles')
+            .update({
+              last_verified_order: order,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', bottle.id)
+            .eq('organization_id', organizationId);
+        }
+        shipped += 1;
+        continue;
+      }
       skipped.push(`${barcode}: already assigned (${current})`);
       continue;
     }
@@ -297,6 +361,21 @@ export const bottleAssignmentService = {
 
         if (!error && !(data && data.success === false)) {
           logger.log('Bottle assignment result:', data);
+          let resultData = { ...(data || {}) };
+          const shipped = Number(resultData.shipped || 0);
+          if (shipped === 0 && shipBarcodes?.length) {
+            const alreadyOnCustomer = await countShipBarcodesOnVerifyCustomer(
+              supabase,
+              organizationId,
+              shipBarcodes,
+              resolved.customerListId || resolved.id,
+              displayName
+            );
+            if (alreadyOnCustomer > 0) {
+              resultData.shipped = alreadyOnCustomer;
+              resultData.already_on_customer = alreadyOnCustomer;
+            }
+          }
           if (hasReturns) {
             await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
               returnBarcodes,
@@ -306,7 +385,7 @@ export const bottleAssignmentService = {
               endDate,
             });
           }
-          return { success: true, data };
+          return { success: true, data: resultData };
         }
 
         if (error && resolved.id && isBottlesAssignedCustomerFkError(error) && shipBarcodes?.length) {
