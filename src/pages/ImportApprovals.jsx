@@ -7658,10 +7658,11 @@ return (
       if (rpcResult.success) {
         const d = rpcResult.data || {};
         const shippedCount = Number(d.shipped || 0);
+        const alreadyOnCustomer = Number(d.already_on_customer || 0);
         logger.debug(
           `RPC assignment succeeded: ${shippedCount} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`,
         );
-        if (shipArr.length > 0 && shippedCount === 0) {
+        if (shipArr.length > 0 && shippedCount === 0 && alreadyOnCustomer < shipArr.length) {
           const warnDetail =
             (Array.isArray(d.warnings) && d.warnings.length && d.warnings.join('; ')) ||
             (Array.isArray(d.errors) && d.errors.length && d.errors.join('; ')) ||
