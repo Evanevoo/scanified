@@ -11,7 +11,15 @@ import { toast } from 'react-hot-toast';
 import { getImportWorker, addImportWorkerListener, removeImportWorkerListener } from '../utils/ImportWorkerManager';
 import { Box, Paper, Typography, Button, IconButton, Alert, LinearProgress, Card, CardContent, Stack, Chip, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import { ArrowBack as ArrowBackIcon, Upload as UploadIcon, Search as SearchIcon, CheckCircle as CheckCircleIcon, CloudUpload as CloudUploadIcon } from '@mui/icons-material';
-import { findCustomer, normalizeCustomerName, batchFindCustomers } from '../utils/customerMatching';
+import { batchFindCustomers } from '../utils/customerMatching';
+import { isSameCustomerIdentity } from '../utils/customerIdentityMatch';
+import {
+  resolveImportOrderNumber,
+  buildImportOrderVariants,
+  collectBarcodeLookupFromScans,
+  buildBarcodeToProductMap,
+  trackedQtyMatchesInvoice,
+} from '../utils/importAutoApproveMatch';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { resolveCustomerListId, isTemporaryCustomerIdentity } from '../utils/resolveCustomerListId';
@@ -155,7 +163,9 @@ export default function Import() {
       if (parsed.columns && Array.isArray(parsed.columns) && JSON.stringify(parsed.columns) === JSON.stringify(detectedColumns)) {
         return parsed.mapping;
       }
-    } catch {}
+    } catch (err) {
+      logger.warn('Failed to parse saved import column mapping from localStorage:', err);
+    }
     return null;
   }
 
@@ -483,19 +493,19 @@ export default function Import() {
     // When unambiguous, infer format:
     // - first > 12  => DD/MM/YYYY
     // - second > 12 => MM/DD/YYYY
-    // If ambiguous (both <= 12), default to MM/DD/YYYY to preserve existing behavior.
+    // If ambiguous (both <= 12), default to DD/MM (day/month) for Trackabout / Canadian imports.
     if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
       const [a, b, y] = dateStr.split('/');
-      let m = a;
-      let d = b;
+      let day = a;
+      let month = b;
       if (+a > 12) {
-        d = a;
-        m = b;
+        day = a;
+        month = b;
       } else if (+b > 12) {
-        m = a;
-        d = b;
+        month = a;
+        day = b;
       }
-      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       return dateStr;
@@ -514,7 +524,7 @@ export default function Import() {
         }
       });
       if (row.date && !isValidDate(row.date)) {
-        errors.push({ row: idx, field: 'date', reason: `Invalid date format: "${row.date}" (expected MM/DD/YYYY or YYYY-MM-DD)` });
+        errors.push({ row: idx, field: 'date', reason: `Invalid date format: "${row.date}" (expected DD/MM/YYYY, MM/DD when day > 12, or YYYY-MM-DD)` });
       }
       if (row.qty_out && row.qty_out.toString().trim() !== '' && isNaN(Number(row.qty_out))) {
         errors.push({ row: idx, field: 'qty_out', reason: `Qty Out is not a number: "${row.qty_out}"` });
@@ -635,12 +645,37 @@ export default function Import() {
     const byInvoiceNumber = {};
     for (const row of rows) {
       const invoiceNumber = String(
-        row.invoice_number || row.reference_number || row.sales_receipt_number || ''
+        row.invoice_number || row.reference_number || row.sales_receipt_number || row.order_number || ''
       ).trim() || 'UNKNOWN';
       if (!byInvoiceNumber[invoiceNumber]) byInvoiceNumber[invoiceNumber] = [];
       byInvoiceNumber[invoiceNumber].push(row);
     }
     return Object.entries(byInvoiceNumber).map(([refNumber, groupRows]) => ({ refNumber, rows: groupRows }));
+  }
+
+  function buildImportInsertData(refNumber, groupRows, mapping, user) {
+    const resolvedRef =
+      refNumber !== 'UNKNOWN'
+        ? refNumber
+        : String(
+            groupRows[0]?.order_number ||
+              groupRows[0]?.invoice_number ||
+              groupRows[0]?.reference_number ||
+              groupRows[0]?.sales_receipt_number ||
+              refNumber
+          ).trim();
+    return {
+      rows: groupRows,
+      order_number: resolvedRef,
+      reference_number: resolvedRef,
+      mapping,
+      summary: {
+        total_rows: groupRows.length,
+        uploaded_by: user.id,
+        uploaded_at: new Date().toISOString(),
+        reference_number: resolvedRef,
+      },
+    };
   }
 
   // Normalize order/ref number for matching (trim, strip leading zeros for all-digit)
@@ -664,9 +699,7 @@ export default function Import() {
   }
 
   function getOrderVariants(orderNumber) {
-    const raw = String(orderNumber ?? '').trim();
-    const norm = normalizeOrderNum(raw);
-    return [...new Set([raw, norm].filter(Boolean))];
+    return buildImportOrderVariants(orderNumber);
   }
 
   function toScanType(scan) {
@@ -679,12 +712,7 @@ export default function Import() {
   }
 
   function getOrderNumberFromImportData(data) {
-    if (!data) return '';
-    const top = data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number || data?.summary?.reference_number;
-    if (top) return String(top).trim();
-    const firstRow = data.rows?.[0] || data.line_items?.[0] || null;
-    if (!firstRow) return '';
-    return String(firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number || '').trim();
+    return resolveImportOrderNumber(data);
   }
 
   // Mirrors firstNumericValue + getShippedQuantity / getReturnedQuantity from ImportApprovals.jsx
@@ -751,95 +779,31 @@ export default function Import() {
     const orderNumber = getOrderNumberFromImportData(data);
     if (!orderNumber) return false;
 
-    const invoiceQtyByProduct = buildInvoiceQtyByProduct(rows);
-    if (invoiceQtyByProduct.size === 0) return false;
-
     const orderVariants = getOrderVariants(orderNumber);
     const { data: scans, error: scansError } = await supabase
       .from('bottle_scans')
-      .select('bottle_barcode, barcode_number, product_code, mode, action, scan_type, created_at, timestamp, order_number')
+      .select('bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp, order_number')
       .in('order_number', orderVariants)
       .eq('organization_id', organizationId);
     if (scansError) return false;
 
     const scanRows = scans || [];
-    // Use both raw and leading-zero-stripped barcodes when looking up product codes from bottles
-    // (matches Import Approvals' barcode normalization in productCodeToAssetInfo).
-    const barcodeLookupSet = new Set();
-    scanRows.forEach((s) => {
-      const raw = (s.bottle_barcode || s.barcode_number || '').toString().trim();
-      if (!raw) return;
-      barcodeLookupSet.add(raw);
-      const norm = normalizeBarcodeForMatch(raw);
-      if (norm && norm !== raw) barcodeLookupSet.add(norm);
-    });
-    const barcodes = [...barcodeLookupSet];
-    const barcodeToProduct = {};
+    const barcodes = collectBarcodeLookupFromScans(scanRows);
+    let barcodeToProduct = {};
     if (barcodes.length > 0) {
       const { data: bottles } = await supabase
         .from('bottles')
         .select('barcode_number, product_code, type')
         .eq('organization_id', organizationId)
         .in('barcode_number', barcodes);
-      (bottles || []).forEach((b) => {
-        const bc = (b.barcode_number || '').toString().trim();
-        if (!bc) return;
-        const product = normalizeProductCode(b.type || b.product_code);
-        if (!product) return;
-        barcodeToProduct[bc] = product;
-        const norm = normalizeBarcodeForMatch(bc);
-        if (norm && norm !== bc) barcodeToProduct[norm] = product;
-      });
+      barcodeToProduct = buildBarcodeToProductMap(bottles, scanRows);
     }
 
-    // Most recent scan wins per (normalized) barcode for the selected order.
-    const latestByBarcode = new Map();
-    scanRows.forEach((scan) => {
-      const bcRaw = (scan.bottle_barcode || scan.barcode_number || '').toString().trim();
-      if (!bcRaw) return;
-      const bcNorm = normalizeBarcodeForMatch(bcRaw) || bcRaw;
-      const time = new Date(scan.created_at || scan.timestamp || 0).getTime();
-      const existing = latestByBarcode.get(bcNorm);
-      if (!existing || time >= existing.time) latestByBarcode.set(bcNorm, { scan, time, bcRaw });
-    });
-
-    const trackedQtyByProduct = new Map();
-    latestByBarcode.forEach(({ scan, bcRaw }) => {
-      const bcNorm = normalizeBarcodeForMatch(bcRaw) || bcRaw;
-      const product =
-        normalizeProductCode(scan.product_code) ||
-        barcodeToProduct[bcRaw] ||
-        barcodeToProduct[bcNorm];
-      if (!product) return;
-      const type = toScanType(scan);
-      const prev = trackedQtyByProduct.get(product) || { shipped: 0, returned: 0 };
-      if (type === 'in') prev.returned += 1;
-      else prev.shipped += 1;
-      trackedQtyByProduct.set(product, prev);
-    });
-
-    for (const [product, invoiceQty] of invoiceQtyByProduct.entries()) {
-      const tracked = trackedQtyByProduct.get(product) || { shipped: 0, returned: 0 };
-      if (invoiceQty.shipped !== tracked.shipped || invoiceQty.returned !== tracked.returned) {
-        return false;
-      }
-    }
-
-    // "No issues" also means there are no extra tracked product quantities
-    // for this order that do not exist in the imported invoice rows.
-    for (const [product, trackedQty] of trackedQtyByProduct.entries()) {
-      const invoiceQty = invoiceQtyByProduct.get(product);
-      if (!invoiceQty && (trackedQty.shipped > 0 || trackedQty.returned > 0)) {
-        return false;
-      }
-    }
-
-    return true;
+    return trackedQtyMatchesInvoice(rows, scanRows, barcodeToProduct);
   }
 
   // Block auto-approval if any bottle that was shipped on this order is currently at a
-  // (different) customer. This mirrors Import Approvals' checkBottlesAtCustomers guard so the
-  // upload flow doesn't silently re-assign bottles that are still out with someone else.
+  // different customer. Bottles already on the delivery customer's balance are allowed.
   async function checkOrderHasBottlesAtCustomer({ recordId, table, organizationId }) {
     try {
       const { data: record } = await supabase
@@ -854,10 +818,12 @@ export default function Import() {
       const orderNumber = getOrderNumberFromImportData(data);
       if (!orderNumber) return false;
 
+      const { name: orderCustomerName, id: orderCustomerId } = getCustomerInfoFromImportData(data);
+
       const orderVariants = getOrderVariants(orderNumber);
       const { data: shipScans } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, barcode_number, mode, action, scan_type, created_at, timestamp')
+        .select('bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp')
         .in('order_number', orderVariants)
         .eq('organization_id', organizationId);
 
@@ -894,12 +860,23 @@ export default function Import() {
       for (const bottle of bottles || []) {
         const customerName = bottle.customer_name || bottle.assigned_customer;
         const hasCustomer = customerName != null && String(customerName).trim() !== '';
-        if (hasCustomer && isBottleAtCustomerByStatus(bottle.status)) {
-          logger.warn(
-            `Auto-approve blocked for order ${orderNumber}: bottle ${bottle.barcode_number} is currently at customer "${customerName}" (status=${bottle.status})`
-          );
-          return true;
+        if (!hasCustomer || !isBottleAtCustomerByStatus(bottle.status)) continue;
+
+        if (
+          isSameCustomerIdentity(
+            orderCustomerId,
+            orderCustomerName,
+            bottle.customer_name,
+            bottle.assigned_customer
+          )
+        ) {
+          continue;
         }
+
+        logger.warn(
+          `Auto-approve blocked for order ${orderNumber}: bottle ${bottle.barcode_number} is currently at a different customer "${customerName}" (status=${bottle.status})`
+        );
+        return true;
       }
       return false;
     } catch (err) {
@@ -1040,7 +1017,7 @@ export default function Import() {
           approved_at: new Date().toISOString(),
           status: 'approved',
           auto_approved: true,
-          auto_approval_reason: 'Quantities match between invoice and scanned data, and shipped bottles are at home'
+          auto_approval_reason: 'Quantities match between invoice and scanned data; shipped bottles are at home or already with the delivery customer'
         })
         .eq('id', id)
         .eq('organization_id', organizationId)
@@ -1152,16 +1129,7 @@ export default function Import() {
       logger.log('Creating invoice import: one row per invoice', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: 0 });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
-        data: {
-          rows: groupRows,
-          mapping,
-          summary: {
-            total_rows: groupRows.length,
-            uploaded_by: user.id,
-            uploaded_at: new Date().toISOString(),
-            reference_number: refNumber
-          }
-        },
+        data: buildImportInsertData(refNumber, groupRows, mapping, user),
         uploaded_by: user.id,
         organization_id: userProfile.organization_id,
         status: 'pending'
@@ -1347,16 +1315,7 @@ export default function Import() {
       logger.log('Creating sales receipt import: one row per receipt', { groupCount: groupsToInsert.length, totalRows: preview.length, toUpdate: updateCount, skippedVerified: 0 });
 
       const insertPayloads = groupsToInsert.map(({ refNumber, rows: groupRows }) => ({
-        data: {
-          rows: groupRows,
-          mapping,
-          summary: {
-            total_rows: groupRows.length,
-            uploaded_by: user.id,
-            uploaded_at: new Date().toISOString(),
-            reference_number: refNumber
-          }
-        },
+        data: buildImportInsertData(refNumber, groupRows, mapping, user),
         uploaded_by: user.id,
         organization_id: userProfile.organization_id,
         status: 'pending'
@@ -2160,7 +2119,7 @@ export default function Import() {
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
       {/* Header */}
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, mb: 3, borderRadius: 3, border: '1px solid rgba(15, 23, 42, 0.08)', background: (theme) => theme.palette.mode === 'dark' ? theme.palette.background.paper : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <IconButton onClick={() => navigate(-1)} sx={{ borderRadius: 999 }}>
             <ArrowBackIcon />
@@ -2432,7 +2391,7 @@ export default function Import() {
               >
                 <Table size="small" stickyHeader>
                   <TableHead>
-                    <TableRow sx={{ backgroundColor: '#f8fafc' }}>
+                    <TableRow sx={{ backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : '#f8fafc' }}>
                       <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Customer Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>

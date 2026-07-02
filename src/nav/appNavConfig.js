@@ -69,6 +69,7 @@ export const APP_NAV_ROUTE_ENTRIES = [
   { path: '/bottle-locations', title: 'Where bottles are', subtitle: 'By warehouse or customer', keywords: ['locations', 'where'] },
   { path: '/asset-history-lookup', title: 'Asset History Lookup', subtitle: 'Trace a cylinder', keywords: ['history'] },
   { path: '/bottle-activity', title: 'Bottle Activity', subtitle: 'All bottle edit events', keywords: ['activity', 'audit', 'history', 'ownership', 'gas type'] },
+  { path: '/quick-add', title: 'Quick Add', subtitle: 'Add multiple barcodes at once', keywords: ['barcode', 'bulk', 'inventory', 'cylinder'] },
   { path: '/recent-cylinders', title: 'Recently Added Cylinders', subtitle: 'New inventory', keywords: [] },
   { path: '/pricing/customers', title: 'Customer Pricing', subtitle: 'Overrides & discounts per customer', keywords: ['pricing', 'discount', 'override', 'bulk'] },
   { path: '/pricing/tax-regions', title: 'Tax Regions', subtitle: 'Location tax rates', keywords: ['tax', 'gst', 'pst', 'hst'] },

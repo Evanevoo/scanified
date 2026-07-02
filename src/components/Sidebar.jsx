@@ -29,6 +29,7 @@ import {
   Link as ProductMapIcon,
   PriceChange as PriceChangeIcon,
   AccountTree as AccountTreeIcon,
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { getPrimaryPathsForRole, getDefaultFullMenuExpanded } from '../nav/appNavConfig';
 
@@ -286,6 +287,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Where bottles are', subtitle: 'By warehouse or customer', path: '/bottle-locations', icon: <PlaceIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Asset History Lookup', subtitle: 'Trace a cylinder', path: '/asset-history-lookup', icon: <SearchIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Bottle Activity', subtitle: 'All bottle edit events', path: '/bottle-activity', icon: <History />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Quick Add', subtitle: 'Add multiple barcodes at once', path: '/quick-add', icon: <AddIcon />, roles: ['admin', 'user', 'manager'] },
         { title: 'Recently Added Cylinders', subtitle: 'New inventory', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
       ]
     },
