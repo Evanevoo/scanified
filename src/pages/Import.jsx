@@ -20,6 +20,10 @@ import {
   buildBarcodeToProductMap,
   trackedQtyMatchesInvoice,
 } from '../utils/importAutoApproveMatch';
+import {
+  buildAutoApproveImportRowUpdate,
+  parseImportDataField,
+} from '../utils/persistVerifiedOrderOnImport';
 import { BOTTLE_SCANS_QTY_SELECT } from '../utils/fetchBottleScansByBarcodes';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
@@ -978,7 +982,14 @@ export default function Import() {
     }
   }
 
-  async function autoApproveImportedRecords({ table, recordIds, organizationId, sweepPendingOrg = false, importedOrderNumbers = [] }) {
+  async function autoApproveImportedRecords({
+    table,
+    recordIds,
+    organizationId,
+    sweepPendingOrg = false,
+    importedOrderNumbers = [],
+    verifiedBy = null,
+  }) {
     let ids = [...new Set((recordIds || []).filter(Boolean))];
     if (sweepPendingOrg && importedOrderNumbers.length > 0) {
       const { data: pendingRows } = await supabase
@@ -1012,14 +1023,23 @@ export default function Import() {
         continue;
       }
 
+      const { data: rowForVerify, error: fetchVerifyErr } = await supabase
+        .from(table)
+        .select('id, data')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .single();
+      if (fetchVerifyErr || !rowForVerify) continue;
+
+      const existingData = parseImportDataField(rowForVerify.data);
+      const orderNumber = getOrderNumberFromImportData(existingData);
+      const { updatePayload } = buildAutoApproveImportRowUpdate(existingData, orderNumber, {
+        verifiedBy,
+      });
+
       const { data: updatedRows, error } = await supabase
         .from(table)
-        .update({
-          approved_at: new Date().toISOString(),
-          status: 'approved',
-          auto_approved: true,
-          auto_approval_reason: 'Quantities match between invoice and scanned data; shipped bottles are at home or already with the delivery customer'
-        })
+        .update(updatePayload)
         .eq('id', id)
         .eq('organization_id', organizationId)
         .eq('status', 'pending')
@@ -1252,7 +1272,8 @@ export default function Import() {
         recordIds: [...insertedIds, ...updatedIds],
         organizationId: userProfile.organization_id,
         sweepPendingOrg: true,
-        importedOrderNumbers
+        importedOrderNumbers,
+        verifiedBy: user.id,
       });
 
       const message = (() => {
@@ -1407,7 +1428,8 @@ export default function Import() {
         recordIds: [...insertedIds, ...updatedIds],
         organizationId: userProfile.organization_id,
         sweepPendingOrg: true,
-        importedOrderNumbers
+        importedOrderNumbers,
+        verifiedBy: user.id,
       });
 
       const message = (() => {
