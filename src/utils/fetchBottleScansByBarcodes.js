@@ -1,5 +1,12 @@
 import logger from './logger';
 
+/** PostgREST select lists — only columns that exist on production bottle_scans. */
+export const BOTTLE_SCANS_SELECT =
+  'id, bottle_barcode, mode, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id';
+
+export const BOTTLE_SCANS_QTY_SELECT =
+  'bottle_barcode, mode, created_at, timestamp, order_number';
+
 export function normalizeScanBarcode(v) {
   return v == null || v === '' ? '' : String(v).trim().replace(/^0+/, '') || String(v).trim();
 }

@@ -13,6 +13,7 @@ import {
   collectBarcodeLookupFromScans,
   trackedQtyMatchesInvoice,
 } from '../utils/importAutoApproveMatch';
+import { BOTTLE_SCANS_QTY_SELECT, BOTTLE_SCANS_SELECT } from '../utils/fetchBottleScansByBarcodes';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabase/client';
 import { resetDaysAtLocation } from '../utils/daysAtLocationUpdater';
@@ -453,8 +454,7 @@ async function fetchBottleScansByBarcodes(supabaseClient, organizationId, barcod
       if (!merged.has(key)) merged.set(key, row);
     });
   };
-  const select =
-    'id, bottle_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id';
+  const select = BOTTLE_SCANS_SELECT;
   const orgFilters = organizationId
     ? [`organization_id.eq.${organizationId}`, 'organization_id.is.null']
     : ['organization_id.is.null'];
@@ -2439,7 +2439,7 @@ export default function ImportApprovals() {
       // NOTE: bottle_scans uses bottle_barcode only (not barcode_number or cylinder_barcode)
       let bottleScans = [];
       
-      const bottleScansSelect = 'bottle_barcode, created_at, timestamp, order_number, organization_id, mode, action, user_id';
+      const bottleScansSelect = BOTTLE_SCANS_SELECT;
       // Try exact match first (string)
       let { data: bottleScansData, error: bottleScansError } = await supabase
         .from('bottle_scans')
@@ -6993,7 +6993,7 @@ return (
       const orderVariants = buildImportOrderVariants(orderNumber);
       const { data: scannedData, error: scannedError } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, mode, action, scan_type, created_at, timestamp, order_number')
+        .select(BOTTLE_SCANS_QTY_SELECT)
         .in('order_number', orderVariants)
         .eq('organization_id', organization?.id);
 

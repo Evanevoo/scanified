@@ -20,6 +20,7 @@ import {
   buildBarcodeToProductMap,
   trackedQtyMatchesInvoice,
 } from '../utils/importAutoApproveMatch';
+import { BOTTLE_SCANS_QTY_SELECT } from '../utils/fetchBottleScansByBarcodes';
 import { validateImportData, autoCorrectImportData, generateImportSummary } from '../utils/importValidation';
 import { bottleAssignmentService } from '../services/bottleAssignmentService';
 import { resolveCustomerListId, isTemporaryCustomerIdentity } from '../utils/resolveCustomerListId';
@@ -782,7 +783,7 @@ export default function Import() {
     const orderVariants = getOrderVariants(orderNumber);
     const { data: scans, error: scansError } = await supabase
       .from('bottle_scans')
-      .select('bottle_barcode, mode, action, scan_type, created_at, timestamp, order_number')
+      .select(BOTTLE_SCANS_QTY_SELECT)
       .in('order_number', orderVariants)
       .eq('organization_id', organizationId);
     if (scansError) return false;
@@ -823,7 +824,7 @@ export default function Import() {
       const orderVariants = getOrderVariants(orderNumber);
       const { data: shipScans } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, mode, action, scan_type, created_at, timestamp')
+        .select(BOTTLE_SCANS_QTY_SELECT)
         .in('order_number', orderVariants)
         .eq('organization_id', organizationId);
 
