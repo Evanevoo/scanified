@@ -103,7 +103,7 @@ export async function fetchBottleScansByBarcodes(
     }
   };
 
-  for (const col of ['bottle_barcode', 'cylinder_barcode']) {
+  for (const col of ['bottle_barcode']) {
     if (organizationId) {
       await runInQuery('bottle_scans', col, 'org');
       await runInQuery('bottle_scans', col, 'null');

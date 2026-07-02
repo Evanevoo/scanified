@@ -442,7 +442,7 @@ function getScanRowBarcode(s) {
   return (s?.bottle_barcode || s?.barcode_number || s?.cylinder_barcode)?.toString().trim() || '';
 }
 
-/** Fetch scans matching bottle_barcode or cylinder_barcode columns on bottle_scans. */
+/** Fetch scans by bottle_barcode on bottle_scans (prod schema has no cylinder_barcode column). */
 async function fetchBottleScansByBarcodes(supabaseClient, organizationId, barcodeArray) {
   if (!barcodeArray?.length) return [];
   const variants = expandBarcodeLookupVariants(barcodeArray);
@@ -454,12 +454,12 @@ async function fetchBottleScansByBarcodes(supabaseClient, organizationId, barcod
     });
   };
   const select =
-    'id, bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id';
+    'id, bottle_barcode, mode, action, scan_type, created_at, timestamp, customer_name, customer_id, location, order_number, organization_id, user_id';
   const orgFilters = organizationId
     ? [`organization_id.eq.${organizationId}`, 'organization_id.is.null']
     : ['organization_id.is.null'];
 
-  for (const col of ['bottle_barcode', 'cylinder_barcode']) {
+  for (const col of ['bottle_barcode']) {
     for (const orgFilter of orgFilters) {
       let query = supabaseClient.from('bottle_scans').select(select).in(col, variants);
       if (orgFilter.startsWith('organization_id.eq.')) {
@@ -2436,10 +2436,10 @@ export default function ImportApprovals() {
       const scannedBarcodes = new Set();
       
       // Fetch from bottle_scans table only (may not have organization_id column)
-      // NOTE: bottle_scans uses 'bottle_barcode' and 'cylinder_barcode', not 'barcode_number'
+      // NOTE: bottle_scans uses bottle_barcode only (not barcode_number or cylinder_barcode)
       let bottleScans = [];
       
-      const bottleScansSelect = 'bottle_barcode, cylinder_barcode, created_at, timestamp, order_number, organization_id, mode, action, user_id';
+      const bottleScansSelect = 'bottle_barcode, created_at, timestamp, order_number, organization_id, mode, action, user_id';
       // Try exact match first (string)
       let { data: bottleScansData, error: bottleScansError } = await supabase
         .from('bottle_scans')
@@ -6993,7 +6993,7 @@ return (
       const orderVariants = buildImportOrderVariants(orderNumber);
       const { data: scannedData, error: scannedError } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp, order_number')
+        .select('bottle_barcode, mode, action, scan_type, created_at, timestamp, order_number')
         .in('order_number', orderVariants)
         .eq('organization_id', organization?.id);
 
