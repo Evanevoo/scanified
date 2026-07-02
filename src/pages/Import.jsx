@@ -782,7 +782,7 @@ export default function Import() {
     const orderVariants = getOrderVariants(orderNumber);
     const { data: scans, error: scansError } = await supabase
       .from('bottle_scans')
-      .select('bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp, order_number')
+      .select('bottle_barcode, mode, action, scan_type, created_at, timestamp, order_number')
       .in('order_number', orderVariants)
       .eq('organization_id', organizationId);
     if (scansError) return false;
@@ -823,7 +823,7 @@ export default function Import() {
       const orderVariants = getOrderVariants(orderNumber);
       const { data: shipScans } = await supabase
         .from('bottle_scans')
-        .select('bottle_barcode, cylinder_barcode, mode, action, scan_type, created_at, timestamp')
+        .select('bottle_barcode, mode, action, scan_type, created_at, timestamp')
         .in('order_number', orderVariants)
         .eq('organization_id', organizationId);
 

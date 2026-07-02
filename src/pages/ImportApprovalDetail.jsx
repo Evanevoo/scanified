@@ -13,8 +13,21 @@ import { reconcileShippedBottleAssignments } from '../services/reconcileShippedB
 import { applyReturnScanInventory } from '../services/applyReturnScanInventory';
 import { fetchOrgRentalPricingContext, monthlyRateForProductPlaceholder } from '../utils/rentalPricing';
 import { getUnanimousShipScanCustomer } from '../utils/verifyScanCustomer';
-import { resolveCustomerListId } from '../utils/resolveCustomerListId';
-import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import {
+  clearResolveCustomerListIdMemo,
+  resolveCustomerListId,
+  resolveOrderCustomerForAssignment,
+} from '../utils/resolveCustomerListId';
+import {
+  findBottleRowByScanIdentifier,
+  resolveBottleRowsForScanBarcodes,
+  canonicalBarcodesForScanIdentifiers,
+} from '../utils/findBottleByScanIdentifier';
+import {
+  duplicateBarcodeMessage,
+  isDuplicateBarcodeDbError,
+  normalizeBottleBarcode,
+} from '../utils/bottleBarcode';
 import { parseDbTimestamp } from '../utils/parseDbTimestamp';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { coerceImportedRowPkForRpc } from '../utils/coerceImportedRowPk';
@@ -183,9 +196,15 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         const uploadedAt = createdAtValues.length
           ? createdAtValues.reduce((a, b) => (a < b ? a : b))
           : (scans[0].created_at || new Date().toISOString());
+        const scanCustomerName = (scans.find((s) => String(s.customer_name || '').trim())?.customer_name || '').trim();
+        const scanCustomerId = (scans.find((s) => String(s.customer_id || '').trim())?.customer_id || '').trim();
+        const topCustomerName = String(filterCustomerName || scanCustomerName || '').trim();
         const mockRecord = {
           id: invoiceNumber,
           data: {
+            order_number: orderNumber,
+            customer_name: topCustomerName,
+            customer_id: scanCustomerId,
             rows: scans.map(scan => ({
               order_number: scan.order_number,
               customer_name: scan.customer_name,
@@ -250,7 +269,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       setLoading(false);
     }
     fetchImport();
-  }, [invoiceNumber, organization?.id]);
+  }, [invoiceNumber, organization?.id, filterCustomerName]);
 
   // Fetch user information for uploaded_by
   useEffect(() => {
@@ -682,36 +701,99 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         });
         logger.log(`📦 After most-recent-wins: Delivered ${deliveredBarcodes.size}, Returned ${returnedBarcodes.size}`);
         
-        // Fetch bottle details for delivered bottles
+        // Fetch bottle details for delivered bottles (exact match + identifier resolution for leading zeros / serial)
         let deliveredBottles = [];
         if (deliveredBarcodes.size > 0) {
+          const barcodeList = Array.from(deliveredBarcodes);
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, status')
-            .in('barcode_number', Array.from(deliveredBarcodes))
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, customer_uuid, status')
+            .in('barcode_number', barcodeList)
             .eq('organization_id', organization.id);
-          
+
           if (bottlesError) {
             logger.error('Error fetching delivered bottles:', bottlesError);
           } else {
             deliveredBottles = bottles || [];
-            logger.log(`✅ Found ${deliveredBottles.length} delivered bottles`);
+            logger.log(`✅ Found ${deliveredBottles.length} delivered bottles (direct barcode match)`);
+          }
+          const resolvedExtra = await resolveBottleRowsForScanBarcodes(
+            supabase,
+            organization.id,
+            barcodeList,
+          );
+          const normKey = (b) => normB(b.barcode_number);
+          const have = new Set(deliveredBottles.map(normKey));
+          for (const row of resolvedExtra) {
+            const k = normKey(row);
+            if (!k || have.has(k)) continue;
+            have.add(k);
+            deliveredBottles.push({
+              barcode_number: row.barcode_number,
+              product_code: row.product_code,
+              category: row.category,
+              group_name: row.group_name,
+              type: row.type,
+              description: row.description,
+              gas_type: row.gas_type,
+              ownership: row.ownership,
+              serial_number: row.serial_number,
+              customer_name: row.customer_name,
+              assigned_customer: row.assigned_customer,
+              customer_uuid: row.customer_uuid,
+              status: row.status,
+            });
+          }
+          if (resolvedExtra.length) {
+            logger.log(
+              `✅ Resolved ${resolvedExtra.length} delivered bottle(s) via scan identifier lookup`,
+            );
           }
         }
         
         // Fetch bottle details for returned bottles
         let returnedBottlesList = [];
         if (returnedBarcodes.size > 0) {
+          const returnList = Array.from(returnedBarcodes);
           const { data: bottles, error: bottlesError } = await supabase
             .from('bottles')
-            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, status')
-            .in('barcode_number', Array.from(returnedBarcodes))
+            .select('barcode_number, product_code, category, group_name, type, description, gas_type, ownership, serial_number, customer_name, assigned_customer, customer_uuid, status')
+            .in('barcode_number', returnList)
             .eq('organization_id', organization.id);
-          
+
           if (bottlesError) {
             logger.error('Error fetching returned bottles:', bottlesError);
           } else {
             returnedBottlesList = bottles || [];
+          }
+          const resolvedReturn = await resolveBottleRowsForScanBarcodes(
+            supabase,
+            organization.id,
+            returnList,
+          );
+          const normKeyR = (b) => normB(b.barcode_number);
+          const haveR = new Set(returnedBottlesList.map(normKeyR));
+          for (const row of resolvedReturn) {
+            const k = normKeyR(row);
+            if (!k || haveR.has(k)) continue;
+            haveR.add(k);
+            returnedBottlesList.push({
+              barcode_number: row.barcode_number,
+              product_code: row.product_code,
+              category: row.category,
+              group_name: row.group_name,
+              type: row.type,
+              description: row.description,
+              gas_type: row.gas_type,
+              ownership: row.ownership,
+              serial_number: row.serial_number,
+              customer_name: row.customer_name,
+              assigned_customer: row.assigned_customer,
+              customer_uuid: row.customer_uuid,
+              status: row.status,
+            });
+          }
+          if (returnedBottlesList.length) {
             logger.log(`✅ Found ${returnedBottlesList.length} returned bottles`);
             for (const bottle of returnedBottlesList) {
               const stillOut =
@@ -735,10 +817,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         setScannedBottles(deliveredBottles);
         setReturnedBottles(returnedBottlesList);
         // Barcodes scanned but not in bottles table = unassigned assets (admin assigns type in Order Verification)
-        const knownDeliveredBarcodes = new Set((deliveredBottles || []).map(b => b.barcode_number));
-        const knownReturnedBarcodes = new Set((returnedBottlesList || []).map(b => b.barcode_number));
-        setUnassignedDeliveredBarcodes(Array.from(deliveredBarcodes).filter(b => !knownDeliveredBarcodes.has(b)));
-        setUnassignedReturnedBarcodes(Array.from(returnedBarcodes).filter(b => !knownReturnedBarcodes.has(b)));
+        const knownDeliveredNorms = new Set((deliveredBottles || []).map((b) => normB(b.barcode_number)));
+        const knownReturnedNorms = new Set((returnedBottlesList || []).map((b) => normB(b.barcode_number)));
+        setUnassignedDeliveredBarcodes(
+          Array.from(deliveredBarcodes).filter((b) => !knownDeliveredNorms.has(normB(b))),
+        );
+        setUnassignedReturnedBarcodes(
+          Array.from(returnedBarcodes).filter((b) => !knownReturnedNorms.has(normB(b))),
+        );
       } catch (error) {
         logger.error('Error fetching scanned bottles:', error);
         setScannedBottles([]);
@@ -889,6 +975,32 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     const showAssignmentSyncHint =
       hasAssignedShipBottles && raw === 'pending' && !inVerified && raw !== 'rejected';
 
+    const usesPerOrderList = Object.prototype.hasOwnProperty.call(idata, 'verified_order_numbers');
+    const perOrderNotVerifiedOnFile =
+      usesPerOrderList && cur && !inVerified && (raw === 'approved' || raw === 'verified');
+
+    if (inVerified) {
+      return {
+        label: 'Verified (this order)',
+        helper:
+          'This order is listed in verified_order_numbers. The file row can stay pending until every order on the same import is verified.',
+        chip: 'Verified (order)',
+        chipColor: 'success',
+        showAssignmentSyncHint: false,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
+    if (perOrderNotVerifiedOnFile) {
+      return {
+        label: 'Pending (not verified for this order)',
+        helper:
+          'This import file is marked approved/verified, but this order number is not in verified_order_numbers. Verify this order on Order Verification, or open another order on the same file.',
+        chip: 'pending',
+        chipColor: 'warning',
+        showAssignmentSyncHint: false,
+        rawRowStatus: importRecord?.status || 'pending',
+      };
+    }
     if (raw === 'approved') {
       return {
         label: 'Approved',
@@ -904,17 +1016,6 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         label: 'Verified',
         helper: 'This import record is marked verified.',
         chip: 'Verified',
-        chipColor: 'success',
-        showAssignmentSyncHint: false,
-        rawRowStatus: importRecord?.status || 'pending',
-      };
-    }
-    if (inVerified) {
-      return {
-        label: 'Verified (this order)',
-        helper:
-          'This order is listed in verified_order_numbers. The file row can stay pending until every order on the same import is verified.',
-        chip: 'Verified (order)',
         chipColor: 'success',
         showAssignmentSyncHint: false,
         rawRowStatus: importRecord?.status || 'pending',
@@ -1013,15 +1114,51 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     return '';
   }, [importRecord, filterCustomerName]);
 
+  const bottleRowMissingRenter = (b) => {
+    const ac = String(b?.assigned_customer || b?.customer_uuid || '').trim();
+    const cn = String(b?.customer_name || '').trim();
+    return !ac && !cn;
+  };
+
   /** SHIP scans tied to this order whose bottle row has no renter — verification may not have run or assignment was cleared later. */
   const deliveredBottlesMissingDbAssignment = useMemo(() => {
-    if (!scannedBottles?.length || !importOrderCustomerDisplay) return [];
-    return scannedBottles.filter((b) => {
-      const ac = String(b.assigned_customer || '').trim();
-      const cn = String(b.customer_name || '').trim();
-      return !ac && !cn;
-    });
-  }, [scannedBottles, importOrderCustomerDisplay]);
+    if (!importOrderCustomerDisplay) return [];
+    const fromBottles = (scannedBottles || []).filter(bottleRowMissingRenter);
+    const fromUnassigned = (unassignedDeliveredBarcodes || []).map((bc) => ({
+      barcode_number: bc,
+      assigned_customer: '',
+      customer_name: '',
+      _scanOnlyNoBottleRow: true,
+    }));
+    return [...fromBottles, ...fromUnassigned];
+  }, [scannedBottles, unassignedDeliveredBarcodes, importOrderCustomerDisplay]);
+
+  const deliveredMissingRenterWarningState = useMemo(() => {
+    if (!importRecord) return { showLegacy: false, showGated: false };
+    const idata = parseDataField(importRecord?.data || {});
+    const raw = String(importRecord?.status || 'pending').toLowerCase();
+    const trimOrder = (n) => (n != null && n !== '' ? String(n).trim() : '');
+    const normOrd = (n) => {
+      if (n == null || n === '') return '';
+      const s = String(n).trim();
+      if (/^\d+$/.test(s)) return s.replace(/^0+/, '') || '0';
+      return s;
+    };
+    const cur = trimOrder(effectiveOrderNumber || getOrderNumber(idata) || '') || '';
+    const vor = Array.isArray(idata?.verified_order_numbers) ? idata.verified_order_numbers : [];
+    const inVerified = !!(cur && vor.some((v) => normOrd(v) === normOrd(cur)));
+    const missingCount = deliveredBottlesMissingDbAssignment.length;
+    const expectedPreVerify =
+      raw === 'pending' && !inVerified && raw !== 'approved' && raw !== 'verified';
+    const showLegacy = missingCount > 0;
+    const showGated = showLegacy && !expectedPreVerify;
+    return { showLegacy, showGated, expectedPreVerify, inVerified, raw };
+  }, [
+    importRecord,
+    effectiveOrderNumber,
+    deliveredBottlesMissingDbAssignment,
+    importOrderCustomerDisplay,
+  ]);
 
   /** Delivered barcodes that still show a different customer on the bottle row (e.g. return not scanned). */
   const deliveredPriorCustomerMismatches = useMemo(() => {
@@ -1090,25 +1227,48 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       return;
     }
 
-    let customerId = getCustomerId(pdata) || null;
+    const importCustomerId = getCustomerId(pdata) || null;
+    let resolvedCustomer = null;
     try {
-      const resolved =
-        (customerId && (await resolveCustomerListId(supabase, organization.id, customerId))) ||
-        (await resolveCustomerListId(supabase, organization.id, customerName));
-      if (resolved?.customerListId) {
-        customerId = resolved.customerListId;
-      } else if (resolved?.id) {
-        customerId = resolved.id;
-      }
+      clearResolveCustomerListIdMemo();
+      resolvedCustomer = await resolveOrderCustomerForAssignment(supabase, organization.id, {
+        customerId: importCustomerId,
+        customerName,
+        filterCustomerName,
+      });
     } catch (e) {
       logger.warn('Fix delivered assignment: resolve customer', e);
     }
+    if (!resolvedCustomer?.customerListId && !resolvedCustomer?.id) {
+      setActionMessage(
+        `Fix failed: could not find "${customerName}" in Customers. Add or match the profile (name or CustomerListID), then retry Fix delivered assignments.`,
+      );
+      setTimeout(() => setActionMessage(''), 12000);
+      return;
+    }
+    const customerId = resolvedCustomer.customerListId || resolvedCustomer.id;
+    const displayCustomerName =
+      String(resolvedCustomer.name || customerName).trim() || 'Customer';
 
-    const missingBarcodes = deliveredBottlesMissingDbAssignment
+    const missingBarcodesRaw = deliveredBottlesMissingDbAssignment
       .map((b) => String(b.barcode_number || '').trim())
       .filter(Boolean);
+    const missingBarcodes = await canonicalBarcodesForScanIdentifiers(
+      supabase,
+      organization.id,
+      missingBarcodesRaw,
+    );
+    const notFound = missingBarcodesRaw.filter(
+      (raw) =>
+        !missingBarcodes.some(
+          (canon) =>
+            canon === raw ||
+            canon.replace(/^0+/, '') === raw.replace(/^0+/, '') ||
+            raw.replace(/^0+/, '') === canon.replace(/^0+/, ''),
+        ),
+    );
     const reconcileBarcodes =
-      deliveredShipBarcodesForFix.length > 0 ? deliveredShipBarcodesForFix : missingBarcodes;
+      deliveredShipBarcodesForFix.length > 0 ? deliveredShipBarcodesForFix : missingBarcodesRaw;
 
     const importTable =
       importRecord._resolvedImportTable === 'imported_sales_receipts'
@@ -1125,18 +1285,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       dateRowForReconcile?.InvoiceDate ||
       null;
 
-    const displayCustomerName =
-      customerName && customerName !== 'Unknown' ? customerName : 'Customer';
-
     setRetryMissingAssignmentLoading(true);
     try {
       let assignedCount = 0;
+      let assignWarnings = null;
       if (missingBarcodes.length > 0) {
         const originalId = getOriginalId(invoiceNumber);
         const recordId = originalId ? coerceImportedRowPkForRpc(originalId) : null;
         const result = await bottleAssignmentService.assignBottles({
           organizationId: organization.id,
-          customerId: customerId || customerName,
+          customerId,
           customerName: displayCustomerName,
           shipBarcodes: missingBarcodes,
           returnBarcodes: [],
@@ -1144,27 +1302,25 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           importTable,
           orderNumber: String(orderNum).trim(),
         });
-        if (!result.success) {
-          setActionMessage(`Fix failed (assign): ${result.error || 'Unknown error'}`);
-          setTimeout(() => setActionMessage(''), 8000);
-          return;
+        if (result.success) {
+          assignedCount = result.data?.shipped ?? 0;
+          assignWarnings = result.data?.warnings;
+        } else {
+          assignWarnings = result.error;
+          logger.warn('Fix delivered: assignBottles did not succeed, running reconcile', result.error);
         }
-        assignedCount = result.data?.shipped ?? 0;
-        if (assignedCount === 0 && mismatchCount === 0) {
-          const detail =
-            result.data?.warnings?.join('; ') ||
-            result.error ||
-            'Assignment returned success but no bottle rows were updated.';
-          setActionMessage(`Fix did not assign any bottles: ${detail}`);
-          setTimeout(() => setActionMessage(''), 10000);
-          return;
-        }
+      } else if (notFound.length > 0 && mismatchCount === 0) {
+        setActionMessage(
+          `No bottle rows found for: ${notFound.join(', ')}. Register these barcodes under Assets, then retry Fix delivered assignments.`,
+        );
+        setTimeout(() => setActionMessage(''), 12000);
+        return;
       }
 
       const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
         organizationId: organization.id,
         shipBarcodes: reconcileBarcodes,
-        customerId: customerId || customerName,
+        customerId,
         customerName: displayCustomerName,
         orderNumber: String(orderNum).trim(),
         effectiveDate: effectiveDateForReconcile,
@@ -1174,6 +1330,18 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
       if (assignedCount > 0) parts.push(`${assignedCount} newly assigned`);
       if (reconcileWarnings.length > 0) {
         parts.push(`${reconcileWarnings.length} reassigned from prior customer`);
+      }
+      if (parts.length === 0 && missingCount > 0 && mismatchCount === 0) {
+        const nf =
+          notFound.length > 0
+            ? ` Not in Assets: ${notFound.join(', ')}.`
+            : '';
+        const detail =
+          (Array.isArray(assignWarnings) ? assignWarnings.join('; ') : assignWarnings) ||
+          'No bottle rows were updated.';
+        setActionMessage(`Fix did not assign any bottles: ${detail}${nf}`);
+        setTimeout(() => setActionMessage(''), 12000);
+        return;
       }
       setActionMessage(
         parts.length > 0
@@ -1248,7 +1416,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         // bottle_scans only
         const { data: orderBottleScans, error: bottleScansError } = await supabase
           .from('bottle_scans')
-          .select('bottle_barcode, cylinder_barcode, order_number, mode, created_at')
+          .select('bottle_barcode, order_number, mode, created_at')
           .eq('order_number', orderNumTrimmed)
           .eq('organization_id', organization?.id);
         if (!bottleScansError && orderBottleScans) {
@@ -1430,8 +1598,9 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           // Bottle not in bottles table yet (scanned barcode not in system)
           // Auto-create the bottle record, assign to customer, and create rental
           logger.log(`🆕 Bottle not found for barcode ${barcode} – creating new bottle record`);
+          const normalizedBarcode = normalizeBottleBarcode(barcode);
           const newBottleData = {
-            barcode_number: barcode,
+            barcode_number: normalizedBarcode,
             organization_id: organization?.id,
             assigned_customer: newCustomerId || newCustomerName,
             customer_name: newCustomerName,
@@ -1442,16 +1611,34 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             updated_at: new Date().toISOString()
           };
 
-          const { data: newBottle, error: insertBottleError } = await supabase
+          let newBottle = null;
+          const { data: insertedBottle, error: insertBottleError } = await supabase
             .from('bottles')
             .insert(newBottleData)
             .select()
             .single();
 
           if (insertBottleError) {
-            logger.error(`Error creating bottle for barcode ${barcode}:`, insertBottleError);
-            assignmentWarnings.push(`Failed to create bottle ${barcode}: ${insertBottleError.message}`);
+            if (isDuplicateBarcodeDbError(insertBottleError)) {
+              const existing = await findBottleRowByScanIdentifier(supabase, organization?.id, normalizedBarcode);
+              if (existing) {
+                newBottle = existing;
+                logger.log(`ℹ️ Bottle ${normalizedBarcode} already exists — using existing record`);
+              } else {
+                logger.error(`Error creating bottle for barcode ${barcode}:`, insertBottleError);
+                assignmentWarnings.push(duplicateBarcodeMessage(normalizedBarcode));
+                continue;
+              }
+            } else {
+              logger.error(`Error creating bottle for barcode ${barcode}:`, insertBottleError);
+              assignmentWarnings.push(`Failed to create bottle ${barcode}: ${insertBottleError.message}`);
+              continue;
+            }
           } else {
+            newBottle = insertedBottle;
+          }
+
+          if (newBottle) {
             logger.log(`✅ Created and assigned new bottle ${barcode} to customer ${newCustomerName}`);
             assignmentSuccesses.push(`New bottle ${barcode} created and assigned to ${newCustomerName}`);
 
@@ -1642,7 +1829,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
           if (orderVariants.length > 0) {
             const resBs = await supabase
               .from('bottle_scans')
-              .select('bottle_barcode, cylinder_barcode, mode, created_at, timestamp, customer_id, customer_name')
+              .select('bottle_barcode, mode, created_at, timestamp, customer_id, customer_name')
               .in('order_number', orderVariants)
               .eq('organization_id', organization.id);
             bottleScanRows = resBs.data || [];
@@ -1804,8 +1991,15 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
             return;
           }
 
-          let customerName = importData.customer_name || importData.customer || '';
-          let customerId = importData.customer_id || importData.CustomerListID || customerName;
+          let customerName = String(getCustomerInfo(importData) || '').trim();
+          if (!customerName || customerName.toLowerCase() === 'unknown') {
+            customerName = String(filterCustomerName || '').trim();
+          }
+          let customerId =
+            getCustomerId(importData) ||
+            importData.customer_id ||
+            importData.CustomerListID ||
+            '';
 
           if (scanCustomerUnanimous && scanCustomerUnanimous.customerListId) {
             const importIdStr = String(customerId || '').trim();
@@ -1823,6 +2017,35 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               customerId = scanCustomerUnanimous.customerListId;
               customerName = scanCustomerUnanimous.name || customerName;
             }
+          }
+
+          clearResolveCustomerListIdMemo();
+          let resolvedOrderCustomer = await resolveOrderCustomerForAssignment(supabase, organization.id, {
+            customerId,
+            customerName,
+            filterCustomerName,
+          });
+          if (!resolvedOrderCustomer && customerName) {
+            resolvedOrderCustomer = await resolveOrderCustomerForAssignment(supabase, organization.id, {
+              customerName: scanCustomerUnanimous?.name || customerName,
+              customerId: scanCustomerUnanimous?.customerListId || customerId,
+              filterCustomerName,
+            });
+          }
+          if (resolvedOrderCustomer) {
+            customerId = resolvedOrderCustomer.customerListId || resolvedOrderCustomer.id || customerId;
+            customerName = resolvedOrderCustomer.name || customerName;
+          } else if (!customerName) {
+            setActionMessage(
+              'Verification failed: no customer name on this scanned order. Open it from Order Verification with ?customer=Name, or set customer on the delivery scans.',
+            );
+            return;
+          } else {
+            setActionMessage(
+              `Verification failed: could not match "${customerName}" to a customer in your organization. ` +
+                'Add or fix the customer under Customers (name and CustomerListID), then retry Verify.',
+            );
+            return;
           }
 
           const custIdStr = String(customerId || '').trim();
@@ -3681,7 +3904,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
   return (
     <Box sx={{ 
       minHeight: '100vh', 
-      background: '#f8fafc',
+      background: (theme) => theme.palette.mode === 'dark' ? theme.palette.background.default : '#f8fafc',
       p: { xs: 2, sm: 3 }
     }}>
       <Paper sx={{ 
@@ -3699,7 +3922,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
               mb: 3,
               borderRadius: 3,
               border: '1px solid rgba(15, 23, 42, 0.08)',
-              background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+              background: (theme) => theme.palette.mode === 'dark' ? theme.palette.background.paper : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
             }}
           >
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
@@ -3877,7 +4100,20 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                 </Alert>
               )}
 
-              {deliveredBottlesMissingDbAssignment.length > 0 && (
+              {deliveredMissingRenterWarningState.expectedPreVerify &&
+                deliveredBottlesMissingDbAssignment.length > 0 && (
+                <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                    Delivered scans — assignment after verify
+                  </Typography>
+                  <Typography variant="body2">
+                    {deliveredBottlesMissingDbAssignment.length} barcode(s) have SHIP scans for this order; bottle rows stay
+                    unassigned until you <strong>Verify This Record</strong> (when SHP, RTN, and TRK match). That is expected
+                    while this order is still pending.
+                  </Typography>
+                </Alert>
+              )}
+              {deliveredMissingRenterWarningState.showGated && (
                 <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>
                     Delivered scan(s) with no renter on the asset record
@@ -3905,6 +4141,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                       <li key={b.barcode_number || b.id}>
                         <Typography variant="body2">
                           {b.barcode_number || '—'}
+                          {b._scanOnlyNoBottleRow ? ' (scan only — not in Assets yet)' : ''}
                         </Typography>
                       </li>
                     ))}
