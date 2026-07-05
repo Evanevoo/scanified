@@ -39,3 +39,38 @@ export async function findBottleRowByScanIdentifier(supabase, organizationId, ra
 
   return null;
 }
+
+/**
+ * Resolve multiple scan identifiers to bottle rows (barcode, stripped barcode, serial).
+ */
+export async function resolveBottleRowsForScanBarcodes(supabase, organizationId, identifiers) {
+  const list = [...new Set((identifiers || []).map((x) => String(x ?? '').trim()).filter(Boolean))];
+  const rows = [];
+  const seen = new Set();
+  for (const id of list) {
+    const row = await findBottleRowByScanIdentifier(supabase, organizationId, id);
+    if (!row) continue;
+    const key = String(row.barcode_number || row.serial_number || id).trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Map scan identifiers to canonical `barcode_number` values when a bottle row exists.
+ */
+export async function canonicalBarcodesForScanIdentifiers(supabase, organizationId, identifiers) {
+  const list = [...new Set((identifiers || []).map((x) => String(x ?? '').trim()).filter(Boolean))];
+  const canon = [];
+  const seen = new Set();
+  for (const id of list) {
+    const row = await findBottleRowByScanIdentifier(supabase, organizationId, id);
+    const bc = String(row?.barcode_number || '').trim();
+    if (!bc || seen.has(bc)) continue;
+    seen.add(bc);
+    canon.push(bc);
+  }
+  return canon;
+}

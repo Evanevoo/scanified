@@ -19,6 +19,7 @@ import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { usePermissions } from '../context/PermissionsContext';
 import GlobalImportProgress from './GlobalImportProgress';
+import GlobalBulkRentalEmailProgress from './GlobalBulkRentalEmailProgress';
 import ImportNotification from './ImportNotification';
 import { useOwnerAccess } from '../hooks/useOwnerAccess';
 import { supabase } from '../supabase/client';
@@ -666,6 +667,7 @@ export default function MainLayout({ children }) {
           {children || <Outlet />}
         </Box>
         <GlobalImportProgress />
+        <GlobalBulkRentalEmailProgress />
         <ImportNotification />
         <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       </Box>

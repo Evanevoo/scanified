@@ -4,7 +4,7 @@
 -- (no FK to those tables). IDs are stored as plain UUIDs for app correlation.
 --
 -- Prerequisite: public.organizations and public.profiles (for RLS).
--- Storage: create a private bucket named "invoices" in Supabase Storage.
+-- Storage: create bucket + RLS — run sql/create_invoices_storage_bucket.sql
 
 CREATE TABLE IF NOT EXISTS public.invoice_email_sends (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

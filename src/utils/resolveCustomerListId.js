@@ -112,3 +112,24 @@ export async function resolveCustomerListId(supabase, organizationId, hint) {
   memo.set(key, null);
   return null;
 }
+
+/**
+ * Resolve order/import customer hints for bottle assignment (URL filter wins, then id, then name).
+ */
+export async function resolveOrderCustomerForAssignment(
+  supabase,
+  organizationId,
+  { customerId, customerName, filterCustomerName } = {},
+) {
+  const urlName = String(filterCustomerName || '').trim();
+  const importName = String(customerName || '').trim();
+  const idHint =
+    customerId != null && String(customerId).trim() !== '' ? String(customerId).trim() : '';
+
+  for (const hint of [urlName, idHint, importName]) {
+    if (!hint) continue;
+    const resolved = await resolveCustomerListId(supabase, organizationId, hint);
+    if (resolved?.customerListId || resolved?.id) return resolved;
+  }
+  return null;
+}
