@@ -10,6 +10,7 @@ import { PermissionsProvider } from './context/PermissionsContext';
 import { ImportProgressProvider } from './components/ImportProgressContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SubscriptionProvider } from './context/SubscriptionContext';
+import { BulkRentalEmailProvider } from './context/BulkRentalEmailContext';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
@@ -213,6 +214,7 @@ function AppContent() {
       <ImportProgressProvider>
         <PermissionsProvider>
           <SubscriptionProvider>
+          <BulkRentalEmailProvider>
           <ThemeProvider>
             <Router
               future={{
@@ -551,6 +553,7 @@ profile && organization ? <Navigate to="/home" replace /> :
               </NotificationLayer>
             </Router>
           </ThemeProvider>
+          </BulkRentalEmailProvider>
           </SubscriptionProvider>
         </PermissionsProvider>
       </ImportProgressProvider>

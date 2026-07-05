@@ -18,6 +18,7 @@ import {
 } from '../services/pricingResolution';
 import { backfillOpenRentalsForAssignedBottles } from '../services/backfillOpenRentalsForAssignedBottles';
 import { closeOrphanOpenRentalsForOrg } from '../services/closeOrphanOpenRentalsForOrg';
+import { mergeQueuedFetchOptions } from '../utils/subscriptionFetchQueue';
 
 const SubscriptionContext = createContext(null);
 
@@ -63,8 +64,13 @@ export function SubscriptionProvider({ children }) {
   const lastFetchAtRef = useRef(0);
   /** Set to true while a fetch is in flight to avoid stacking concurrent refetches. */
   const fetchInFlightRef = useRef(false);
-  /** If true, run another fetch as soon as the current one finishes (so deletes/refreshes are not dropped). */
-  const fetchQueuedRef = useRef(false);
+  /**
+   * Follow-up fetch options when a request arrives mid-flight. Merged so an explicit
+   * Update (reconcile) beats a silent realtime/tab refresh queued at the same time.
+   */
+  const fetchQueuedRef = useRef(null);
+  /** Resolves when the in-flight fetch (and any chained queued fetch) finishes. */
+  const inflightPromiseRef = useRef(null);
 
   useEffect(() => {
     if (!orgId) {
@@ -90,18 +96,24 @@ export function SubscriptionProvider({ children }) {
       if (mountedRef.current && !silent) setLoading(false);
       return;
     }
-    // Avoid stacking concurrent fetches; queue one follow-up so callers still get fresh data.
-    if (fetchInFlightRef.current) {
-      fetchQueuedRef.current = true;
-      return;
-    }
-    fetchInFlightRef.current = true;
-    if (!silent) {
-      setLoading(true);
-      setError(null);
+    // Avoid stacking concurrent fetches; queue merged follow-up so explicit Update still reconciles.
+    if (fetchInFlightRef.current && inflightPromiseRef.current) {
+      fetchQueuedRef.current = mergeQueuedFetchOptions(fetchQueuedRef.current, options);
+      return inflightPromiseRef.current;
     }
 
-    try {
+    const runFetch = async (fetchOptions) => {
+      const runSilent = fetchOptions.silent === true;
+      const runReconcile =
+        fetchOptions.reconcile === true
+        || (fetchOptions.reconcile !== false && !runSilent);
+      fetchInFlightRef.current = true;
+      if (!runSilent) {
+        setLoading(true);
+        setError(null);
+      }
+
+      try {
       const withTimeout = (promise, label, ms = 15000) =>
         Promise.race([
           promise,
@@ -192,17 +204,19 @@ export function SubscriptionProvider({ children }) {
       }));
       let openRentalsList = rentalsRes.data || [];
 
-      if (reconcileRentals) {
-        const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
-          supabase,
-          orgId,
-          {
-            bottles: bottlesList,
-            openRentals: openRentalsList,
-            customers: custRes.data || [],
-          },
-        );
-        if (backfillInserted > 0) {
+      if (runReconcile) {
+        // Loop until no more inserts so Update can backfill >500 bottles in one click.
+        for (let pass = 0; pass < 20; pass += 1) {
+          const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
+            supabase,
+            orgId,
+            {
+              bottles: bottlesList,
+              openRentals: openRentalsList,
+              customers: custRes.data || [],
+            },
+          );
+          if (backfillInserted <= 0) break;
           const refetchRentals = await safe(
             'rentals',
             supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
@@ -210,6 +224,7 @@ export function SubscriptionProvider({ children }) {
           if (!refetchRentals.error && refetchRentals.data) {
             openRentalsList = refetchRentals.data;
           }
+          if (backfillInserted < 500) break;
         }
 
         const { closed: orphansClosed, errors: orphanCloseErrors } = await closeOrphanOpenRentalsForOrg(
@@ -270,17 +285,32 @@ export function SubscriptionProvider({ children }) {
         classNodesList = [];
       }
       if (mountedRef.current) setClassificationNodes(classNodesList);
-    } catch (err) {
-      console.error('SubscriptionContext fetch error:', err);
-      if (mountedRef.current && !silent) setError(err.message);
+      } catch (err) {
+        console.error('SubscriptionContext fetch error:', err);
+        if (mountedRef.current && !runSilent) setError(err.message);
+      } finally {
+        lastFetchAtRef.current = Date.now();
+        fetchInFlightRef.current = false;
+        if (mountedRef.current && !runSilent) setLoading(false);
+      }
+    };
+
+    const chain = (async () => {
+      let pending = { silent, reconcile: reconcileRentals };
+      while (mountedRef.current && orgId) {
+        await runFetch(pending);
+        if (!fetchQueuedRef.current) break;
+        pending = fetchQueuedRef.current;
+        fetchQueuedRef.current = null;
+      }
+    })();
+
+    inflightPromiseRef.current = chain;
+    try {
+      await chain;
     } finally {
-      lastFetchAtRef.current = Date.now();
-      fetchInFlightRef.current = false;
-      if (mountedRef.current && !silent) setLoading(false);
-      const runQueued = fetchQueuedRef.current;
-      fetchQueuedRef.current = false;
-      if (runQueued && mountedRef.current && orgId) {
-        void fetchAll({ silent: true });
+      if (inflightPromiseRef.current === chain) {
+        inflightPromiseRef.current = null;
       }
     }
   }, [orgId]);

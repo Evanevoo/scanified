@@ -60,6 +60,39 @@ export async function resolveReturnEndDateForBarcode(
 }
 
 /**
+ * True when a RETURN/PICKUP/IN scan already exists for this barcode (optionally scoped to order_number).
+ */
+export async function hasExistingReturnScanForBarcode(
+  supabase,
+  organizationId,
+  barcode,
+  orderNumber,
+) {
+  if (!organizationId || !barcode) return false;
+  const order = String(orderNumber || '').trim();
+
+  for (const bc of barcodeVariants(barcode)) {
+    let q = supabase
+      .from('bottle_scans')
+      .select('mode')
+      .eq('organization_id', organizationId)
+      .eq('bottle_barcode', bc)
+      .order('timestamp', { ascending: false })
+      .limit(20);
+
+    if (order) q = q.eq('order_number', order);
+
+    const { data, error } = await q;
+    if (error || !data?.length) continue;
+
+    if (data.some((row) => RETURN_MODES.includes(String(row?.mode || '').trim().toUpperCase()))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Batch lookup for orphan rental repair (one query per org, map by normalized barcode).
  * @returns {Promise<Map<string, string>>} normBarcode -> YYYY-MM-DD
  */

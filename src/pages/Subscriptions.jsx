@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef, useImperative
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscriptions } from '../context/SubscriptionContext';
+import { useBulkRentalEmail } from '../context/BulkRentalEmailContext';
 import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
 import { createSubscription, generateInvoice } from '../services/subscriptionService';
 import { supabase } from '../supabase/client';
@@ -45,6 +46,7 @@ import {
   bottleProductCode,
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
+  getDescendantCustomerRecords,
   isDnsRentalExcludedFromBillableCount,
   isRentalOpen,
   resolvedRentalProductCode,
@@ -57,6 +59,7 @@ import {
 } from '../services/openRentalsBillingBasis';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
+import BulkEmailPreviewDialog from '../components/BulkEmailPreviewDialog';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
@@ -105,6 +108,7 @@ import {
   getPeriodForCyclePrep,
 } from '../utils/rentalBillingPeriod';
 import { preallocateCycleInvoicesForOrganization } from '../services/preallocateCycleInvoices';
+import { applySearchToMonthlyExportRows } from '../utils/rentalMonthlyExportRows';
 
 /**
  * Classifies customer payment_terms for QuickBooks monthly export cohorts.
@@ -147,18 +151,63 @@ function rowMatchesTermsFilter(row, filter) {
 }
 
 /** Deduped open-rental unit count — same basis as Customer Detail rental history header (legacy virtual rows). */
-function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = null) {
+function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = null, allCustomers = null) {
   const customer = row?.customer || {};
-  const customerListId = String(
-    row.customer_id || customer.CustomerListID || customer.id || '',
-  ).trim();
-  const customerName = String(customer.name || customer.Name || '').trim();
-  const customerPkId = String(customer.id || '').trim();
-  const keys = { customerListId, customerName, customerPkId };
-  const merged = rentalsBillingIndex
-    ? mergeOpenRentalsForBillingBasisFromIndex(rentalsBillingIndex, keys)
-    : mergeOpenRentalsForBillingBasis((openRentals || []).filter(isRentalOpen), keys);
-  return merged.filter((r) => !isDnsRentalExcludedFromBillableCount(r)).length;
+  const baseKeys = {
+    customerListId: String(
+      row.customer_id || customer.CustomerListID || customer.id || '',
+    ).trim(),
+    customerName: String(customer.name || customer.Name || '').trim(),
+    customerPkId: String(customer.id || '').trim(),
+  };
+
+  const collectMerged = (keys) => (
+    rentalsBillingIndex
+      ? mergeOpenRentalsForBillingBasisFromIndex(rentalsBillingIndex, keys)
+      : mergeOpenRentalsForBillingBasis((openRentals || []).filter(isRentalOpen), keys)
+  );
+
+  const seen = new Set();
+  let count = 0;
+  const countBillable = (rows) => {
+    for (const r of rows || []) {
+      if (isDnsRentalExcludedFromBillableCount(r)) continue;
+      const id = String(r?.id || '').trim();
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      count += 1;
+    }
+  };
+
+  countBillable(collectMerged(baseKeys));
+
+  const listId = baseKeys.customerListId;
+  let root = customer;
+  if (Array.isArray(allCustomers) && allCustomers.length > 0 && (customer.id || listId)) {
+    const found = allCustomers.find(
+      (c) =>
+        (customer.id && String(c.id) === String(customer.id))
+        || (listId && String(c.CustomerListID || '').trim() === listId),
+    );
+    if (found) root = found;
+  }
+  const descendants =
+    root?.id && Array.isArray(allCustomers)
+      ? getDescendantCustomerRecords(root, allCustomers)
+      : [];
+  for (const desc of descendants) {
+    countBillable(
+      collectMerged({
+        customerListId: String(desc.CustomerListID || '').trim(),
+        customerName: String(desc.name || desc.Name || '').trim(),
+        customerPkId: String(desc.id || '').trim(),
+      }),
+    );
+  }
+
+  return count;
 }
 
 /** Maps DB/UI aliases so period tabs stay consistent (e.g. annual → yearly). */
@@ -377,8 +426,11 @@ export default function Subscriptions() {
     }
     return opts;
   }, []);
-  const [bulkEmailing, setBulkEmailing] = useState(false);
-  const [bulkEmailProgress, setBulkEmailProgress] = useState({ sent: 0, total: 0, failed: 0 });
+  const bulkEmailJob = useBulkRentalEmail();
+  const { active: bulkEmailing, progress: bulkEmailProgress, startJob: startBulkEmailJob } = bulkEmailJob;
+  const [bulkEmailPreviewOpen, setBulkEmailPreviewOpen] = useState(false);
+  const [bulkEmailPreviewLoading, setBulkEmailPreviewLoading] = useState(false);
+  const [bulkEmailPreviewItems, setBulkEmailPreviewItems] = useState([]);
   const [zipExporting, setZipExporting] = useState(false);
   const [zipExportProgress, setZipExportProgress] = useState({ done: 0, total: 0 });
   const [rentalsWorkspaceRefreshing, setRentalsWorkspaceRefreshing] = useState(false);
@@ -630,31 +682,33 @@ export default function Subscriptions() {
     })();
   }, [organization?.id]);
 
+  const reloadActiveLeaseAgreements = useCallback(async () => {
+    const orgId = profile?.organization_id;
+    if (!orgId) {
+      setActiveLeaseAgreements([]);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('lease_agreements')
+        .select('id, customer_id, customer_name, status, max_asset_count, bottle_id')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setActiveLeaseAgreements(data || []);
+    } catch {
+      setActiveLeaseAgreements([]);
+    }
+  }, [profile?.organization_id]);
+
   useEffect(() => {
     let active = true;
-    const loadActiveLeaseAgreements = async () => {
-      const orgId = profile?.organization_id;
-      if (!orgId) {
-        if (active) setActiveLeaseAgreements([]);
-        return;
-      }
-      try {
-        // Narrow fetch only — avoid fetchBillingWorkspaceData (duplicate full bottles/customers/rentals pulls).
-        const { data, error } = await supabase
-          .from('lease_agreements')
-          .select('id, customer_id, customer_name, status, max_asset_count, bottle_id')
-          .eq('organization_id', orgId)
-          .order('created_at', { ascending: false });
-        if (!active) return;
-        if (error) throw error;
-        setActiveLeaseAgreements(data || []);
-      } catch {
-        if (active) setActiveLeaseAgreements([]);
-      }
-    };
-    loadActiveLeaseAgreements();
+    (async () => {
+      if (!active) return;
+      await reloadActiveLeaseAgreements();
+    })();
     return () => { active = false; };
-  }, [profile?.organization_id]);
+  }, [reloadActiveLeaseAgreements]);
 
   useEffect(() => {
     const bump = () => setLocalRatesVersion((v) => v + 1);
@@ -1172,6 +1226,7 @@ export default function Subscriptions() {
           { customer: mergedCustomer, customer_id: g.customer_id },
           ctx.rentals,
           openRentalsBillingIndex,
+          ctx.customers,
         );
         return {
           id: `legacy-${g.key}`,
@@ -1333,7 +1388,12 @@ export default function Subscriptions() {
         canonicalBillingPeriod(row.billing_period) === 'monthly' &&
         String(row.customer?.billing_mode || '').toLowerCase() !== 'lease'
       ) {
-        const basisCount = billableItemCountForRentalRow(row, ctx.rentals, openRentalsBillingIndex);
+        const basisCount = billableItemCountForRentalRow(
+          row,
+          ctx.rentals,
+          openRentalsBillingIndex,
+          ctx.customers,
+        );
         if (basisCount > 0) computedItemCount = basisCount;
       }
 
@@ -1690,6 +1750,35 @@ export default function Subscriptions() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `cycleInvoiceLookupKey` replaces `allRows` so we do not refetch when row arrays are recreated with the same customers/subscriptions
   }, [organization?.id, cycleInvoiceLookupKey, getCurrentCycleRange, getPdfBillingPeriodForSub, invoiceLookupRefreshKey]);
 
+  useEffect(() => {
+    const onInvoiceSent = (event) => {
+      const {
+        customerId: cid,
+        subscriptionId: sid,
+        invoiceNumber,
+        isVirtual,
+      } = event?.detail || {};
+      if (!cid && !sid) return;
+      setCycleInvoiceLookup((prev) => {
+        const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
+        const entry = {
+          invoice_number: invoiceNumber,
+          status: 'sent',
+          updated_at: new Date().toISOString(),
+        };
+        return {
+          byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
+          bySubscriptionId:
+            sid && !isVirtual && !String(sid).startsWith('legacy-') && !String(sid).startsWith('virtual-')
+              ? { ...base.bySubscriptionId, [sid]: entry }
+              : { ...base.bySubscriptionId },
+        };
+      });
+    };
+    window.addEventListener('rental-cycle-invoice-sent', onInvoiceSent);
+    return () => window.removeEventListener('rental-cycle-invoice-sent', onInvoiceSent);
+  }, []);
+
   const handleCreate = async () => {
     if (!newSub.customer_id) return;
     setSaving(true);
@@ -1847,6 +1936,32 @@ export default function Subscriptions() {
     row.status === 'active' &&
     (parseFloat(row.itemCount) || 0) > 0
   ));
+
+  const resolveCustomerEmailForRow = useCallback(async (row) => {
+    let customerEmail = row.customer?.email || row.customer?.Email || row.customer?.email_address || '';
+    if (!customerEmail) {
+      const cid = String(row.customer_id || '').trim();
+      if (cid && organization?.id) {
+        const { data: byList } = await supabase
+          .from('customers')
+          .select('email')
+          .eq('organization_id', organization.id)
+          .eq('CustomerListID', cid)
+          .maybeSingle();
+        customerEmail = byList?.email?.trim() || '';
+        if (!customerEmail) {
+          const { data: byId } = await supabase
+            .from('customers')
+            .select('email')
+            .eq('organization_id', organization.id)
+            .eq('id', cid)
+            .maybeSingle();
+          customerEmail = byId?.email?.trim() || '';
+        }
+      }
+    }
+    return customerEmail || '';
+  }, [organization?.id]);
 
   const buildQbCsvExportRows = useCallback(async (period, cohort = 'all') => {
     const billingData = {
@@ -2025,6 +2140,21 @@ export default function Subscriptions() {
     organization?.id,
     qbCsvBillingMonth,
   ]);
+
+  /**
+   * Monthly invoice rows shared by Export CSV, monthly PDF ZIP, and bulk email.
+   * Uses buildQbCsvExportRows (billing month + terms), then optional search narrowing like ZIP.
+   */
+  const getMonthlyInvoiceExportRows = useCallback(async () => {
+    const result = await buildQbCsvExportRows('monthly', termsFilter);
+    if (result.invalidBillingMonth) {
+      return { rows: [], invalidBillingMonth: true };
+    }
+    let rows = result.rows || [];
+    rows = applySearchToMonthlyExportRows(rows, filtered, debouncedSearch, normalize, normalizeName);
+
+    return { rows, invalidBillingMonth: false };
+  }, [buildQbCsvExportRows, termsFilter, debouncedSearch, filtered]);
 
   const handleExportQbInvoiceCsv = async (period, cohort = 'all') => {
     setActionError(null);
@@ -3172,215 +3302,182 @@ export default function Subscriptions() {
     }
   }, [emailRow, buildInvoicePdfForRow, profile, user, organization?.name, organization?.website, organization?.id, organization?.email, organization?.default_invoice_email, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId, qbCsvBillingMonth]);
 
-  const handleBulkEmailInvoices = useCallback(async () => {
-    const rows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
-    if (rows.length === 0) {
-      setActionError('No invoiceable rentals in the current view.');
+  const openBulkEmailPreview = useCallback(async () => {
+    if (bulkEmailing) {
+      setActionError('Bulk email is already running. Use the progress panel to pause or cancel.');
       return;
     }
-    setBulkEmailing(true);
-    setBulkEmailProgress({ sent: 0, total: rows.length, failed: 0 });
     setActionError(null);
     setActionSuccess(null);
-
-    let defaultFrom = '';
-    let billingInquiryEmail = organization?.default_invoice_email || organization?.email || '';
-    const orgName = organization?.name || 'your organization';
-    const orgWebsite = organization?.website || '';
+    setBulkEmailPreviewOpen(true);
+    setBulkEmailPreviewLoading(true);
+    setBulkEmailPreviewItems([]);
     try {
-      const { data: orgData } = await supabase
-        .from('organizations')
-        .select('invoice_emails, default_invoice_email, email')
-        .eq('id', organization.id)
-        .single();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionEmail = sessionData?.session?.user?.email?.trim() || '';
-      const profileEmail = profile?.email?.trim() || '';
-      defaultFrom = sessionEmail || profileEmail || user?.email?.trim() || orgData?.default_invoice_email || orgData?.email || '';
-      billingInquiryEmail = orgData?.default_invoice_email || orgData?.email || billingInquiryEmail;
-    } catch {
-      defaultFrom = profile?.email?.trim() || user?.email?.trim() || '';
-    }
-
-    const savedEmailTemplate = getSavedEmailTemplate();
-    const remitName = String(remitAddress?.remit_name || orgName).trim();
-    const remitLine1 = String(remitAddress?.remit_address_line1 || '').trim();
-    const remitLine2 = String(remitAddress?.remit_address_line2 || '').trim();
-    const remitLine3 = String(remitAddress?.remit_address_line3 || '').trim();
-
-    let sent = 0;
-    let failed = 0;
-    for (const row of rows) {
-      try {
-        let customerEmail = row.customer?.email || row.customer?.Email || row.customer?.email_address || '';
-        if (!customerEmail) {
-          const cid = String(row.customer_id || '').trim();
-          if (cid) {
-            const { data: byList } = await supabase
-              .from('customers').select('email').eq('organization_id', organization.id).eq('CustomerListID', cid).maybeSingle();
-            customerEmail = byList?.email?.trim() || '';
-            if (!customerEmail) {
-              const { data: byId } = await supabase
-                .from('customers').select('email').eq('organization_id', organization.id).eq('id', cid).maybeSingle();
-              customerEmail = byId?.email?.trim() || '';
-            }
-          }
-        }
-        if (!customerEmail) {
-          failed += 1;
-          setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
-          continue;
-        }
-
-        const invNo = await resolveRentalInvoiceNumberForActions(row);
-        const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
-        const bulkSnapOpts = qbSnapshotGroupsCacheRef.current ? { zipGroupsCache: qbSnapshotGroupsCacheRef.current } : {};
-        const bulkPdfBundle = await buildInvoicePdfForRow(row, invNo, bulkSnapOpts);
-        const { doc, customerName: cn, amountDue, invoiceNumber: pdfInvNo } = bulkPdfBundle;
-        const formattedAmount = amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-        const customerPoBulk = String(
-          row?.customer?.purchase_order
-          ?? matchCustomerRecordBySubscriptionId(row?.customer_id)?.purchase_order
-          ?? '',
-        ).trim();
-        const emailVars = buildRentalInvoiceEmailVarMap({
-          invoiceNumber: pdfInvNo,
-          formattedAmount,
-          customerName,
-          customerPurchaseOrder: customerPoBulk,
-          orgName,
-          orgWebsite,
-          remitName,
-          remitLine1,
-          remitLine2,
-          remitLine3,
-          remitAddressBlock,
-          billingInquiryEmail,
-          savedTemplate: savedEmailTemplate,
-          daysAtLocationSummary: daysAtLocationSummaryFromBottles(bulkPdfBundle.bottles),
-        });
-
-        const bulkBodyRaw = savedEmailTemplate?.body;
-        const bulkHasBody = typeof bulkBodyRaw === 'string' && bulkBodyRaw.trim().length > 0;
-        let msgBody = bulkHasBody
-          ? applyInvoiceEmailTemplateVars(bulkBodyRaw, emailVars)
-          : `Your invoice ${pdfInvNo} for $${formattedAmount} is attached.\n\nFor any billing or invoice inquiries, please reply to this email.\nThank you very much for your business.`;
-        msgBody = stripRemitInstructionsFromInvoiceEmailBody(msgBody);
-        msgBody = mergePaymentMethodsIntoInvoiceEmailBody(msgBody, bulkBodyRaw, emailVars);
-        if (bulkHasBody && !msgBody.includes(pdfInvNo)) {
-          msgBody = `Invoice ${pdfInvNo}\n\n${msgBody}`;
-        }
-        msgBody = ensureInvoiceContext(msgBody, pdfInvNo, formattedAmount);
-        if (!bulkHasBody && customerPoBulk) {
-          msgBody = `${String(msgBody).trim()}\n\nCustomer P.O.: ${customerPoBulk}`;
-        }
-        const renderedSignature = applyInvoiceEmailTemplateVars(
-          String(savedEmailTemplate?.signature || defaultTemplateSignature),
-          emailVars
-        );
-        msgBody = withGlobalSignature(msgBody, renderedSignature);
-        const bulkSubjectRaw = savedEmailTemplate?.subject;
-        const bulkHasSubject = typeof bulkSubjectRaw === 'string' && bulkSubjectRaw.trim().length > 0;
-        const subject = bulkHasSubject
-          ? applyInvoiceEmailTemplateVars(bulkSubjectRaw, emailVars)
-          : `Invoice ${pdfInvNo} – ${customerName} – ${orgName}`;
-        const pdfBase64 = doc.output('datauristring').split(',')[1];
-        const pdfFileName = `Invoice_${String(cn || customerName).replace(/[^\w-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-        const bodyHtml = msgBody.replace(/\n/g, '<br/>');
-
-        const response = await fetch('/.netlify/functions/send-invoice-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: customerEmail,
-            from: defaultFrom,
-            senderName: profile?.full_name || user?.user_metadata?.full_name || '',
-            subject,
-            body: bodyHtml,
-            pdfBase64,
-            pdfFileName,
-            invoiceNumber: pdfInvNo,
-          }),
-        });
-        if (!response.ok) {
-          failed += 1;
-          setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
-        } else {
-          sent += 1;
-          setBulkEmailProgress((p) => ({ ...p, sent: p.sent + 1 }));
-          try {
-            const bulkPayload = await response.json().catch(() => ({}));
-            await persistRentalInvoiceEmailSent(row, pdfInvNo);
-            const { periodStart: bPs, periodEnd: bPe } = getBillingPeriodForSub(row, {
-              qbBillingMonthYm: qbCsvBillingMonth,
-            });
-            const rowSid = String(row.id || '').trim();
-            await logInvoiceEmailSend({
-              organizationId: organization.id,
-              subscriptionId:
-                rowSid && !row.isVirtual && !rowSid.startsWith('legacy-') && !rowSid.startsWith('virtual-')
-                  ? rowSid
-                  : null,
-              customerId: row.customer_id,
-              invoiceNumber: pdfInvNo,
-              periodStart: bPs,
-              periodEnd: bPe,
-              emailedTo: [customerEmail].filter(Boolean),
-              emailFrom: defaultFrom,
-              subject,
-              messageId: bulkPayload?.messageId,
-              sentByUserId: profile?.id || user?.id,
-              pdfBase64,
-            });
-            const cid = String(row.customer_id || '').trim();
-            const sid = String(row.id || '').trim();
-            if (cid || sid) {
-              setCycleInvoiceLookup((prev) => {
-                const base = prev?.byCustomerId && prev?.bySubscriptionId ? prev : emptyCycleInvoiceLookup();
-                const entry = {
-                  invoice_number: pdfInvNo,
-                  status: 'sent',
-                  updated_at: new Date().toISOString(),
-                };
-                return {
-                  byCustomerId: cid ? { ...base.byCustomerId, [cid]: entry } : { ...base.byCustomerId },
-                  bySubscriptionId:
-                    sid && !row.isVirtual && !sid.startsWith('legacy-') && !sid.startsWith('virtual-')
-                      ? { ...base.bySubscriptionId, [sid]: entry }
-                      : { ...base.bySubscriptionId },
-                };
-              });
-            }
-          } catch {
-            /* status update best-effort; email already sent */
-          }
-        }
-      } catch {
-        failed += 1;
-        setBulkEmailProgress((p) => ({ ...p, failed: p.failed + 1 }));
+      const { rows, invalidBillingMonth } = await getMonthlyInvoiceExportRows();
+      if (invalidBillingMonth) {
+        setActionError('Select a valid billing month for bulk email.');
+        setBulkEmailPreviewOpen(false);
+        return;
       }
+      if (rows.length === 0) {
+        setActionError('No monthly invoiceable rentals match the current Month, Terms, and search filters.');
+        setBulkEmailPreviewOpen(false);
+        return;
+      }
+
+      const items = await Promise.all(
+        rows.map(async (row) => {
+          const customerName = row.customer?.name || row.customer?.Name || row.customer_id || 'Customer';
+          const [email, invoiceNumber] = await Promise.all([
+            resolveCustomerEmailForRow(row),
+            resolveRentalInvoiceNumberForActions(row),
+          ]);
+          return {
+            row,
+            customerName,
+            email: email || null,
+            invoiceNumber,
+            itemCount: parseFloat(row.itemCount) || 0,
+            totalPerCycle: parseFloat(row.totalPerCycle) || 0,
+            willSend: Boolean(email),
+            skipReason: email ? undefined : 'No email on file',
+          };
+        }),
+      );
+      setBulkEmailPreviewItems(items);
+    } catch (e) {
+      setActionError(e?.message || 'Could not prepare bulk email preview.');
+      setBulkEmailPreviewOpen(false);
+    } finally {
+      setBulkEmailPreviewLoading(false);
+    }
+  }, [
+    bulkEmailing,
+    getMonthlyInvoiceExportRows,
+    resolveCustomerEmailForRow,
+    resolveRentalInvoiceNumberForActions,
+  ]);
+
+  const executeBulkEmailFromPreview = useCallback(async () => {
+    const toSend = bulkEmailPreviewItems.filter((i) => i.willSend);
+    if (toSend.length === 0) {
+      setActionError('No customers with an email address to send to.');
+      return;
+    }
+    if (bulkEmailing) {
+      setActionError('A bulk email job is already running.');
+      return;
     }
 
-    setBulkEmailing(false);
-    if (failed > 0) {
-      setActionError(`Sent ${sent}/${rows.length} invoices. ${failed} skipped (no email on file or send error).`);
-    } else {
-      setActionSuccess(`Sent ${sent}/${rows.length} invoices successfully.`);
-    }
-  }, [filtered, buildInvoicePdfForRow, organization, profile, user, getSavedEmailTemplate, withGlobalSignature, ensureInvoiceContext, persistRentalInvoiceEmailSent, resolveRentalInvoiceNumberForActions, remitAddress, remitAddressBlock, matchCustomerRecordBySubscriptionId, qbCsvBillingMonth]);
+    setActionError(null);
+    setActionSuccess(null);
+    setBulkEmailPreviewOpen(false);
+
+    const skippedNoEmail = bulkEmailPreviewItems.filter((i) => !i.willSend).length;
+    const zipGroupsCache = qbSnapshotGroupsCacheRef.current || null;
+
+    await startBulkEmailJob({
+      items: bulkEmailPreviewItems,
+      skippedNoEmail,
+      deps: {
+        organization,
+        profile,
+        user,
+        getSavedEmailTemplate,
+        remitAddress,
+        remitAddressBlock,
+        matchCustomerRecordBySubscriptionId,
+        qbCsvBillingMonth,
+        buildInvoicePdfForRow,
+        zipGroupsCache,
+        persistRentalInvoiceEmailSent,
+        withGlobalSignature,
+        ensureInvoiceContext,
+        defaultTemplateSignature,
+        onInvoiceSent: ({ row, pdfInvNo }) => {
+          const cid = String(row.customer_id || '').trim();
+          const sid = String(row.id || '').trim();
+          if (!cid && !sid) return;
+          window.dispatchEvent(
+            new CustomEvent('rental-cycle-invoice-sent', {
+              detail: {
+                customerId: cid,
+                subscriptionId: sid,
+                invoiceNumber: pdfInvNo,
+                isVirtual: row.isVirtual,
+              },
+            }),
+          );
+        },
+      },
+      onComplete: (result, { skippedNoEmail: skipped }) => {
+        if (result.cancelled) {
+          const parts = [`Stopped after ${result.sent}/${result.total} emailed`];
+          if (result.failed > 0) parts.push(`${result.failed} email error(s)`);
+          setActionError(parts.join('. '));
+          return;
+        }
+        const parts = [`Emailed ${result.sent}/${result.total} customers`];
+        if (result.failed > 0) parts.push(`${result.failed} email send error(s)`);
+        if (skipped > 0) parts.push(`${skipped} skipped in preview (no email on file)`);
+        if (result.pdfArchiveFailed > 0) {
+          parts.push(
+            `${result.pdfArchiveFailed} PDF archive failed (emails were still sent — run sql/create_invoices_storage_bucket.sql in Supabase)`,
+          );
+        }
+        if (result.failed > 0 || skipped > 0 || result.pdfArchiveFailed > 0) {
+          setActionError(parts.join('. '));
+        } else {
+          setActionSuccess(`Emailed ${result.sent}/${result.total} invoices successfully.`);
+        }
+        setInvoiceLookupRefreshKey((k) => k + 1);
+      },
+    });
+  }, [
+    bulkEmailPreviewItems,
+    bulkEmailing,
+    startBulkEmailJob,
+    organization,
+    profile,
+    user,
+    getSavedEmailTemplate,
+    remitAddress,
+    remitAddressBlock,
+    matchCustomerRecordBySubscriptionId,
+    qbCsvBillingMonth,
+    buildInvoicePdfForRow,
+    persistRentalInvoiceEmailSent,
+    withGlobalSignature,
+    ensureInvoiceContext,
+  ]);
 
   const handleExportInvoicePdfsZip = useCallback(async () => {
-    const baseRows = filtered.filter((r) => r.status === 'active' && (parseFloat(r.totalPerCycle) || 0) > 0);
-    const rows = baseRows.filter((r) => canonicalBillingPeriod(r.billing_period) !== 'yearly');
-    if (rows.length === 0) {
-      setActionError('No monthly invoiceable rentals in the current view.');
-      return;
-    }
     setZipExporting(true);
-    setZipExportProgress({ done: 0, total: rows.length });
+    setZipExportProgress({ done: 0, total: 0 });
     setActionError(null);
     setActionSuccess(null);
+
+    let rows = [];
+    try {
+      const result = await getMonthlyInvoiceExportRows();
+      if (result.invalidBillingMonth) {
+        setActionError('Select a valid billing month for the monthly PDF ZIP.');
+        setZipExporting(false);
+        return;
+      }
+      rows = result.rows || [];
+      if (rows.length === 0) {
+        setActionError('No monthly invoiceable rentals match the current Month, Terms, and search filters.');
+        setZipExporting(false);
+        return;
+      }
+    } catch (e) {
+      setActionError(e?.message || 'Could not load rows for ZIP export.');
+      setZipExporting(false);
+      return;
+    }
+
+    setZipExportProgress({ done: 0, total: rows.length });
 
     // One rentals load for the whole ZIP — buildInvoicePdfForRow otherwise queries the full table per row.
     const needsRentalSnapshot = rows.some(
@@ -3516,7 +3613,7 @@ export default function Subscriptions() {
       setZipExportProgress({ done: 0, total: 0 });
     }
   }, [
-    filtered,
+    getMonthlyInvoiceExportRows,
     buildInvoicePdfForRow,
     resolveRentalInvoiceNumberForActions,
     getCurrentCycleRange,
@@ -3545,13 +3642,14 @@ export default function Subscriptions() {
     setRentalsWorkspaceRefreshing(true);
     try {
       await ctx.refresh();
+      await reloadActiveLeaseAgreements();
       setActionSuccess('Rentals and bottle counts updated from the server.');
     } catch (e) {
       setActionError(e?.message || 'Refresh failed.');
     } finally {
       setRentalsWorkspaceRefreshing(false);
     }
-  }, [ctx]);
+  }, [ctx, reloadActiveLeaseAgreements]);
 
   const handlePreallocateCycleInvoiceNumbers = useCallback(async () => {
     if (!organization?.id) return;
@@ -3601,7 +3699,7 @@ export default function Subscriptions() {
           void handlePreallocateCycleInvoiceNumbers();
           break;
         case 'email':
-          handleBulkEmailInvoices();
+          void openBulkEmailPreview();
           break;
         case 'zip':
           handleExportInvoicePdfsZip();
@@ -3620,7 +3718,7 @@ export default function Subscriptions() {
       termsFilter,
       handleGenerateAllInvoices,
       handlePreallocateCycleInvoiceNumbers,
-      handleBulkEmailInvoices,
+      openBulkEmailPreview,
       handleExportInvoicePdfsZip,
       blurActiveElement,
     ],
@@ -3767,7 +3865,7 @@ export default function Subscriptions() {
                 sx={toolbarBtnSx}
               >
                 {bulkEmailing
-                  ? `Email ${bulkEmailProgress.sent + bulkEmailProgress.failed}/${bulkEmailProgress.total}`
+                  ? `Email ${(bulkEmailProgress.sent || 0) + (bulkEmailProgress.failed || 0)}/${bulkEmailProgress.total || 0}`
                   : 'Email'}
               </Button>
               <Button
@@ -3804,28 +3902,13 @@ export default function Subscriptions() {
             </Stack>
           </Stack>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.25, lineHeight: 1.5 }}>
-            CSV and ZIP respect Month + Terms filters. Per customer: use the row action buttons (PDF, Email, Excel, etc.).
+            CSV, ZIP, and bulk Email use the same monthly rows (Month + Terms; search narrows ZIP/Email). Per customer: row actions (PDF, Email, Excel).
           </Typography>
         </Paper>
       </Stack>
 
       {actionError && <Alert severity="error" onClose={() => setActionError(null)} sx={{ mb: 2 }}>{actionError}</Alert>}
       {actionSuccess && <Alert severity="success" onClose={() => setActionSuccess(null)} sx={{ mb: 2 }}>{actionSuccess}</Alert>}
-      {bulkEmailing && (
-        <Box sx={{ mb: 2 }}>
-          <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Sending bulk invoices…</Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {bulkEmailProgress.sent} sent · {bulkEmailProgress.failed} skipped · {bulkEmailProgress.total} total
-            </Typography>
-          </Stack>
-          <LinearProgress
-            variant="determinate"
-            value={bulkEmailProgress.total > 0 ? ((bulkEmailProgress.sent + bulkEmailProgress.failed) / bulkEmailProgress.total) * 100 : 0}
-            sx={{ borderRadius: 1, height: 6 }}
-          />
-        </Box>
-      )}
       {zipExporting && (
         <Box sx={{ mb: 2 }}>
           <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
@@ -4329,6 +4412,29 @@ export default function Subscriptions() {
         emailRow={emailRow}
         senderOptions={senderOptions}
         initialForm={emailInitialForm}
+        primaryColor={primaryColor}
+      />
+
+      <BulkEmailPreviewDialog
+        open={bulkEmailPreviewOpen}
+        onClose={() => setBulkEmailPreviewOpen(false)}
+        onConfirm={() => void executeBulkEmailFromPreview()}
+        loading={bulkEmailPreviewLoading}
+        sending={false}
+        items={bulkEmailPreviewItems}
+        billingMonthLabel={
+          qbCsvMonthMenuOptions.find((o) => o.value === qbCsvBillingMonth)?.label || qbCsvBillingMonth
+        }
+        termsLabel={
+          termsFilter === 'net30'
+            ? 'NET 30'
+            : termsFilter === 'credit_card'
+              ? 'Credit Card'
+              : termsFilter === 'other'
+                ? 'Other'
+                : 'All'
+        }
+        searchActive={Boolean(debouncedSearch.trim())}
         primaryColor={primaryColor}
       />
     </Box>
