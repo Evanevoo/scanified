@@ -50,6 +50,37 @@ describe('verifiedOrdersList', () => {
     expect(norms.has('75999')).toBe(false);
   });
 
+  it('pending file without verified_order_numbers does not appear on Verified Orders', () => {
+    const pending = {
+      id: 'inv-s49665',
+      status: 'pending',
+      data: {
+        customer_name: 'Brynn Johnson',
+        rows: [{ reference_number: 'S49665', customer_name: 'Brynn Johnson' }],
+      },
+    };
+    const rows = expandImportRecordsToOrderRows(pending, 'invoice', norm);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('pending file only expands orders in verified_order_numbers', () => {
+    const pending = {
+      id: 'inv-partial',
+      status: 'pending',
+      data: {
+        verified_order_numbers: ['S49665'],
+        rows: [
+          { reference_number: 'S49665', customer_name: 'Brynn Johnson' },
+          { reference_number: 'S49999', customer_name: 'Other' },
+        ],
+      },
+    };
+    const rows = expandImportRecordsToOrderRows(pending, 'invoice', norm);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].order_number).toBe('S49665');
+    expect(rows[0]._partialVerifiedOnPendingFile).toBe(true);
+  });
+
   it('drops scanned row when import already covers order 75794', () => {
     const importRows = flattenImportRecordsToOrderRows(
       [

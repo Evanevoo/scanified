@@ -22,19 +22,19 @@ import { mergeQueuedFetchOptions } from '../utils/subscriptionFetchQueue';
 
 const SubscriptionContext = createContext(null);
 
-const REALTIME_TABLES = [
-  'subscriptions',
-  'subscription_items',
-  'asset_type_pricing',
-  'asset_classification_nodes',
-  'customer_pricing',
-  'customer_pricing_overrides',
-  'subscription_invoices',
-  'payments',
-  'customers',
-  'lease_contracts',
-  'lease_contract_items',
-];
+/** PostgREST default max rows — page so large orgs are not silently truncated. */
+const PAGE_SIZE = 1000;
+
+/**
+ * Columns needed for Rentals billing / backfill / orphan close.
+ * Avoid select('*') — full bottle rows are the main payload cost on this page.
+ */
+const BOTTLE_SELECT_NARROW =
+  'id, organization_id, barcode_number, barcode, product_code, product_type, asset_type, cylinder_type, gas_type, sku, display_label, description, name, asset_name, status, asset_status, ownership, assigned_customer, customer_id, customer_uuid, customer_name, classification_node_id, rental_start_date, delivery_date, purchase_date, location, days_at_location, created_at, last_location_update';
+
+function isUndefinedColumnError(err) {
+  return !!err && (err.code === '42703' || /column .* does not exist/i.test(String(err.message || '')));
+}
 
 export function SubscriptionProvider({ children }) {
   const { organization } = useAuth();
@@ -62,6 +62,8 @@ export function SubscriptionProvider({ children }) {
   const channelRef = useRef(null);
   /** Tracks the last successful (or attempted) fetch so we can throttle background refetches. */
   const lastFetchAtRef = useRef(0);
+  /** True after the first successful workspace paint — Update should not blank the page. */
+  const hasHydratedRef = useRef(false);
   /** Set to true while a fetch is in flight to avoid stacking concurrent refetches. */
   const fetchInFlightRef = useRef(false);
   /**
@@ -75,6 +77,7 @@ export function SubscriptionProvider({ children }) {
   useEffect(() => {
     if (!orgId) {
       missingTablesRef.current = new Set();
+      hasHydratedRef.current = false;
       return;
     }
     const key = `subscription-missing-tables:${orgId}`;
@@ -109,12 +112,12 @@ export function SubscriptionProvider({ children }) {
         || (fetchOptions.reconcile !== false && !runSilent);
       fetchInFlightRef.current = true;
       if (!runSilent) {
-        setLoading(true);
         setError(null);
+        if (!hasHydratedRef.current) setLoading(true);
       }
 
       try {
-      const withTimeout = (promise, label, ms = 15000) =>
+      const withTimeout = (promise, label, ms = 20000) =>
         Promise.race([
           promise,
           new Promise((_, reject) =>
@@ -155,6 +158,109 @@ export function SubscriptionProvider({ children }) {
         return res;
       };
 
+      /** Page through org tables so we are not capped at PostgREST's default 1000 rows. */
+      const safePaged = async (tableName, makeQuery, fallback = []) => {
+        if (missingTablesRef.current.has(tableName)) {
+          return { data: fallback, error: null };
+        }
+        const all = [];
+        let from = 0;
+        for (let page = 0; page < 50; page += 1) {
+          const res = await withTimeout(
+            makeQuery().range(from, from + PAGE_SIZE - 1),
+            `${tableName}[${from}]`,
+          );
+          if (isMissingTableError(res)) {
+            missingTablesRef.current.add(tableName);
+            persistMissingTables();
+            return { data: fallback, error: null };
+          }
+          if (res.error) return res;
+          const chunk = res.data || [];
+          all.push(...chunk);
+          if (chunk.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+        return { data: all, error: null };
+      };
+
+      const fetchBottles = async () => {
+        let res = await safePaged(
+          'bottles',
+          () =>
+            supabase
+              .from('bottles')
+              .select(BOTTLE_SELECT_NARROW)
+              .eq('organization_id', orgId)
+              .order('id', { ascending: true }),
+        );
+        if (isUndefinedColumnError(res.error)) {
+          res = await safePaged(
+            'bottles',
+            () =>
+              supabase
+                .from('bottles')
+                .select('*')
+                .eq('organization_id', orgId)
+                .order('id', { ascending: true }),
+          );
+        }
+        return res;
+      };
+
+      const fetchOpenRentals = () =>
+        safePaged(
+          'rentals',
+          () =>
+            supabase
+              .from('rentals')
+              .select('*')
+              .eq('organization_id', orgId)
+              .is('rental_end_date', null)
+              .order('id', { ascending: true }),
+        );
+
+      const fetchCustomers = () =>
+        safePaged(
+          'customers',
+          () =>
+            supabase
+              .from('customers')
+              .select('*')
+              .eq('organization_id', orgId)
+              .order('id', { ascending: true }),
+        );
+
+      const fetchClassificationNodes = async () => {
+        if (missingTablesRef.current.has('asset_classification_nodes')) {
+          return [];
+        }
+        try {
+          let cr = await supabase
+            .from('asset_classification_nodes')
+            .select('id, organization_id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
+            .eq('organization_id', orgId)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true });
+          if (cr.error?.code === '42703') {
+            cr = await supabase
+              .from('asset_classification_nodes')
+              .select('id, organization_id, parent_id, name, sort_order')
+              .eq('organization_id', orgId)
+              .order('sort_order', { ascending: true })
+              .order('name', { ascending: true });
+          }
+          if (isMissingTableError(cr)) {
+            missingTablesRef.current.add('asset_classification_nodes');
+            persistMissingTables();
+            return [];
+          }
+          return !cr.error && cr.data ? cr.data : [];
+        } catch {
+          return [];
+        }
+      };
+
       const [
         subsRes,
         itemsRes,
@@ -168,6 +274,7 @@ export function SubscriptionProvider({ children }) {
         rentalsRes,
         leaseRes,
         leaseItemsRes,
+        classNodesList,
       ] = await Promise.all([
         safe('subscriptions', supabase.from('subscriptions').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('subscription_items', supabase.from('subscription_items').select('*').eq('organization_id', orgId)),
@@ -176,20 +283,12 @@ export function SubscriptionProvider({ children }) {
         safe('customer_pricing_overrides', supabase.from('customer_pricing_overrides').select('*').eq('organization_id', orgId)),
         safe('subscription_invoices', supabase.from('subscription_invoices').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('payments', supabase.from('payments').select('*').eq('organization_id', orgId).order('payment_date', { ascending: false })),
-        safe('customers', supabase.from('customers').select('*').eq('organization_id', orgId).order('name')),
-        safe('bottles',
-          supabase
-            .from('bottles')
-            // Use broad select to tolerate schema differences across org databases.
-            .select('*')
-            .eq('organization_id', orgId)
-        ),
-        safe(
-          'rentals',
-          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null)
-        ),
+        fetchCustomers(),
+        fetchBottles(),
+        fetchOpenRentals(),
         safe('lease_contracts', supabase.from('lease_contracts').select('*').eq('organization_id', orgId).order('start_date', { ascending: false })),
         safe('lease_contract_items', supabase.from('lease_contract_items').select('*').eq('organization_id', orgId)),
+        fetchClassificationNodes(),
       ]);
 
       if (!mountedRef.current) return;
@@ -204,6 +303,25 @@ export function SubscriptionProvider({ children }) {
       }));
       let openRentalsList = rentalsRes.data || [];
 
+      // Paint the Rentals UI as soon as reads finish — do not block on backfill/orphan writes.
+      if (mountedRef.current) {
+        setSubscriptions(subsRes.data || []);
+        setSubscriptionItems(itemsRes.data || []);
+        setAssetTypePricing(pricingRes.data || []);
+        setCustomerPricingRows(legacyPricingRes.data || []);
+        setCustomerPricingOverrides(overridesRes.data || []);
+        setInvoices(invoicesRes.data || []);
+        setPayments(paymentsRes.data || []);
+        setCustomers(custRes.data || []);
+        setBottles(bottlesList);
+        setOpenRentals(openRentalsList);
+        setLeaseContracts(leaseRes.data || []);
+        setLeaseContractItems(leaseItemsRes.data || []);
+        setClassificationNodes(classNodesList || []);
+        hasHydratedRef.current = true;
+        if (!runSilent) setLoading(false);
+      }
+
       if (runReconcile) {
         // Loop until no more inserts so Update can backfill >500 bottles in one click.
         for (let pass = 0; pass < 20; pass += 1) {
@@ -217,10 +335,7 @@ export function SubscriptionProvider({ children }) {
             },
           );
           if (backfillInserted <= 0) break;
-          const refetchRentals = await safe(
-            'rentals',
-            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
-          );
+          const refetchRentals = await fetchOpenRentals();
           if (!refetchRentals.error && refetchRentals.data) {
             openRentalsList = refetchRentals.data;
           }
@@ -241,50 +356,15 @@ export function SubscriptionProvider({ children }) {
           console.warn('closeOrphanOpenRentalsForOrg:', orphanCloseErrors.join('; '));
         }
         if (orphansClosed > 0) {
-          const refetchAfterOrphans = await safe(
-            'rentals',
-            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null),
-          );
+          const refetchAfterOrphans = await fetchOpenRentals();
           if (!refetchAfterOrphans.error && refetchAfterOrphans.data) {
             openRentalsList = refetchAfterOrphans.data;
           }
         }
-      }
-
-      setSubscriptions(subsRes.data || []);
-      setSubscriptionItems(itemsRes.data || []);
-      setAssetTypePricing(pricingRes.data || []);
-      setCustomerPricingRows(legacyPricingRes.data || []);
-      setCustomerPricingOverrides(overridesRes.data || []);
-      setInvoices(invoicesRes.data || []);
-      setPayments(paymentsRes.data || []);
-      setCustomers(custRes.data || []);
-      setBottles(bottlesList);
-      setOpenRentals(openRentalsList);
-      setLeaseContracts(leaseRes.data || []);
-      setLeaseContractItems(leaseItemsRes.data || []);
-
-      let classNodesList = [];
-      try {
-        let cr = await supabase
-          .from('asset_classification_nodes')
-          .select('id, organization_id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
-          .eq('organization_id', orgId)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true });
-        if (cr.error?.code === '42703') {
-          cr = await supabase
-            .from('asset_classification_nodes')
-            .select('id, organization_id, parent_id, name, sort_order')
-            .eq('organization_id', orgId)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true });
+        if (mountedRef.current) {
+          setOpenRentals(openRentalsList);
         }
-        if (!cr.error && cr.data) classNodesList = cr.data;
-      } catch {
-        classNodesList = [];
       }
-      if (mountedRef.current) setClassificationNodes(classNodesList);
       } catch (err) {
         console.error('SubscriptionContext fetch error:', err);
         if (mountedRef.current && !runSilent) setError(err.message);
@@ -333,10 +413,12 @@ export function SubscriptionProvider({ children }) {
     let debounceTimer = null;
     const scheduleSilentRefresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      // Keep short so Rentals reflects bottle/rental edits without a long wait;
+      // silent fetches skip reconcile so this is read-only and cheaper than Update.
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         fetchAll({ silent: true });
-      }, 4000);
+      }, 1000);
     };
 
     const channel = supabase.channel(`subscription-ctx-${orgId}`);
@@ -380,8 +462,8 @@ export function SubscriptionProvider({ children }) {
   useEffect(() => {
     if (!orgId) return;
     let debounceTimer = null;
-    /** Tab returns after edits elsewhere; 30s balances freshness vs repeating 11-query fetch too often. */
-    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 30_000;
+    /** Tab returns after edits elsewhere; 15s balances freshness vs repeating the workspace fetch too often. */
+    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 15_000;
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       const sinceLast = Date.now() - lastFetchAtRef.current;
