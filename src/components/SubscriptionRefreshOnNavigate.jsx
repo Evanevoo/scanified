@@ -4,8 +4,8 @@ import { useSubscriptions } from '../context/SubscriptionContext';
 
 /** Default: avoid hammering Supabase on every sidebar click (11 parallel large selects). */
 const MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT = 60_000;
-/** Rentals workspace: silent refresh is read-only now (no backfill); 30s is enough between visits. */
-const MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE = 30_000;
+/** Rentals workspace: silent refresh is read-only (no backfill); keep visits fresher than other routes. */
+const MIN_MS_BETWEEN_NAV_REFRESH_WORKSPACE = 15_000;
 
 function minMsBetweenRefreshForPath(pathname) {
   if (!pathname) return MIN_MS_BETWEEN_NAV_REFRESH_DEFAULT;

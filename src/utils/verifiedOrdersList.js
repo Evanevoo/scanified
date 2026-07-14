@@ -77,15 +77,31 @@ function displayLabelForImportType(tableType) {
 export function expandImportRecordsToOrderRows(rec, tableType, normalizeOrderNum) {
   if (!rec) return [];
   const data = parseImportDataField(rec.data);
-  const norms = orderNormsFromImportData(data, normalizeOrderNum);
-  if (norms.size === 0) {
-    return [mapMonolithicImportListRow(rec, tableType, data)];
+  const status = String(rec.status || '').toLowerCase();
+  const isPartialFile = status === 'pending' || status === 'processing';
+  const vor = Array.isArray(data.verified_order_numbers) ? data.verified_order_numbers : [];
+
+  // Pending files only contribute orders listed in verified_order_numbers (partial verify).
+  // Expanding every line-item order made unverified pending rows show as Verified on the list
+  // while verification detail correctly still showed pending (e.g. S49665).
+  let norms;
+  if (isPartialFile) {
+    norms = new Set();
+    for (const vo of vor) {
+      const n = normalizeOrderNum(String(vo ?? '').trim());
+      if (n) norms.add(n);
+    }
+    if (norms.size === 0) return [];
+  } else {
+    norms = orderNormsFromImportData(data, normalizeOrderNum);
+    if (norms.size === 0) {
+      return [mapMonolithicImportListRow(rec, tableType, data)];
+    }
   }
 
   const rows = data.rows || data.line_items || [];
   const topCust = String(data.customer_name || data.CustomerName || data.Customer || '').trim();
   const topId = String(data.customer_id || data.CustomerListID || data.CustomerId || '').trim();
-  const vor = Array.isArray(data.verified_order_numbers) ? data.verified_order_numbers : [];
   const fallbackTs =
     rec.approved_at || rec.verified_at || rec.created_at || new Date().toISOString();
 
@@ -251,7 +267,13 @@ export function supplementImportRowsForScannedOrders({
       let matched = false;
       for (const rec of records || []) {
         const data = parseImportDataField(rec.data);
-        if (!orderNormsFromImportData(data, normalizeOrderNum).has(norm)) continue;
+        const status = String(rec.status || '').toLowerCase();
+        const isPartialFile = status === 'pending' || status === 'processing';
+        const vor = Array.isArray(data.verified_order_numbers) ? data.verified_order_numbers : [];
+        const fileHasOrder = isPartialFile
+          ? vor.some((vo) => normalizeOrderNum(String(vo ?? '').trim()) === norm)
+          : orderNormsFromImportData(data, normalizeOrderNum).has(norm);
+        if (!fileHasOrder) continue;
         const expanded = expandImportRecordsToOrderRows(rec, tableType, normalizeOrderNum).filter(
           (r) => normalizeOrderNum(String(r.order_number || '').trim()) === norm,
         );
