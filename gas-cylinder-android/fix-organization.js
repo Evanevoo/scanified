@@ -5,8 +5,11 @@ import logger from './utils/logger';
 const { createClient } = require('@supabase/supabase-js');
 
 // Initialize Supabase client
-const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or EXPO_PUBLIC_*) before running.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 

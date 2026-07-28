@@ -261,7 +261,9 @@ function importRecordIdForRpc(importRecordId) {
   if (importRecordId == null || importRecordId === '') return null;
   const s = String(importRecordId).trim();
   if (!s) return null;
-  return isCustomerRowUuid(s) ? s : null;
+  // imported_invoices / imported_sales_receipts use integer PKs; some legacy paths used UUIDs.
+  if (isCustomerRowUuid(s) || /^\d+$/.test(s)) return s;
+  return null;
 }
 
 export const bottleAssignmentService = {
@@ -275,7 +277,7 @@ export const bottleAssignmentService = {
    * @param {string} params.customerName
    * @param {string[]} params.shipBarcodes - barcodes being shipped out
    * @param {string[]} params.returnBarcodes - barcodes being returned
-   * @param {string} [params.importRecordId] - imported row PK only when it is a uuid (legacy numeric ids are omitted)
+   * @param {string} [params.importRecordId] - imported row PK (integer id or uuid)
    * @param {string} [params.importTable] - 'imported_invoices' or 'imported_sales_receipts'
    * @param {number} [params.defaultRentalAmount=10] - monthly rental rate
    * @param {number} [params.defaultTaxRate=0.11] - tax rate

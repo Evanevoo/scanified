@@ -150,6 +150,14 @@ backups/
 
 # Supabase
 .supabase/
+supabase/.temp/
+
+# Never commit env/secrets even if moved into archive
+**/.env
+**/.env.*
+!**/.env.example
+**/*.keystore
+**/credentials.json
 
 # Vercel
 .vercel

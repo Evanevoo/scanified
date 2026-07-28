@@ -1,0 +1,24 @@
+-- OPTIONAL Phase 0 follow-up (DO NOT auto-apply)
+-- Supabase advisor: 20 public tables have RLS disabled and are exposed to anon/authenticated.
+-- Enabling RLS without policies will block all access — add policies first, then enable.
+
+-- ALTER TABLE public.cylinder_tests ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.customer_holdings ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.delivery_challans ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.liquid_stock ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.cylinder_movements ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.maintenance ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.sales_track ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.asset_customer_relationships ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.invoice_counters ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.assets ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.gas_types ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.owners ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.cylinders ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.organization_backups ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.backup_schedules ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.cylinder_fills ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.customer_departments ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.organization_rental_classes ENABLE ROW LEVEL SECURITY;

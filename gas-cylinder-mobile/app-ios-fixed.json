@@ -7,7 +7,9 @@
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -26,12 +28,17 @@
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "apple-signin",
-            "CFBundleURLSchemes": ["scanified-auth"]
+            "CFBundleURLSchemes": [
+              "scanified-auth"
+            ]
           }
         ]
       },
       "usesAppleSignIn": true,
-      "associatedDomains": ["applinks:jtfucttzaswmqqhmmhfb.supabase.co", "webcredentials:jtfucttzaswmqqhfb.supabase.co"]
+      "associatedDomains": [
+        "applinks:jtfucttzaswmqqhmmhfb.supabase.co",
+        "webcredentials:jtfucttzaswmqqhfb.supabase.co"
+      ]
     },
     "plugins": [
       [
@@ -43,8 +50,6 @@
       "expo-apple-authentication"
     ],
     "extra": {
-      "EXPO_PUBLIC_SUPABASE_URL": "https://jtfucttzaswmqqhmmhfb.supabase.co",
-      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg",
       "eas": {
         "projectId": "d71ec042-1fec-4186-ac3b-0ae85a6af345"
       }

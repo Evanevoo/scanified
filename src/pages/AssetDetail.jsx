@@ -293,15 +293,33 @@ const auditBottleUpdateCustomerAssignment = (record) => {
   if (record?.history_type !== 'audit') return null;
   const m = String(record?.mode || record?.action || '').toUpperCase();
   if (!m.includes('BOTTLE_UPDATE')) return null;
+  const d = normalizeAuditDetails(record.details);
+  const fc = d?.field_changes;
+  const hasAssignChange =
+    fc &&
+    typeof fc === 'object' &&
+    (Object.prototype.hasOwnProperty.call(fc, 'assigned_customer') ||
+      Object.prototype.hasOwnProperty.call(fc, 'customer_id') ||
+      Object.prototype.hasOwnProperty.call(fc, 'customer_name'));
+
   let customerId = String(record?.customer_id || record?.assigned_customer || '').trim();
   let customerName = String(record?.customer_name || '').trim();
   if (!customerId && !customerName) {
-    const d = normalizeAuditDetails(record.details);
     const post = postAssignmentFromAuditFieldChanges(d);
     customerId = post?.assigned_customer != null ? String(post.assigned_customer).trim() : '';
     customerName = post?.customer_name != null ? String(post.customer_name).trim() : '';
   }
-  if (!customerId && !customerName) return null;
+  // Explicit clear in field_changes must clear replay even when `.to` is null/empty.
+  if (!customerId && !customerName) {
+    if (hasAssignChange) {
+      return {
+        assignedCustomerId: '',
+        customerName: '',
+        sourceAction: 'cleared_by_bottle_update_audit',
+      };
+    }
+    return null;
+  }
   return {
     assignedCustomerId: customerId,
     customerName,
@@ -446,6 +464,12 @@ export default function AssetDetail() {
       String(replayed.customerName || '') === String(fallback.customerName || '');
     if (sameAsDb) return fallback;
 
+    // Bottle row already unassigned — never resurrect a renter from old SHIP/history for display.
+    // (Manual Asset Detail clear + save was undoing itself visually via timeline replay.)
+    if (!fallback.assignedCustomerId && !fallback.customerName) {
+      return { assignedCustomerId: '', customerName: '', sourceAction: 'fallback_unassigned' };
+    }
+
     if (!replayed.assignedCustomerId && !replayed.customerName) {
       return { assignedCustomerId: '', customerName: '', sourceAction: 'replay_timeline_cleared' };
     }
@@ -559,6 +583,9 @@ export default function AssetDetail() {
       // Do not auto-clear renter from timeline replay when the bottle row still has a customer (import assign, etc.),
       // except when replay shows returned/empty — then clear stale assignment after a RETURN.
       if (!nextId && !nextName && (currentId || currentName) && effectiveStatus !== 'empty') return;
+      // Do not resurrect a customer from timeline after a manual unassign / cleared bottle row.
+      // Otherwise Asset Detail "clear customer → Save" appears to succeed, then history sync re-assigns.
+      if (!currentId && !currentName && (nextId || nextName)) return;
       const currentStatus = normalizeStatus(asset?.status);
       const needsRepair = currentId !== nextId || currentName !== nextName || currentStatus !== effectiveStatus;
       if (!needsRepair) return;
@@ -2233,6 +2260,12 @@ export default function AssetDetail() {
                   if (reason === 'clear') {
                     setCustomerAssignInput('');
                     setCustomerAssignSearchError('');
+                    editAssignedCustomerRef.current = '';
+                    setEditData((prev) => ({
+                      ...prev,
+                      assigned_customer: '',
+                      customer_name: null,
+                    }));
                     if (customerSearchTimerRef.current) {
                       clearTimeout(customerSearchTimerRef.current);
                     }
@@ -2290,10 +2323,14 @@ export default function AssetDetail() {
                   editAssignedCustomerRef.current = String(customerId || '').trim();
                   const next = {
                     ...editData,
-                    assigned_customer: customerId,
+                    assigned_customer: customerId || '',
                     customer_name: selectedCustomer?.name || selectedCustomer?.Name || null,
                   };
-                  if (customerId && selectedCustomer && selectedCustomer.customer_type !== 'VENDOR') {
+                  if (!selectedCustomer) {
+                    // X / clear must wipe assignment even if input-change fires first.
+                    next.assigned_customer = '';
+                    next.customer_name = null;
+                  } else if (customerId && selectedCustomer.customer_type !== 'VENDOR') {
                     const loc = bottleLocationValueForCustomer(selectedCustomer, locations);
                     if (loc) next.location = loc;
                   }

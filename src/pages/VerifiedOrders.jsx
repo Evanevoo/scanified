@@ -743,8 +743,17 @@ export default function VerifiedOrders() {
         orderNumber: orderNumber,
       });
 
+      const rpcImportUpdated = Number(rpcResult?.data?.import_record_updated || 0);
+      const rpcFullyHandledImport = rpcResult.success && rpcImportUpdated > 0;
+
       if (rpcResult.success) {
         logger.log('RPC unverify succeeded:', rpcResult.data);
+        if (!rpcFullyHandledImport) {
+          logger.warn(
+            'RPC unverify did not update import row (likely integer PK / missing id). Applying client reopen.',
+            { importRecordId: order.id, rpcImportUpdated },
+          );
+        }
       } else {
         logger.warn('RPC unverify failed, falling back to inline logic:', rpcResult.error);
 
@@ -767,8 +776,8 @@ export default function VerifiedOrders() {
         await reverseBottleAssignments(orderNumber, customerName, orderCustomerId);
       }
 
-      // Single DB write: strip this order from verified_order_numbers (all # variants on this card) and
-      // always reopen the import row so Order Verification lists it again (approved_at / status were hiding it).
+      // Always strip this order from verified_order_numbers and reopen the import row.
+      // RPC used to ignore integer import PKs, which left orders stuck on Verified Orders.
       try {
         const normStrip = (n) => {
           if (n == null || n === '') return '';
@@ -831,7 +840,12 @@ export default function VerifiedOrders() {
         if (tableName === 'imported_invoices') {
           patch.auto_approved = false;
         }
-        await supabase.from(tableName).update(patch).eq('id', order.id).eq('organization_id', organization.id);
+        const { error: reopenErr } = await supabase
+          .from(tableName)
+          .update(patch)
+          .eq('id', order.id)
+          .eq('organization_id', organization.id);
+        if (reopenErr) throw reopenErr;
       } catch (e) {
         logger.warn('Warning unverify import row (data + reopen):', e);
         try {
@@ -842,9 +856,17 @@ export default function VerifiedOrders() {
             approved_at: null,
           };
           if (tableName === 'imported_invoices') patch.auto_approved = false;
-          await supabase.from(tableName).update(patch).eq('id', order.id).eq('organization_id', organization.id);
+          const { error: statusOnlyErr } = await supabase
+            .from(tableName)
+            .update(patch)
+            .eq('id', order.id)
+            .eq('organization_id', organization.id);
+          if (statusOnlyErr) throw statusOnlyErr;
         } catch (e2) {
           logger.warn('Warning unverify import row status-only fallback:', e2);
+          if (!rpcFullyHandledImport) {
+            throw e2;
+          }
         }
       }
 

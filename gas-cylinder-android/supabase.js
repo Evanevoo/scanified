@@ -1,6 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://jtfucttzaswmqqhmmhfb.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0ZnVjdHR6YXN3bXFxaG1taGZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5NDQ4NzMsImV4cCI6MjA2MTUyMDg3M30.6-CAPYefAektlh3dLRVFZbPKYSnhIAzp3knohc3NDEg';
+/**
+ * Legacy JS entry — prefer supabase.ts (reads Expo extra / env).
+ * Keys must come from environment; never hardcode anon keys in git.
+ */
+const supabaseUrl =
+  process.env.EXPO_PUBLIC_SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  '';
+const supabaseAnonKey =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  '';
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    '[supabase.js] Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY (or VITE_* equivalents).'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

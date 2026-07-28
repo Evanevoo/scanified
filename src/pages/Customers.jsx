@@ -855,6 +855,7 @@ function Customers({ profile }) {
               sx={{
                 ...customersToolbarSelectSx,
                 minWidth: 168,
+                mt: 0.75,
               }}
               SelectProps={{
                 MenuProps: {
