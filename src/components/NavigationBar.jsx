@@ -109,7 +109,8 @@ export default function NavigationBar() {
 
   // Marketing navbar only for unauthenticated/public flows.
   // Any signed-in user (including platform owner without an org) uses MainLayout — avoid double nav on /owner-portal.
-  if (location.pathname === '/login' || profile) {
+  // /landing-dark ships its own embedded dark nav (light AppBar would clash with its theme).
+  if (location.pathname === '/login' || location.pathname === '/landing-dark' || profile) {
     return null;
   }
 

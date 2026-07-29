@@ -1,3 +1,6 @@
+# Local AI agent skill tooling (installed via `npx skills add`) — not app code
+.agents/
+
 # Dependencies
 node_modules/
 npm-debug.log*

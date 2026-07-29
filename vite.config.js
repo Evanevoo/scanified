@@ -18,6 +18,11 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    // .agents/skills contains symlinked files (from `npx skills add`) that crash
+    // Vite's Windows file watcher with EBUSY; it's tooling config, not app source.
+    watch: {
+      ignored: ['**/.agents/**'],
+    },
     proxy: {
       '/.netlify/functions': {
         target: 'http://localhost:8888',

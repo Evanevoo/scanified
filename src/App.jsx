@@ -109,6 +109,7 @@ const TaxRegionsPage = lazy(() => import('./pages/TaxRegions'));
 const BarcodeGenerator = lazy(() => import('./pages/BarcodeGenerator'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const ModernLandingPage = lazy(() => import('./pages/ModernLandingPage'));
+const CyberLandingPage = lazy(() => import('./pages/CyberLandingPage'));
 const FixOrganizationLink = lazy(() => import('./pages/FixOrganizationLink'));
 const OAuthOrganizationLink = lazy(() => import('./pages/OAuthOrganizationLink'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
@@ -247,6 +248,11 @@ function AppContent() {
                     ))
                   } />
                   <Route path="/landing" element={<ModernLandingPage />} />
+                  <Route path="/landing-dark" element={
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <CyberLandingPage />
+                    </Suspense>
+                  } />
                   <Route path="/create-organization" element={<CreateOrganization />} />
                   <Route path="/verify-organization" element={<VerifyOrganization />} />
                   <Route path="/accept-invite" element={<AcceptInvite />} />
