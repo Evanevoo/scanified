@@ -56,22 +56,30 @@ describe('bottleCustomerDirectory', () => {
         name: 'Saskatoon Truck Parts Centre Ltd',
       });
 
+      const chain = {
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => ({
+          data: {
+            id: 'uuid-1',
+            CustomerListID: 'LIST-99',
+            name: 'Saskatoon Truck Parts Centre Ltd',
+          },
+        }),
+        limit: async () => ({
+          data: [
+            {
+              id: 'uuid-1',
+              CustomerListID: 'LIST-99',
+              name: 'Saskatoon Truck Parts Centre Ltd',
+            },
+          ],
+        }),
+      };
       const supabase = {
         from: () => ({
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({
-                  data: {
-                    id: 'uuid-1',
-                    CustomerListID: 'LIST-99',
-                    name: 'Saskatoon Truck Parts Centre Ltd',
-                    is_active: true,
-                  },
-                }),
-              }),
-            }),
-          }),
+          select: () => chain,
         }),
       };
 

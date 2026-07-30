@@ -91,8 +91,9 @@ export function isActiveCustomerAssignment(assignedCustomerId, customerName, cus
 export async function findActiveCustomerForBottle(supabase, organizationId, bottle) {
   if (!supabase || !organizationId || !bottle) return null;
 
+  // Keep select aligned with live `customers` schema (no is_active / Name / customer_id on many orgs).
   const selectCols =
-    'id, CustomerListID, name, Name, is_active, is_deleted, deleted_at, archived, customer_id';
+    'id, CustomerListID, name, customer_type, location, city, contact_details, phone';
 
   const tryRow = (row) => {
     if (row && isActiveCustomerRecord(row) && bottleAssignedToCustomerRow(bottle, row)) return row;

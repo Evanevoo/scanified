@@ -55,6 +55,7 @@ import { closeOpenRentalsForBottle } from '../services/closeOpenRentalsForBottle
 import { useSubscriptions } from '../context/SubscriptionContext';
 import {
   bottleHasStaleCustomerAssignment,
+  findActiveCustomerForBottle,
   isActiveCustomerAssignment,
   staleBottleCustomerLabel,
   mergeCustomerIntoAssignDirectory,
@@ -718,11 +719,32 @@ export default function AssetDetail() {
 
   const ensureAssignCustomerInDirectory = useCallback(
     async (hints = []) => {
-      if (!organizationId) return;
+      if (!organizationId) return null;
+      const hintList = (hints || []).map((h) => String(h || '').trim()).filter(Boolean);
+      if (!hintList.length) return null;
+
+      // Call sites pass [assigned_customer, customer_uuid, customer_name, fromCustomerRouteHint].
+      // Prefer the shared resolver — Asset Detail only loads the first 1000 customers by name,
+      // so assignees past that slice (e.g. "Neufeld…") must be fetched by List ID / UUID / name.
+      try {
+        const row = await findActiveCustomerForBottle(supabase, organizationId, {
+          assigned_customer: hintList[0] || hintList[3] || null,
+          customer_uuid: hintList[1] || null,
+          customer_id: hintList[1] || null,
+          customer_name: hintList[2] || null,
+        });
+        if (row && isAssignableCustomer(row)) {
+          setCustomers((prev) => mergeCustomerIntoAssignDirectory(prev, row));
+          return row;
+        }
+      } catch (error) {
+        logger.warn('ensureAssignCustomerInDirectory:', error?.message || error);
+      }
+
+      // Fallback: try each hint individually (legacy path).
       const seen = new Set();
-      for (const raw of hints) {
-        const hint = String(raw || '').trim();
-        if (!hint || seen.has(hint.toLowerCase())) continue;
+      for (const hint of hintList) {
+        if (seen.has(hint.toLowerCase())) continue;
         seen.add(hint.toLowerCase());
 
         let query = supabase
@@ -732,7 +754,7 @@ export default function AssetDetail() {
 
         if (UUID_RE.test(hint)) {
           query = query.eq('id', hint);
-        } else if (/^\d{6,}-/i.test(hint)) {
+        } else if (/^\d{4,}-/i.test(hint) || /^[0-9A-Z]+-[0-9A-Z]+/i.test(hint)) {
           query = query.eq('CustomerListID', hint);
         } else {
           query = query.ilike('name', hint);
@@ -746,8 +768,9 @@ export default function AssetDetail() {
         if (!row || !isAssignableCustomer(row)) continue;
 
         setCustomers((prev) => mergeCustomerIntoAssignDirectory(prev, row));
-        return;
+        return row;
       }
+      return null;
     },
     [organizationId]
   );
@@ -950,7 +973,15 @@ export default function AssetDetail() {
         }
       }
 
-      setCustomers(directory);
+      // Preserve assignees merged via ensureAssignCustomerInDirectory. fetchCustomers often
+      // finishes after ensure and would otherwise wipe customers past the 1000 name limit.
+      setCustomers((prev) => {
+        let next = directory;
+        for (const row of prev || []) {
+          next = mergeCustomerIntoAssignDirectory(next, row);
+        }
+        return next;
+      });
     } catch (error) {
       logger.error('Error fetching customers:', error);
       setCustomers([]);
@@ -1309,8 +1340,11 @@ export default function AssetDetail() {
       const customerForSave = editData.assigned_customer
         ? findCustomerByAssignId(editData.assigned_customer, customers)
         : null;
+      // Only push customer branch onto the bottle when newly assigning — never overwrite a
+      // location the user just picked in this edit (that made Location changes look like no-ops).
       const shouldSyncBottleLocationFromCustomer = Boolean(
-        editData.assigned_customer &&
+        assignmentChanged &&
+          nextAssign &&
           customerForSave &&
           customerForSave.customer_type !== 'VENDOR'
       );
@@ -1733,21 +1767,15 @@ export default function AssetDetail() {
               Location
             </Typography>
             <Typography variant="body1" fontWeight="bold">
-              {(() => {
-                // If bottle is assigned to a customer, show customer's location first
-                if (customerData?.location) {
-                  return formatLocationDisplay(customerData.location);
-                }
-                // Otherwise show bottle's location
-                return asset.location ? formatLocationDisplay(asset.location) : '-';
-              })()}
+              {asset.location ? formatLocationDisplay(asset.location) : '-'}
             </Typography>
-            {customerData?.location && asset.location && normalizeLocationKey(customerData.location) !== normalizeLocationKey(asset.location) && (
+            {customerData?.location &&
+              normalizeLocationKey(customerData.location) !== normalizeLocationKey(asset.location) && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                (Bottle location: {formatLocationDisplay(asset.location)})
+                (Customer branch: {formatLocationDisplay(customerData.location)})
               </Typography>
             )}
-          </Grid>
+            </Grid>
 
           <Grid item xs={12}>
             <Typography variant="body2" color="textSecondary">
