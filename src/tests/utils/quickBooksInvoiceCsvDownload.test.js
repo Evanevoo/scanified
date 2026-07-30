@@ -1,6 +1,9 @@
 import {
   downloadQuickBooksInvoiceCsv,
   resolveTaxCode,
+  formatTrackaboutQbDate,
+  buildTrackaboutQbInvoiceRow,
+  TRACKABOUT_QB_EXPORT_COLUMNS,
 } from '../../utils/quickBooksInvoiceCsvDownload';
 
 describe('resolveTaxCode', () => {
@@ -15,6 +18,34 @@ describe('resolveTaxCode', () => {
   });
   it('returns SSK when both', () => {
     expect(resolveTaxCode(1, 1)).toBe('SSK');
+  });
+});
+
+describe('formatTrackaboutQbDate', () => {
+  it('formats ISO dates as M/D/YYYY', () => {
+    expect(formatTrackaboutQbDate('2026-03-31')).toBe('3/31/2026');
+  });
+});
+
+describe('buildTrackaboutQbInvoiceRow', () => {
+  it('matches Trackabout column order with P.O. last and SSK tax', () => {
+    const row = buildTrackaboutQbInvoiceRow({
+      invoiceNumber: 'R75879',
+      customerNumber: '8000038A-1347307530A',
+      subtotal: 36,
+      invoiceDate: '2026-03-31',
+      dueDate: '2026-04-30',
+      name: 'Balzers Regina',
+      purchaseOrder: 'PO-123',
+    });
+    expect(Object.keys(row)).toEqual(TRACKABOUT_QB_EXPORT_COLUMNS);
+    expect(row['TX code']).toBe('SSK');
+    expect(row.TX).toBe(3.96);
+    expect(row.Total).toBe(39.96);
+    expect(row.Rate).toBe(36);
+    expect(row.Date).toBe('3/31/2026');
+    expect(row['Due date']).toBe('4/30/2026');
+    expect(row['P.O.']).toBe('PO-123');
   });
 });
 
@@ -80,7 +111,7 @@ describe('downloadQuickBooksInvoiceCsv', () => {
     ).toThrow(/missing invoice_number/i);
   });
 
-  it('writes CSV using pre-resolved invoice numbers only', () => {
+  it('writes Trackabout columns with P.O. last and SSK', () => {
     const rows = [
       {
         id: 'sub-1',
@@ -89,7 +120,7 @@ describe('downloadQuickBooksInvoiceCsv', () => {
         totalPerCycle: 100,
         itemCount: 5,
         billing_period: 'monthly',
-        customer: { name: 'Acme Gas' },
+        customer: { name: 'Acme Gas', purchase_order: 'PO-9' },
       },
     ];
 
@@ -103,10 +134,13 @@ describe('downloadQuickBooksInvoiceCsv', () => {
     expect(capturedCsv).toBeTruthy();
 
     const lines = capturedCsv.trim().split('\n');
-    expect(lines.length).toBe(2);
+    expect(lines[0]).toBe(TRACKABOUT_QB_EXPORT_COLUMNS.join(','));
     expect(lines[1]).toMatch(/^W00501,/);
-    expect(lines[1]).toContain('CUST001');
+    expect(lines[1]).toContain('SSK');
     expect(lines[1]).toContain('Acme Gas');
+    expect(lines[1]).toMatch(/PO-9$/);
+    expect(lines[1]).not.toContain('GST,');
+    expect(lines[1]).not.toContain('# of Bottles');
     expect(downloadName).toBe('quickbooks_invoices_test_2026-04-30.csv');
   });
 });

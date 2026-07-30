@@ -9,7 +9,7 @@ import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
 import { getNextInvoiceNumbers, emptyCycleInvoiceLookup, loadRentalCycleInvoiceLookup } from '../utils/invoiceUtils';
-import { downloadQuickBooksInvoiceCsv } from '../utils/quickBooksInvoiceCsvDownload';
+import { downloadQuickBooksInvoiceCsv, buildTrackaboutQbInvoiceRow, TRACKABOUT_QB_EXPORT_COLUMNS } from '../utils/quickBooksInvoiceCsvDownload';
 import {
   attachInvoiceNumbersToExportRows,
   resolveRentalInvoiceNumber,
@@ -2959,12 +2959,6 @@ export default function Subscriptions() {
         return;
       }
 
-      const gst = +(invoiceBundle?.totals?.gst ?? 0);
-      const pst = +(invoiceBundle?.totals?.pst ?? 0);
-      const tax = +(invoiceBundle?.totals?.tax ?? (gst + pst));
-      const grandTotal = +(invoiceBundle?.totals?.amountDue ?? (total + tax));
-      // Always SSK for SK rental Excel (never G / GST-only).
-      const txCode = tax > 0 ? 'SSK' : 'E';
       const invoiceDate = invoiceBundle?.dates?.invoice || getCurrentCycleRange().periodEnd;
       const dueDate = invoiceBundle?.dates?.due || getCurrentCycleRange().dueDate;
       const poExcel = String(
@@ -2972,46 +2966,29 @@ export default function Subscriptions() {
           ?? matchCustomerRecordBySubscriptionId(sub?.customer_id)?.purchase_order
           ?? '',
       ).trim();
-      const orderedColumns = [
-        'Invoice#',
-        'Customer Number',
-        'P.O.',
-        'Total',
-        'Date',
-        'TX',
-        'TX code',
-        'Due date',
-        'Rate',
-        'Name',
-        '# of Bottles',
+      // Trackabout / Zed Axis column order; P.O. last.
+      const singleRowOrdered = [
+        buildTrackaboutQbInvoiceRow({
+          invoiceNumber: invoiceBundle?.invoiceNumber || invNo,
+          customerNumber:
+            getCustomerListId(sub.customer, sub.customer_id) ||
+            sub.customer_id ||
+            '',
+          subtotal: total,
+          invoiceDate,
+          dueDate,
+          name: sub.customer?.name || sub.customer?.Name || sub.customer_id || '',
+          purchaseOrder: poExcel,
+        }),
       ];
 
-      const lineQtySum = Array.isArray(invoiceBundle?.lineItems)
-        ? invoiceBundle.lineItems.reduce((s, li) => s + (Number(li.qty) || 0), 0)
-        : 0;
-      const bottleCountExcel =
-        lineQtySum > 0 ? lineQtySum : (parseFloat(sub.itemCount) || 0);
-
-      const singleRowOrdered = [{
-        'Invoice#': invoiceBundle?.invoiceNumber || invNo,
-        'Customer Number': sub.customer_id || '',
-        'P.O.': poExcel,
-        'Total': grandTotal,
-        'Date': invoiceDate,
-        'TX': tax,
-        'TX code': txCode,
-        'Due date': dueDate,
-        'Rate': total,
-        'Name': sub.customer?.name || sub.customer?.Name || sub.customer_id || '',
-        '# of Bottles': bottleCountExcel,
-      }];
-
       const wb = XLSX.utils.book_new();
-      const summaryWs = XLSX.utils.json_to_sheet(singleRowOrdered, { header: orderedColumns });
+      const summaryWs = XLSX.utils.json_to_sheet(singleRowOrdered, { header: TRACKABOUT_QB_EXPORT_COLUMNS });
       XLSX.utils.book_append_sheet(wb, summaryWs, 'Invoice');
       const safeCustomer = String(sub.customer?.name || sub.customer?.Name || sub.customer_id || 'customer')
         .replace(/[^\w-]+/g, '_');
-      XLSX.writeFile(wb, `quickbooks_invoice_${safeCustomer}_${invoiceDate}.xlsx`);
+      const dateTag = String(invoiceDate || '').slice(0, 10);
+      XLSX.writeFile(wb, `quickbooks_invoice_${safeCustomer}_${dateTag}.xlsx`);
       setActionSuccess(`Excel exported for ${sub.customer?.name || sub.customer?.Name || sub.customer_id}.`);
     } catch (err) {
       setActionError(err?.message || 'Failed to export customer Excel.');

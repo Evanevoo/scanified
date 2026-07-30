@@ -1,12 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { useSubscriptions } from '../context/SubscriptionContext';
 import { useTheme, resolveAccentToHex } from '../context/ThemeContext';
-import { formatCurrency, formatDate } from '../utils/subscriptionUtils';
+import { formatCurrency } from '../utils/subscriptionUtils';
+import {
+  buildTrackaboutQbInvoiceRow,
+  TRACKABOUT_QB_EXPORT_COLUMNS,
+} from '../utils/quickBooksInvoiceCsvDownload';
 import {
   Box, Typography, Paper, Stack, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, TextField, LinearProgress, Alert,
+  TableContainer, TableHead, TableRow, TextField, LinearProgress,
 } from '@mui/material';
-import { Download as DownloadIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import { Download as DownloadIcon } from '@mui/icons-material';
 
 export default function QuickBooksExport() {
   const ctx = useSubscriptions();
@@ -30,41 +34,24 @@ export default function QuickBooksExport() {
         const customer = ctx.customers.find((c) => c.id === inv.customer_id || c.CustomerListID === inv.customer_id);
         const storedTotal = parseFloat(inv.total_amount) || 0;
         const storedTax = parseFloat(inv.tax_amount) || 0;
-        // Prefer pretax from invoice; if tax was stored as GST-only, still rebuild at SSK (5%+6%).
         let subtotal = +(storedTotal - storedTax).toFixed(2);
         if (!(subtotal > 0) && storedTotal > 0) subtotal = storedTotal;
-        const gst = subtotal > 0 ? +(subtotal * 0.05).toFixed(2) : 0;
-        const pst = subtotal > 0 ? +(subtotal * 0.06).toFixed(2) : 0;
-        const taxAmount = +(gst + pst).toFixed(2);
-        const total = subtotal > 0 ? +(subtotal + taxAmount).toFixed(2) : storedTotal;
-        const txCode = taxAmount > 0 ? 'SSK' : 'E';
 
-        const dueDate = inv.due_date || '';
-        const invoiceDate = inv.created_at ? inv.created_at.split('T')[0] : '';
-
-        const fmt = (d) => {
-          if (!d) return '';
-          const dt = new Date(d);
-          return `${dt.getMonth() + 1}/${dt.getDate()}/${dt.getFullYear()}`;
-        };
-
-        return {
-          'Invoice#': inv.invoice_number,
-          'Customer Number': customer?.CustomerListID || customer?.id || inv.customer_id,
-          'Total': total,
-          'Date': fmt(invoiceDate),
-          'TX': taxAmount.toFixed(2),
-          'TX code': txCode,
-          'Due date': fmt(dueDate),
-          'Rate': subtotal,
-          'Name': customer?.name || customer?.Name || inv.customer_id,
-        };
+        return buildTrackaboutQbInvoiceRow({
+          invoiceNumber: inv.invoice_number,
+          customerNumber: customer?.CustomerListID || customer?.id || inv.customer_id,
+          subtotal,
+          invoiceDate: inv.created_at ? inv.created_at.split('T')[0] : '',
+          dueDate: inv.due_date || '',
+          name: customer?.name || customer?.Name || inv.customer_id,
+          purchaseOrder: customer?.purchase_order || '',
+        });
       });
   }, [ctx.invoices, ctx.customers, dateFrom, dateTo]);
 
   const handleDownload = () => {
     if (rows.length === 0) return;
-    const cols = ['Invoice#', 'Customer Number', 'Total', 'Date', 'TX', 'TX code', 'Due date', 'Rate', 'Name'];
+    const cols = TRACKABOUT_QB_EXPORT_COLUMNS;
     const csvRows = rows.map((r) => cols.map((c) => {
       const val = r[c];
       return typeof val === 'string' ? `"${val.replace(/"/g, '""')}"` : val;
@@ -88,7 +75,9 @@ export default function QuickBooksExport() {
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700 }}>QuickBooks Export</Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>Export invoices in QuickBooks-compatible CSV format</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Trackabout-compatible CSV for Zed Axis (SSK tax + P.O.)
+          </Typography>
         </Box>
         <Button variant="contained" startIcon={<DownloadIcon />} onClick={handleDownload} disabled={rows.length === 0}
           sx={{ textTransform: 'none', borderRadius: 2, bgcolor: primaryColor, '&:hover': { bgcolor: primaryColor, opacity: 0.9 } }}>
@@ -109,32 +98,33 @@ export default function QuickBooksExport() {
           <Table size="small">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', color: 'text.secondary' } }}>
-                <TableCell>Invoice#</TableCell>
-                <TableCell>Customer Number</TableCell>
-                <TableCell align="right">Total</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell align="right">TX</TableCell>
-                <TableCell>TX Code</TableCell>
-                <TableCell>Due Date</TableCell>
-                <TableCell>Rate</TableCell>
-                <TableCell>Name</TableCell>
+                {TRACKABOUT_QB_EXPORT_COLUMNS.map((col) => (
+                  <TableCell key={col} align={col === 'Total' || col === 'TX' || col === 'Rate' ? 'right' : 'left'}>
+                    {col}
+                  </TableCell>
+                ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>No invoices in the selected date range.</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={TRACKABOUT_QB_EXPORT_COLUMNS.length} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                    No invoices in the selected date range.
+                  </TableCell>
+                </TableRow>
               ) : (
                 rows.map((r, i) => (
                   <TableRow key={i} hover>
                     <TableCell sx={{ fontFamily: 'monospace' }}>{r['Invoice#']}</TableCell>
                     <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{r['Customer Number']}</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(r['Total'])}</TableCell>
-                    <TableCell>{r['Date']}</TableCell>
-                    <TableCell align="right" sx={{ fontFamily: 'monospace' }}>{r['TX']}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>{formatCurrency(r.Total)}</TableCell>
+                    <TableCell>{r.Date}</TableCell>
+                    <TableCell align="right" sx={{ fontFamily: 'monospace' }}>{Number(r.TX).toFixed(2)}</TableCell>
                     <TableCell>{r['TX code']}</TableCell>
                     <TableCell>{r['Due date']}</TableCell>
-                    <TableCell><Typography variant="body2" sx={{ fontWeight: 600 }}>{r['Rate']}</Typography></TableCell>
-                    <TableCell>{r['Name']}</TableCell>
+                    <TableCell align="right" sx={{ fontFamily: 'monospace' }}>{r.Rate}</TableCell>
+                    <TableCell>{r.Name}</TableCell>
+                    <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{r['P.O.'] || '—'}</TableCell>
                   </TableRow>
                 ))
               )}
