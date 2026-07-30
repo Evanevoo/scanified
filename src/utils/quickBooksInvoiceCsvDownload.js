@@ -2,12 +2,11 @@
 
 import { getCustomerListId, getCustomerDisplayLabel } from './customerParentConstraint';
 
+/** SK rental invoices always use SSK (GST+PST). Exempt / zero tax → E. */
 export function resolveTaxCode(gstAmount, pstAmount) {
   const gst = Number(gstAmount) || 0;
   const pst = Number(pstAmount) || 0;
-  if (gst > 0 && pst > 0) return 'SSK';
-  if (gst > 0) return 'GST';
-  if (pst > 0) return 'PST';
+  if (gst > 0 || pst > 0) return 'SSK';
   return 'E';
 }
 

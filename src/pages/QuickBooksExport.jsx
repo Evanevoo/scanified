@@ -28,9 +28,16 @@ export default function QuickBooksExport() {
       })
       .map((inv) => {
         const customer = ctx.customers.find((c) => c.id === inv.customer_id || c.CustomerListID === inv.customer_id);
-        const sub = ctx.subscriptions.find((s) => s.id === inv.subscription_id);
-        const taxAmount = parseFloat(inv.tax_amount) || 0;
-        const txCode = taxAmount > 0 ? 'G' : 'E';
+        const storedTotal = parseFloat(inv.total_amount) || 0;
+        const storedTax = parseFloat(inv.tax_amount) || 0;
+        // Prefer pretax from invoice; if tax was stored as GST-only, still rebuild at SSK (5%+6%).
+        let subtotal = +(storedTotal - storedTax).toFixed(2);
+        if (!(subtotal > 0) && storedTotal > 0) subtotal = storedTotal;
+        const gst = subtotal > 0 ? +(subtotal * 0.05).toFixed(2) : 0;
+        const pst = subtotal > 0 ? +(subtotal * 0.06).toFixed(2) : 0;
+        const taxAmount = +(gst + pst).toFixed(2);
+        const total = subtotal > 0 ? +(subtotal + taxAmount).toFixed(2) : storedTotal;
+        const txCode = taxAmount > 0 ? 'SSK' : 'E';
 
         const dueDate = inv.due_date || '';
         const invoiceDate = inv.created_at ? inv.created_at.split('T')[0] : '';
@@ -44,16 +51,16 @@ export default function QuickBooksExport() {
         return {
           'Invoice#': inv.invoice_number,
           'Customer Number': customer?.CustomerListID || customer?.id || inv.customer_id,
-          'Total': parseFloat(inv.total_amount) || 0,
+          'Total': total,
           'Date': fmt(invoiceDate),
           'TX': taxAmount.toFixed(2),
           'TX code': txCode,
           'Due date': fmt(dueDate),
-          'Rate': sub?.billing_period === 'yearly' ? 'Yearly' : 'Monthly',
+          'Rate': subtotal,
           'Name': customer?.name || customer?.Name || inv.customer_id,
         };
       });
-  }, [ctx.invoices, ctx.customers, ctx.subscriptions, dateFrom, dateTo]);
+  }, [ctx.invoices, ctx.customers, dateFrom, dateTo]);
 
   const handleDownload = () => {
     if (rows.length === 0) return;

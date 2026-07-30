@@ -9,7 +9,7 @@ import { supabase } from '../supabase/client';
 import { formatCurrency, formatDate, STATUS_COLORS } from '../utils/subscriptionUtils';
 import { createRentalInvoicePdfDoc, defaultInvoiceNumber } from '../utils/rentalInvoicePdf';
 import { getNextInvoiceNumbers, emptyCycleInvoiceLookup, loadRentalCycleInvoiceLookup } from '../utils/invoiceUtils';
-import { downloadQuickBooksInvoiceCsv, resolveTaxCode } from '../utils/quickBooksInvoiceCsvDownload';
+import { downloadQuickBooksInvoiceCsv } from '../utils/quickBooksInvoiceCsvDownload';
 import {
   attachInvoiceNumbersToExportRows,
   resolveRentalInvoiceNumber,
@@ -2963,7 +2963,8 @@ export default function Subscriptions() {
       const pst = +(invoiceBundle?.totals?.pst ?? 0);
       const tax = +(invoiceBundle?.totals?.tax ?? (gst + pst));
       const grandTotal = +(invoiceBundle?.totals?.amountDue ?? (total + tax));
-      const txCode = resolveTaxCode(gst, pst);
+      // Always SSK for SK rental Excel (never G / GST-only).
+      const txCode = tax > 0 ? 'SSK' : 'E';
       const invoiceDate = invoiceBundle?.dates?.invoice || getCurrentCycleRange().periodEnd;
       const dueDate = invoiceBundle?.dates?.due || getCurrentCycleRange().dueDate;
       const poExcel = String(

@@ -7,11 +7,11 @@ describe('resolveTaxCode', () => {
   it('returns E when no tax', () => {
     expect(resolveTaxCode(0, 0)).toBe('E');
   });
-  it('returns GST when only gst', () => {
-    expect(resolveTaxCode(1, 0)).toBe('GST');
+  it('returns SSK when only gst (SK invoices always use combined code)', () => {
+    expect(resolveTaxCode(1, 0)).toBe('SSK');
   });
-  it('returns PST when only pst', () => {
-    expect(resolveTaxCode(0, 1)).toBe('PST');
+  it('returns SSK when only pst', () => {
+    expect(resolveTaxCode(0, 1)).toBe('SSK');
   });
   it('returns SSK when both', () => {
     expect(resolveTaxCode(1, 1)).toBe('SSK');
