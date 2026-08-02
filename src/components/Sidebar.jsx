@@ -520,10 +520,10 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                 onClick={onToggleCollapse}
                 sx={{
                   color: 'text.secondary',
-                  borderRadius: 2,
-                  bgcolor: isDarkNav ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)',
-                  border: isDarkNav ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)',
-                  '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' },
+                  borderRadius: '8px',
+                  bgcolor: 'transparent',
+                  border: isDarkNav ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid #e2e4e9',
+                  '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.06) : '#f5f6f8' },
                 }}
               >
                 {isCollapsed ? <ChevronRight /> : <ChevronLeft />}
@@ -575,19 +575,12 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                     sx={{
                       py: 1,
                       px: 1.5,
-                      borderRadius: 999,
-                      backgroundColor: active
-                        ? `${primaryColor}1f`
-                        : isDarkNav
-                          ? alpha('#fff', 0.06)
-                          : 'rgba(255,255,255,0.55)',
+                      borderRadius: '8px',
+                      backgroundColor: active ? `${primaryColor}14` : 'transparent',
                       color: active ? primaryColor : 'text.primary',
-                      border: active
-                        ? `1px solid ${primaryColor}55`
-                        : isDarkNav
-                          ? `1px solid ${alpha('#fff', 0.1)}`
-                          : '1px solid rgba(255,255,255,0.82)',
-                      boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
+                      borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                      boxShadow: 'none',
+                      '&:hover': { backgroundColor: active ? `${primaryColor}1e` : 'action.hover' },
                     }}
                   >
                     <ListItemIcon sx={{ minWidth: 36 }}>
@@ -655,8 +648,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         px: 1.5, 
                         py: 1,
                         minHeight: 32,
-                        borderRadius: 999,
-                        '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.76)' },
+                        borderRadius: '8px',
+                        '&:hover': { bgcolor: isDarkNav ? alpha('#fff', 0.06) : '#f5f6f8' },
                       }}
                     >
                       <Typography 
@@ -698,32 +691,20 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
                         sx={{
                           py: 1.1,
                           px: 1.5,
-                          borderRadius: 999,
-                          backgroundColor: active
-                            ? `${primaryColor}1f`
-                            : isDarkNav
-                              ? alpha('#fff', 0.06)
-                              : 'rgba(255,255,255,0.55)',
+                          borderRadius: '8px',
+                          backgroundColor: active ? `${primaryColor}14` : 'transparent',
                           color: active ? primaryColor : 'text.primary',
-                          border: active
-                            ? `1px solid ${primaryColor}55`
-                            : isDarkNav
-                              ? `1px solid ${alpha('#fff', 0.1)}`
-                              : '1px solid rgba(255,255,255,0.82)',
-                          boxShadow: active ? '0 8px 18px rgba(64,181,173,0.2)' : 'none',
-                          transition: 'background-color 0.18s, color 0.18s, box-shadow 0.18s',
+                          borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+                          boxShadow: 'none',
+                          transition: 'background-color 0.18s, color 0.18s',
                           '&:hover': {
-                            backgroundColor: active
-                              ? `${primaryColor}2a`
-                              : isDarkNav
-                                ? alpha('#fff', 0.1)
-                                : 'rgba(255,255,255,0.78)',
+                            backgroundColor: active ? `${primaryColor}1e` : 'action.hover',
                           },
                           '&.Mui-selected': {
-                            backgroundColor: `${primaryColor}1f`,
+                            backgroundColor: `${primaryColor}14`,
                             color: primaryColor,
                             '&:hover': {
-                              backgroundColor: `${primaryColor}2a`,
+                              backgroundColor: `${primaryColor}1e`,
                             },
                           },
                         }}
@@ -788,8 +769,8 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         {!isCollapsed && profile && (
           <Box sx={{ 
             p: 2,
-            borderTop: isDarkNav ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid rgba(255,255,255,0.78)',
-            bgcolor: isDarkNav ? alpha('#fff', 0.06) : 'rgba(255,255,255,0.72)',
+            borderTop: isDarkNav ? `1px solid ${alpha('#fff', 0.1)}` : '1px solid #e2e4e9',
+            bgcolor: 'transparent',
             mt: 'auto'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
