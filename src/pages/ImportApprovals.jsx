@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import { useDebounce } from '../utils/performance';
 import {
   duplicateBarcodeMessage,
   isDuplicateBarcodeDbError,
@@ -858,6 +859,10 @@ export default function ImportApprovals() {
       return '';
     }
   });
+  /** Filtering runs a full JSON-parse + match pass over every pending record, so the
+   *  text field stays instantly responsive while the expensive recompute below only
+   *  fires ~280ms after typing stops. */
+  const debouncedSearch = useDebounce(search, 280);
   const [locationFilter, setLocationFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
   const [auditDialog, setAuditDialog] = useState({ open: false, logs: [], title: '' });
@@ -1133,18 +1138,18 @@ export default function ImportApprovals() {
       const recordStatus = determineVerificationStatus(record);
       const filterReasons = [];
       
-      // Search filter
-      if (search) {
-        const searchLower = search.toLowerCase();
+      // Search filter (debounced -- see debouncedSearch)
+      if (debouncedSearch) {
+        const searchLower = debouncedSearch.toLowerCase();
         const orderNumLower = orderNum.toLowerCase();
         const customerName = getCustomerInfo(data).toLowerCase();
         const items = getLineItems(data);
         const productCodes = items.map(item => (item.product_code || '').toLowerCase()).join(' ');
-        
-        if (!orderNumLower.includes(searchLower) && 
-            !customerName.includes(searchLower) && 
+
+        if (!orderNumLower.includes(searchLower) &&
+            !customerName.includes(searchLower) &&
             !productCodes.includes(searchLower)) {
-          filterReasons.push(`Search filter: "${search}" not found`);
+          filterReasons.push(`Search filter: "${debouncedSearch}" not found`);
           logger.debug(`Filtering out record ${record.id} (${orderNum}): Search filter`);
           return false;
         }
@@ -1269,9 +1274,20 @@ export default function ImportApprovals() {
     return deduplicated;
   };
 
-  // Get filtered records
-  const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
-  const filteredReceipts = deduplicateRecords(filterRecords(pendingReceipts));
+  // Get filtered records. Memoized: this reruns the full filter + dedupe pass over
+  // every pending record (JSON-parsing each one's `data` field along the way), so
+  // recomputing it on every render -- including every keystroke in the search box,
+  // and every unrelated state change elsewhere on this page -- was what made typing
+  // in search feel like it "kept loading": a synchronous full-list recompute
+  // blocking the main thread, not an actual stuck network request.
+  const filteredInvoices = useMemo(
+    () => deduplicateRecords(filterRecords(pendingInvoices)),
+    [pendingInvoices, debouncedSearch, statusFilter, locationFilter]
+  );
+  const filteredReceipts = useMemo(
+    () => deduplicateRecords(filterRecords(pendingReceipts)),
+    [pendingReceipts, debouncedSearch, statusFilter, locationFilter]
+  );
 
   /** Stats match the visible import list (same filter + dedupe as "X imports showing"). */
   const verificationStats = useMemo(() => {
@@ -1667,17 +1683,27 @@ export default function ImportApprovals() {
       // Check which orders are approved (from imported_invoices/receipts) - do not show as scanned-only
       const approvedOrderNumbers = new Set();
       
+      // Unbounded org-wide history query, refetched on every list load/refresh -- was one
+      // of the contributors to slow loads and, on larger orgs, to Postgres statement
+      // timeouts. Ordering + a generous cap bounds the worst case without changing which
+      // recently-approved orders this lookup actually needs to consider; a real fix would
+      // scope this to only the orders present in the current batch rather than full org
+      // history, but that's a larger change than a safe limit addition.
       const [approvedInvoicesResult, approvedReceiptsResult] = await Promise.all([
         supabase
           .from('imported_invoices')
           .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
-          .or('status.in.(approved,verified),auto_approved.eq.true'),
+          .or('status.in.(approved,verified),auto_approved.eq.true')
+          .order('approved_at', { ascending: false, nullsFirst: false })
+          .limit(5000),
         supabase
           .from('imported_sales_receipts')
           .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
           .or('status.in.(approved,verified),auto_approved.eq.true')
+          .order('approved_at', { ascending: false, nullsFirst: false })
+          .limit(5000)
       ]);
       
       const approvedImports = [...(approvedInvoicesResult.data || []), ...(approvedReceiptsResult.data || [])];
@@ -1961,8 +1987,17 @@ export default function ImportApprovals() {
         if (autoApprovedCount > 0) {
           logger.debug(`Auto-approved ${autoApprovedCount} record(s) on load`);
           setSnackbar(`Auto-approved ${autoApprovedCount} record(s) with matching quantities`);
-          if (!silent) setLoading(true);
-          return fetchVerificationStats(true, true);
+          // Refetch with fresh post-approval data (its own setPendingInvoices call
+          // above supersedes this call's cleanedRecords). Awaiting it -- instead of
+          // `return`-ing it directly -- means THIS call's own `silent` flag still
+          // decides whether to clear the loading spinner below, regardless of the
+          // recursive call being silent=true. Previously the spinner never cleared
+          // when auto-approve fired during a non-silent (visible) load, because
+          // neither the outer call's own setLoading(false) (skipped by the early
+          // return) nor the inner silent call's (skipped because silent=true) ever ran.
+          await fetchVerificationStats(true, true);
+          if (!silent) setLoading(false);
+          return;
         }
       }
 
@@ -2031,8 +2066,15 @@ export default function ImportApprovals() {
   // Fetch all customers once for lookup (name->id and id->name)
   async function fetchCustomers() {
     if (customerLookupDone.current) return;
+    if (!organization?.id) return;
     try {
-      const { data: customers, error } = await supabase.from('customers').select('CustomerListID, name');
+      // Was missing the organization filter entirely -- relied solely on RLS to scope
+      // this to the current org, with no defense-in-depth filter and no row limit.
+      const { data: customers, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .eq('organization_id', organization.id)
+        .limit(10000);
       if (error) throw error;
       const nameToId = {};
       const idToName = {};
@@ -2057,13 +2099,18 @@ export default function ImportApprovals() {
         return;
       }
       
+      // Same bound already used for the bottle_scans fetch in fetchVerificationStats --
+      // this was unbounded (full org scan history), a contributor to slow loads and,
+      // on larger orgs, Postgres statement timeouts.
       const { data: scannedRows, error } = await supabase
         .from('bottle_scans')
         .select('order_number, bottle_barcode')
-        .eq('organization_id', organization.id);
-      
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false })
+        .limit(5000);
+
       if (error) throw error;
-      
+
       const counts = {};
       const allOrderNumbers = new Set();
       (scannedRows || []).forEach(row => {
@@ -2089,12 +2136,15 @@ export default function ImportApprovals() {
         return;
       }
       
-      // Get from bottle_scans table
+      // Get from bottle_scans table. Same bound already used elsewhere in this file for
+      // the same table -- this was unbounded (full org scan history, every column).
       const { data: scannedRows, error: scanError } = await supabase
         .from('bottle_scans')
         .select('*')
-        .eq('organization_id', organization.id);
-      
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false })
+        .limit(5000);
+
       if (scanError) {
         logger.error('Error fetching bottle_scans:', scanError);
         // Continue with empty array

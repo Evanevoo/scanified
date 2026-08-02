@@ -3102,30 +3102,18 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
                                      unassignedDeliveredBarcodes.includes(barcode);
         const newMode = isCurrentlyDelivered ? 'RETURN' : 'SHIP';
         
-        // Update in bottle_scans
+        // Update in bottle_scans (single source)
         const { error: bottleScansError } = await supabase
           .from('bottle_scans')
           .update({ mode: newMode })
           .eq('organization_id', organization.id)
           .eq('bottle_barcode', barcode)
           .eq('order_number', orderNumber);
-        
+
         if (bottleScansError) {
           logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansError);
         }
-        
-        // Also update bottle_scans (single source)
-        const { error: bottleScansErr } = await supabase
-          .from('bottle_scans')
-          .update({ mode: newMode })
-          .eq('organization_id', organization.id)
-          .eq('bottle_barcode', barcode)
-          .eq('order_number', orderNumber);
 
-        if (bottleScansErr) {
-          logger.error(`Error updating bottle_scans for ${barcode}:`, bottleScansErr);
-        }
-        
         successCount++;
       }
       
