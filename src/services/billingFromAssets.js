@@ -764,7 +764,11 @@ export function groupBillableUnitCountsByProductCode(bottles, rentals, subscript
 
   const map = new Map();
   const seenRentalKeys = new Set();
-  const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottles);
+  // Callers that invoke this per-subscription/per-row in a loop (e.g. Subscriptions.jsx)
+  // can pass a lookup already built once for the whole batch via options.bottleLookupMaps,
+  // instead of rebuilding it from the full bottles array on every call.
+  const { byId: bottleById, byBarcode: bottleByBarcode } =
+    options.bottleLookupMaps || buildBottleLookupMaps(bottles);
 
   if (asOfPeriodEnd) {
     const pe = clipYmd(asOfPeriodEnd);

@@ -862,6 +862,10 @@ export default function Subscriptions() {
       defaultYearly: defaultUnitRateByPeriod.yearly,
       classificationNodes: ctx.classificationNodes || [],
     };
+    // Built once per `enriched` recompute instead of once per subscription inside
+    // groupBillableUnitCountsByProductCode -- avoids an O(subscriptions x bottles)
+    // rebuild of the same lookup on every render/refetch.
+    const bottleLookupMaps = buildBottleLookupMaps(billingData.bottles);
 
     return ctx.subscriptions.map((sub) => {
       const items = ctx.subscriptionItems.filter((i) => i.subscription_id === sub.id && i.status === 'active');
@@ -952,14 +956,18 @@ export default function Subscriptions() {
           customerPkId: String(customer?.id || '').trim(),
         });
         const basisGroups = summarizeMergedOpenRentalsByProduct(mergedBasis, billingData.bottles);
-        const groupsRaw = groupBillableUnitCountsByProductCode(
-          billingData.bottles,
-          billingData.rentals,
-          subscriptionMatchKey,
-          customer,
-          { allCustomers: billingData.customers },
-        );
-        const groups = basisGroups.length > 0 ? basisGroups : groupsRaw;
+        // Only fall back to the heavier full-recompute path when basisGroups didn't
+        // already cover it -- this used to run unconditionally on every subscription
+        // even when its result was immediately discarded.
+        const groups = basisGroups.length > 0
+          ? basisGroups
+          : groupBillableUnitCountsByProductCode(
+              billingData.bottles,
+              billingData.rentals,
+              subscriptionMatchKey,
+              customer,
+              { allCustomers: billingData.customers, bottleLookupMaps },
+            );
         totalPerCycle = computeSubscriptionBillingCycleTotal(
           { ...sub, billing_period: effectiveBillingPeriod },
           customer,
@@ -1978,6 +1986,9 @@ export default function Subscriptions() {
       defaultYearly: defaultUnitRateByPeriod.yearly,
       classificationNodes: ctx.classificationNodes || [],
     };
+    // Built once for the whole export instead of once per row inside
+    // groupBillableUnitCountsByProductCode.
+    const exportBottleLookupMaps = buildBottleLookupMaps(billingData.bottles);
 
     const base =
       qbCsvBillingMonth === 'live'
@@ -2026,6 +2037,7 @@ export default function Subscriptions() {
             allCustomers: billingData.customers,
             asOfPeriodEnd: pe,
             allowAssignedBottleRecovery: true,
+            bottleLookupMaps: exportBottleLookupMaps,
           },
         );
       };
