@@ -43,15 +43,13 @@ function getDefaultSectionsForRole(role) {
     dashboard: true,
     operations: true,
     customers: true,
-    subscriptions: true,
     inventory: true,
-    pricing: false,
     billing: false,
     reports: false,
     admin: false,
   };
   if (r === 'admin' || r === 'orgowner' || r === 'manager') {
-    return { ...collapsed, pricing: true, billing: true, reports: true, admin: true };
+    return { ...collapsed, billing: true, reports: true, admin: true };
   }
   return collapsed;
 }
@@ -74,9 +72,7 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
     dashboard: true,
     operations: true,
     customers: true,
-    subscriptions: true,
     inventory: true,
-    pricing: false,
     billing: false,
     reports: false,
     admin: false
@@ -263,16 +259,9 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Customer List', subtitle: 'Search accounts', path: '/customers', icon: <People />, roles: ['admin', 'user', 'manager'] },
         { title: 'Import Customer Info', subtitle: 'Upload customer updates', path: '/import-customer-info', icon: <Upload />, roles: ['admin', 'user', 'manager'] },
         { title: 'Locations', subtitle: 'Branches / sites list', path: '/locations', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Join Codes', subtitle: 'Invite users to the org', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] }
-      ]
-    },
-    subscriptions: {
-      title: 'Rentals',
-      icon: <Schedule />,
-      items: [
-        { title: 'Rentals', subtitle: 'Active rentals & billing', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Customer Rental History', subtitle: 'Monthly start / ship / return / end', path: '/rentals/customer-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Join Codes', subtitle: 'Invite users to the org', path: '/organization-join-codes', icon: <QrCodeIcon />, roles: ['admin', 'manager'] },
         { title: 'Lease Agreements', subtitle: 'Manage agreements and terms', path: '/lease-agreements', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Customer Rental History', subtitle: 'Monthly start / ship / return / end', path: '/rentals/customer-history', icon: <History />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     inventory: {
@@ -291,21 +280,16 @@ const Sidebar = ({ open, onClose, isCollapsed, onToggleCollapse }) => {
         { title: 'Recently Added Cylinders', subtitle: 'New inventory', path: '/recent-cylinders', icon: <Inventory />, roles: ['admin', 'user', 'manager'] }
       ]
     },
-    pricing: {
-      title: 'Pricing',
-      icon: <PriceChangeIcon />,
-      items: [
-        { title: 'Customer Pricing', subtitle: 'Overrides & discounts', path: '/pricing/customers', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] },
-        { title: 'Tax Regions', subtitle: 'Location tax rates', path: '/pricing/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
-      ]
-    },
     billing: {
       title: 'Billing',
       icon: <Payment />,
       items: [
+        { title: 'Rentals', subtitle: 'Active rentals & billing', path: '/rentals', icon: <Schedule />, roles: ['admin', 'user', 'manager'] },
         { title: 'Invoices', subtitle: 'All rental invoices', path: '/invoices', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
         { title: 'Emailed invoice history', subtitle: 'Sent PDFs & audit', path: '/invoices/history', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
         { title: 'QuickBooks Export', subtitle: 'Export CSV for QB', path: '/invoices/export', icon: <Receipt />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Customer Pricing', subtitle: 'Overrides & discounts', path: '/pricing/customers', icon: <PriceChangeIcon />, roles: ['admin', 'user', 'manager'] },
+        { title: 'Tax Regions', subtitle: 'Location tax rates', path: '/pricing/tax-regions', icon: <LocationIcon />, roles: ['admin', 'user', 'manager'] },
       ]
     },
     reports: {

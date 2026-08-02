@@ -73,16 +73,6 @@ export default function MainLayout({ children }) {
   const headerBrandName = isOwnerPortal ? 'Scanified' : (organization?.name || 'WeldCor');
   const headerBrandInitial = isOwnerPortal ? 'S' : (organization?.name?.charAt(0)?.toUpperCase() || 'W');
 
-  // Top navigation — classic tab bar (pre–post-login redesign); hidden for platform owner
-  const topNavLinks = profile?.role === 'owner'
-    ? []
-    : [
-        { label: 'Home', to: '/home' },
-        { label: 'Inventory', to: '/inventory' },
-        { label: 'Orders', to: '/import-approvals' },
-        { label: 'Rentals', to: '/rentals' },
-      ];
-
   useEffect(() => {
     setShowSuggestions(false);
   }, [location.pathname]);
@@ -233,15 +223,6 @@ export default function MainLayout({ children }) {
     } else if (item.type === 'organization') {
       navigate(`/owner-portal/customer-management?org=${item.id}`);
     }
-  };
-
-  const isTopNavActive = (to) => {
-    const path = location.pathname;
-    if (to === '/home') return path === '/home';
-    if (to === '/inventory') return path.startsWith('/inventory') || path.startsWith('/assets');
-    if (to === '/import-approvals') return path.startsWith('/import-approval');
-    if (to === '/rentals') return path.startsWith('/rentals') || path.startsWith('/subscriptions');
-    return path === to || path.startsWith(`${to}/`);
   };
 
   const handleLogout = async () => {
@@ -444,52 +425,6 @@ export default function MainLayout({ children }) {
               justifyContent: 'flex-end',
             }}
           >
-            {topNavLinks.length > 0 && (
-              <Box
-                sx={{
-                  display: { xs: 'none', md: 'flex' },
-                  alignItems: 'center',
-                  gap: 0,
-                  flexShrink: 0,
-                }}
-              >
-                {topNavLinks.map((link) => {
-                  const active = isTopNavActive(link.to);
-                  return (
-                  <Button
-                    key={link.label}
-                    onClick={() => navigate(link.to)}
-                    sx={{
-                      color: active ? primaryColor : 'text.primary',
-                      fontWeight: active ? 700 : 500,
-                      fontFamily: 'Inter, sans-serif',
-                      fontSize: '0.875rem',
-                      textTransform: 'none',
-                      px: 2,
-                      py: 0,
-                      minHeight: 40,
-                      borderRadius: '8px',
-                      borderBottom: 'none',
-                      backgroundColor: active
-                        ? (isDarkShell ? alpha('#fff', 0.12) : 'rgba(255,255,255,0.95)')
-                        : 'transparent',
-                      boxShadow: active
-                        ? (isDarkShell ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 18px rgba(99,102,241,0.12)')
-                        : 'none',
-                      transition: 'all 0.2s',
-                      '&:hover': {
-                        color: primaryColor,
-                        bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.9)',
-                      },
-                    }}
-                  >
-                    {link.label}
-                  </Button>
-                );
-                })}
-              </Box>
-            )}
-
             <Box
               sx={{
                 flex: '1 1 0%',
