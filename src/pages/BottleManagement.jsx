@@ -1492,6 +1492,12 @@ const BottleManagement = () => {
 
           gas_type: editingBottle.gas_type,
 
+          // 'type' is a separate legacy column that several pages (e.g. Assets.jsx)
+          // read for display/grouping instead of gas_type. It's only ever set at
+          // CSV import time otherwise, so it goes stale the moment gas_type is
+          // edited here unless we keep it in sync explicitly.
+          type: editingBottle.gas_type,
+
           status: editingBottle.status,
 
           updated_at: new Date().toISOString()
