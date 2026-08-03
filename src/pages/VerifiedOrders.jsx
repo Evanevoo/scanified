@@ -257,56 +257,73 @@ export default function VerifiedOrders() {
 
       const allOrders = [...importOrderRows, ...scannedOrders];
       
-      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
+      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals.
+      // Was a sequential await-in-loop issuing up to 2 Supabase round-trips per order
+      // (rentals, then bottle_scans) -- O(orders) queries. Now: one pass to figure out
+      // which orders actually need the fallback and collect their order numbers, one
+      // batched query per table for all of them, then apply results back. Same
+      // priority (rentals beats bottle_scans) and same "first match wins" behavior per
+      // order number as before -- just not one round-trip at a time.
+      const ordersNeedingFallback = [];
+      const fallbackOrderNums = new Set();
       for (const order of allOrders) {
         // First, try to extract customer name from invoice data using getCustomerName function
         // This properly checks all possible locations in the invoice data
         const customerNameFromInvoice = getCustomerName(order);
-        
+
         if (customerNameFromInvoice && customerNameFromInvoice !== 'N/A' && customerNameFromInvoice !== 'Unknown') {
           // Invoice has customer name - use it (this is the source of truth)
           order.customer_name = customerNameFromInvoice;
           if (!order.data_parsed) order.data_parsed = {};
           order.data_parsed.customer_name = customerNameFromInvoice;
-          logger.log(`✅ Found customer name from invoice data for order: ${customerNameFromInvoice}`);
         } else {
           // Invoice doesn't have customer name - fallback to bottle_scans or rentals
-          // Extract order number manually (getOrderNumber is defined later)
           let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
           if (!orderNum && order.data_parsed?.rows && order.data_parsed.rows.length > 0) {
             const firstRow = order.data_parsed.rows[0];
             orderNum = firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
           }
           if (orderNum && orderNum !== 'N/A') {
-            // Try to get customer name from rentals table first (more reliable than bottle_scans)
-            const { data: rentals } = await supabase
-              .from('rentals')
-              .select('customer_name')
-              .eq('order_number', orderNum)
-              .eq('organization_id', organization.id)
-              .limit(1);
-            
-            if (rentals && rentals.length > 0 && rentals[0].customer_name) {
-              order.customer_name = rentals[0].customer_name;
-              if (!order.data_parsed) order.data_parsed = {};
-              order.data_parsed.customer_name = rentals[0].customer_name;
-              logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentals[0].customer_name}`);
-            } else {
-              // Last resort: try to get customer name from bottle_scans (may be incorrect)
-              const { data: bottleScans } = await supabase
-                .from('bottle_scans')
-                .select('customer_name')
-                .eq('order_number', orderNum)
-                .eq('organization_id', organization.id)
-                .limit(1);
-              
-              if (bottleScans && bottleScans.length > 0 && bottleScans[0].customer_name) {
-                order.customer_name = bottleScans[0].customer_name;
-                if (!order.data_parsed) order.data_parsed = {};
-                order.data_parsed.customer_name = bottleScans[0].customer_name;
-                logger.log(`⚠️ Found customer name from bottle_scans for order ${orderNum} (fallback): ${bottleScans[0].customer_name}`);
-              }
-            }
+            ordersNeedingFallback.push({ order, orderNum });
+            fallbackOrderNums.add(orderNum);
+          }
+        }
+      }
+
+      if (fallbackOrderNums.size > 0) {
+        const orderNumList = Array.from(fallbackOrderNums);
+        const [{ data: fallbackRentals }, { data: fallbackScans }] = await Promise.all([
+          supabase
+            .from('rentals')
+            .select('order_number, customer_name')
+            .in('order_number', orderNumList)
+            .eq('organization_id', organization.id),
+          supabase
+            .from('bottle_scans')
+            .select('order_number, customer_name')
+            .in('order_number', orderNumList)
+            .eq('organization_id', organization.id),
+        ]);
+
+        const rentalNameByOrderNum = new Map();
+        (fallbackRentals || []).forEach((r) => {
+          if (r.customer_name && !rentalNameByOrderNum.has(r.order_number)) {
+            rentalNameByOrderNum.set(r.order_number, r.customer_name);
+          }
+        });
+        const scanNameByOrderNum = new Map();
+        (fallbackScans || []).forEach((s) => {
+          if (s.customer_name && !scanNameByOrderNum.has(s.order_number)) {
+            scanNameByOrderNum.set(s.order_number, s.customer_name);
+          }
+        });
+
+        for (const { order, orderNum } of ordersNeedingFallback) {
+          const name = rentalNameByOrderNum.get(orderNum) || scanNameByOrderNum.get(orderNum);
+          if (name) {
+            order.customer_name = name;
+            if (!order.data_parsed) order.data_parsed = {};
+            order.data_parsed.customer_name = name;
           }
         }
       }
