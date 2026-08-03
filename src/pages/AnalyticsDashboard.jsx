@@ -88,7 +88,7 @@ export default function AnalyticsDashboard() {
 
         supabase
           .from('invoices')
-          .select('total')
+          .select('total_amount')
           .eq('organization_id', organization.id)
           .eq('status', 'paid')
           .gte('created_at', startDate.toISOString())
@@ -97,7 +97,10 @@ export default function AnalyticsDashboard() {
       ]);
 
       // Calculate metrics
-      const totalRevenue = revenue?.reduce((sum, inv) => sum + (inv.total || 0), 0) || 0;
+      // invoices has no `total` column (only `total_amount`) -- this and the .select()
+      // above were both referencing a nonexistent field, so this was always computing
+      // 0 (a query for a nonexistent column errors, revenue ends up null/undefined).
+      const totalRevenue = revenue?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
       const activeBottles = bottles?.filter(b => b.status === 'active').length || 0;
       const pendingDeliveries = rentals?.filter(r => r.status === 'pending').length || 0;
       const completedDeliveries = rentals?.filter(r => r.status === 'delivered').length || 0;
@@ -122,7 +125,7 @@ export default function AnalyticsDashboard() {
 
         supabase
           .from('invoices')
-          .select('total')
+          .select('total_amount')
           .eq('organization_id', organization.id)
           .eq('status', 'paid')
           .gte('created_at', previousPeriodStart.toISOString())
@@ -131,7 +134,7 @@ export default function AnalyticsDashboard() {
           .limit(5000)
       ]);
 
-      const prevRevenueTotal = prevRevenueData?.reduce((sum, inv) => sum + (inv.total || 0), 0) || 0;
+      const prevRevenueTotal = prevRevenueData?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
       const revenueGrowth = prevRevenueTotal > 0 ? ((totalRevenue - prevRevenueTotal) / prevRevenueTotal) * 100 : 0;
 
       setAnalytics({
@@ -169,7 +172,7 @@ export default function AnalyticsDashboard() {
     const monthlyRevenue = {};
     invoices.forEach(invoice => {
       const month = new Date(invoice.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (invoice.total || 0);
+      monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (invoice.total_amount || 0);
     });
     
     return Object.entries(monthlyRevenue).map(([month, revenue]) => ({ month, revenue }));
