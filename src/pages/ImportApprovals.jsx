@@ -1387,6 +1387,20 @@ export default function ImportApprovals() {
     }
     return 0;
   };
+  /**
+   * Whole days this record has been waiting, from the same timestamp the sort uses.
+   * A pending order means bottles are physically at the customer while billing
+   * nothing, so age is a revenue signal -- the dashboard surfaces the oldest one,
+   * and this puts the same number on the card you land on.
+   * Returns null when no usable timestamp exists (don't show a misleading "0d").
+   */
+  const getRecordAgeDays = (record) => {
+    const ts = getSortableScanTime(record);
+    if (!ts || ts <= 0) return null;
+    const days = Math.floor((Date.now() - ts) / 86400000);
+    return Number.isFinite(days) && days >= 0 ? days : null;
+  };
+
   const sortedFilteredInvoices = useMemo(() => {
     return [...(filteredInvoices || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
   }, [filteredInvoices]);
@@ -5283,6 +5297,24 @@ export default function ImportApprovals() {
                       size="small"
                       icon={VERIFICATION_STATES[determineVerificationStatus(invoice)].icon}
                     />
+                    {(() => {
+                      // Age only earns attention once it's been sitting a while -- showing
+                      // "0d" on everything would just be noise on a busy queue.
+                      const ageDays = getRecordAgeDays(invoice);
+                      if (ageDays == null || ageDays < 3) return null;
+                      const stale = ageDays >= 14;
+                      return (
+                        <Tooltip title={`Waiting ${ageDays} day${ageDays === 1 ? '' : 's'} for verification`}>
+                          <Chip
+                            label={`${ageDays}d`}
+                            size="small"
+                            variant="outlined"
+                            color={stale ? 'error' : 'warning'}
+                            sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                          />
+                        </Tooltip>
+                      );
+                    })()}
                     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                       <Typography variant="h6" color="primary" fontWeight={600}>
                         {orderNum}
