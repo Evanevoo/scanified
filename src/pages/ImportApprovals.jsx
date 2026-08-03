@@ -7076,10 +7076,16 @@ return (
       // Resolve to a CustomerListID so downstream pages (Customer Detail, Asset Detail, Bottle Locations, Reports) all match.
       clearResolveCustomerListIdMemo();
       let newCustomerId = getCustomerId(data) || null;
+      // Hoisted out of the block below (was block-scoped, so unavailable to the RNB
+      // balance check further down) -- lets that check also match bottles.assigned_customer
+      // against the resolved customers.id UUID, not just CustomerListID/name, matching
+      // ImportApprovalDetail.jsx's more thorough version of the same check.
+      let resolvedCustomerForBalance = null;
       {
         const resolved =
           (await resolveCustomerListId(supabase, organization?.id, newCustomerId)) ||
           (await resolveCustomerListId(supabase, organization?.id, newCustomerName));
+        resolvedCustomerForBalance = resolved || null;
         if (resolved?.customerListId) {
           newCustomerId = resolved.customerListId;
           if (!newCustomerName || newCustomerName === 'Unknown') {
@@ -7160,7 +7166,7 @@ return (
         const allBc = [...new Set([...shipArr, ...retArr])];
         const { data: bottleRows } = await supabase
           .from('bottles')
-          .select('barcode_number, product_code, assigned_customer, customer_name')
+          .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
           .eq('organization_id', organization.id)
           .in('barcode_number', allBc);
         const bottleMap = new Map();
@@ -7170,7 +7176,7 @@ return (
           if (missing.length > 0) {
             const { data: extra } = await supabase
               .from('bottles')
-              .select('barcode_number, product_code, assigned_customer, customer_name')
+              .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
               .eq('organization_id', organization.id);
             (extra || []).forEach(b => {
               const norm = normalizeBarcode(b.barcode_number);
@@ -7182,9 +7188,41 @@ return (
             });
           }
         }
+        // Matches ImportApprovalDetail.jsx's RNB check: some barcodes are only
+        // resolvable via serial_number rather than barcode_number (e.g. a bottle
+        // scanned/entered by serial). Without this fallback, ImportApprovals.jsx's
+        // "Approve" button could flag a return as RNB that ImportApprovalDetail.jsx's
+        // "Verify This Record" would have correctly matched -- inconsistent behavior
+        // between the two approval entry points for the same order.
+        const stillUnmapped = allBc.filter((bc) => !bottleMap.has(String(bc).trim()));
+        if (stillUnmapped.length > 0) {
+          const { data: serialRows } = await supabase
+            .from('bottles')
+            .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
+            .eq('organization_id', organization.id)
+            .in('serial_number', stillUnmapped.map((x) => String(x).trim()));
+          (serialRows || []).forEach((b) => {
+            const sn = String(b.serial_number || '').trim();
+            stillUnmapped.forEach((raw) => {
+              if (sn && sn === String(raw).trim()) {
+                bottleMap.set(String(raw).trim(), b);
+              }
+            });
+          });
+        }
         const custId = String(newCustomerId || '').trim();
         const custName = String(newCustomerName || '').trim();
         const custNameLower = custName.toLowerCase();
+        // Also matches ImportApprovalDetail.jsx: bottles.assigned_customer can hold
+        // customers.id (uuid) instead of CustomerListID in some records -- without
+        // this, a return could be wrongly flagged RNB purely because the stored
+        // identity uses the other id form than what's being compared against.
+        const balanceRowIdLower = resolvedCustomerForBalance?.id
+          ? String(resolvedCustomerForBalance.id).trim().toLowerCase()
+          : '';
+        const balanceResolvedNameLower = resolvedCustomerForBalance?.name
+          ? String(resolvedCustomerForBalance.name).trim().toLowerCase()
+          : '';
         for (const retBc of retArr) {
           const retNorm = normalizeBarcode(retBc);
           const latestScan = latestOrderScanModeByBarcode.get(retNorm);
@@ -7197,8 +7235,12 @@ return (
           const cn = String(bottle.customer_name || '').trim();
           const acLower = ac.toLowerCase();
           const cnLower = cn.toLowerCase();
-          const idMatch = custId && (ac === custId || acLower === custId.toLowerCase());
-          const nameMatch = custNameLower && (acLower === custNameLower || cnLower === custNameLower);
+          const idMatch =
+            (custId && (ac === custId || acLower === custId.toLowerCase())) ||
+            (balanceRowIdLower && acLower === balanceRowIdLower);
+          const nameMatch =
+            (custNameLower && (acLower === custNameLower || cnLower === custNameLower)) ||
+            (balanceResolvedNameLower && (cnLower === balanceResolvedNameLower || acLower === balanceResolvedNameLower));
           const onBalance = idMatch || nameMatch;
           if (!onBalance) {
             returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
