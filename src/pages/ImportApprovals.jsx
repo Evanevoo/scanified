@@ -1342,7 +1342,13 @@ export default function ImportApprovals() {
   }, [filteredInvoices]);
 
   // Sort by best available date/time, newest first.
-  // Prefer scan/upload timestamps, then import/receipt dates.
+  // Prefer the actual system timestamp (when this record was scanned/imported into
+  // Scanified) over document-derived dates. The document dates (data.date,
+  // invoice_date, receipt_date, etc, pulled from the imported file's own contents)
+  // reflect when the invoice/receipt was written -- not when it was scanned -- and
+  // are frequently date-only, which collapses many unrelated records onto the same
+  // UTC-midnight sort key and leaves ties in non-chronological order. Only fall back
+  // to a document date when no real system timestamp exists on the record at all.
   const getSortableScanTime = (record) => {
     const parseToEpoch = (raw) => {
       if (raw == null || raw === '') return 0;
@@ -1359,6 +1365,12 @@ export default function ImportApprovals() {
     const summary = data?.summary || null;
 
     const candidates = [
+      record?.created_at,
+      record?.updated_at,
+      record?.uploaded_at,
+      data?.created_at,
+      data?.uploaded_at,
+      summary?.uploaded_at,
       data?.date,
       data?.invoice_date,
       data?.receipt_date,
@@ -1367,12 +1379,6 @@ export default function ImportApprovals() {
       firstRow?.receipt_date,
       data?.scan_date,
       firstRow?.scan_date,
-      record?.created_at,
-      record?.updated_at,
-      record?.uploaded_at,
-      data?.created_at,
-      data?.uploaded_at,
-      summary?.uploaded_at
     ];
 
     for (const c of candidates) {
