@@ -1,5 +1,5 @@
 import React from 'react';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { AuthProvider } from '../../hooks/useAuth';
 import { supabase } from '../../supabase/client';
 
@@ -8,7 +8,10 @@ jest.mock('../../supabase/client', () => ({
   supabase: {
     auth: {
       getSession: jest.fn(),
-      onAuthStateChange: jest.fn(),
+      // useAuth.jsx destructures { data: listener } from this call's return value --
+      // a bare jest.fn() returns undefined, so every test crashed before running.
+      // Matches the real supabase-js contract: { data: { subscription } }.
+      onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })),
       signOut: jest.fn(),
     },
     from: jest.fn(() => ({
@@ -104,12 +107,15 @@ describe('useAuth Hook', () => {
 
   it('should handle trial expiration', async () => {
     const mockUser = { id: 'user-1', email: 'test@example.com' };
-    const mockProfile = { id: 'profile-1', user_id: 'user-1', role: 'admin' };
-    const mockOrganization = { 
-      id: 'org-1', 
+    const mockProfile = { id: 'profile-1', user_id: 'user-1', role: 'admin', organization_id: 'org-1' };
+    const mockOrganization = {
+      id: 'org-1',
       name: 'Test Org',
       subscription_status: 'trial',
-      subscription_end_date: new Date(Date.now() - 86400000).toISOString() // Yesterday
+      // useAuth.jsx checks trial_end_date specifically (there's also a separate,
+      // differently-named trial_ends_at/subscription_end_date pair in the real
+      // schema -- this field name is the one the actual product code reads).
+      trial_end_date: new Date(Date.now() - 86400000).toISOString() // Yesterday
     };
 
     supabase.auth.getSession.mockResolvedValue({
@@ -117,23 +123,40 @@ describe('useAuth Hook', () => {
       error: null,
     });
 
-    supabase.from.mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-          single: jest.fn().mockResolvedValue({ data: mockProfile, error: null }),
-        }),
-      }),
-    });
+    // useAuth.jsx queries 'profiles' then 'organizations' twice (a deleted-check
+    // query, then the real fetch which also chains .is('deleted_at', null) before
+    // .single()). A single blanket mockReturnValue answered both tables with
+    // mockProfile via a select().eq().single() chain that had no .is() method --
+    // calling .is() on it threw, which got swallowed and left trialExpired at its
+    // false default. Build a fully chainable mock so any of select/eq/is can be
+    // called in any order before single() resolves.
+    const makeChainable = (resolvedValue) => {
+      const chain = {};
+      ['select', 'eq', 'is', 'order', 'limit'].forEach((method) => {
+        chain[method] = jest.fn().mockReturnValue(chain);
+      });
+      chain.single = jest.fn().mockResolvedValue(resolvedValue);
+      chain.maybeSingle = jest.fn().mockResolvedValue(resolvedValue);
+      return chain;
+    };
+    supabase.from.mockImplementation((table) =>
+      makeChainable({
+        data: table === 'organizations' ? mockOrganization : mockProfile,
+        error: null,
+      })
+    );
 
     const { result } = renderHook(() => {
       const { useAuth } = require('../../hooks/useAuth');
       return useAuth();
     }, { wrapper });
 
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 0));
+    // This flow is three sequential awaited Supabase calls (profile, then the
+    // org-deleted check, then the real org fetch) -- a single setTimeout(0) tick
+    // (the pattern the other tests in this file use) doesn't reliably flush all
+    // three before the assertion runs. waitFor retries until it settles.
+    await waitFor(() => {
+      expect(result.current.trialExpired).toBe(true);
     });
-
-    expect(result.current.trialExpired).toBe(true);
   });
 });
