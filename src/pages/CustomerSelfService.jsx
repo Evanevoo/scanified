@@ -188,6 +188,10 @@ function CustomerDashboard({ customer, stats }) {
 }
 
 function CylinderTracking({ customerId }) {
+  // Was referencing `organization` without ever defining it (no useAuth() call, and
+  // this component only receives `customerId` as a prop) -- every fetch threw a
+  // ReferenceError, caught silently, so this tab always showed an empty list.
+  const { organization } = useAuth();
   const [cylinders, setCylinders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trackingFilter, setTrackingFilter] = useState('all');
