@@ -39,7 +39,14 @@ export default function AnalyticsDashboard() {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      // Fetch various analytics data
+      // Fetch various analytics data. These were previously unbounded (no .limit()),
+      // so a busy org with a lot of activity in the selected window could return the
+      // entire matching history in one shot -- the same shape of query that has caused
+      // Postgres statement timeouts elsewhere in this app. Ordering by recency + capping
+      // at 5000 bounds the worst case; counts/sums become an approximation of "top 5000
+      // most recent" rather than the true total for orgs that blow past the cap within
+      // a single time range, which is an accepted trade-off (same one made in
+      // ImportApprovals.jsx) rather than a full fix (e.g. a server-side aggregate).
       const [
         { data: bottles },
         { data: customers },
@@ -51,32 +58,42 @@ export default function AnalyticsDashboard() {
           .from('bottles')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('customers')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('rentals')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
           .select('total')
           .eq('organization_id', organization.id)
           .eq('status', 'paid')
           .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       // Calculate metrics
@@ -99,8 +116,10 @@ export default function AnalyticsDashboard() {
           .select('*')
           .eq('organization_id', organization.id)
           .gte('created_at', previousPeriodStart.toISOString())
-          .lt('created_at', startDate.toISOString()),
-        
+          .lt('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
           .select('total')
@@ -108,6 +127,8 @@ export default function AnalyticsDashboard() {
           .eq('status', 'paid')
           .gte('created_at', previousPeriodStart.toISOString())
           .lt('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       const prevRevenueTotal = prevRevenueData?.reduce((sum, inv) => sum + (inv.total || 0), 0) || 0;

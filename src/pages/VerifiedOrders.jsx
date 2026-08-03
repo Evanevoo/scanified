@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -49,14 +49,19 @@ import {
   supplementImportRowsForScannedOrders,
 } from '../utils/verifiedOrdersList';
 import { resolveOrderNumberFromListEntry } from '../utils/verifiedOrdersDedup';
+import { useDebounce } from '../utils/performance';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
   const navigate = useNavigate();
   const [verifiedOrders, setVerifiedOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // Raw `search` updates every keystroke so the input feels instant; the actual filter pass
+  // (below, over the full verifiedOrders list) runs against the debounced value so typing
+  // doesn't recompute getOrderNumber/getCustomerName (which parse nested JSON per order) on
+  // every character.
+  const debouncedSearch = useDebounce(search, 280);
   const [typeFilter, setTypeFilter] = useState('all'); // all, invoice, receipt, scanned
   const [dateFilter, setDateFilter] = useState('all'); // all, today, week, month
   const [page, setPage] = useState(0);
@@ -75,10 +80,6 @@ export default function VerifiedOrders() {
       fetchVerifiedOrders();
     }
   }, [organization?.id]);
-
-  useEffect(() => {
-    applyFilters();
-  }, [verifiedOrders, search, typeFilter, dateFilter]);
 
   const fetchVerifiedOrders = async () => {
     try {
@@ -99,20 +100,24 @@ export default function VerifiedOrders() {
         { data: pendingReceipts, error: pendingRecErr },
         { data: bottleScansList, error: bottleScanError },
       ] = await Promise.all([
+        // Verified/approved history grows without bound over the org's lifetime -- ordered
+        // by recency + capped so this doesn't fetch every order ever verified on every load.
         supabase
           .from('imported_invoices')
           .select('*')
           .eq('organization_id', organization.id)
           .in('status', ['verified', 'approved'])
           .order('approved_at', { ascending: false })
-          .order('verified_at', { ascending: false }),
+          .order('verified_at', { ascending: false })
+          .limit(5000),
         supabase
           .from('imported_sales_receipts')
           .select('*')
           .eq('organization_id', organization.id)
           .in('status', ['verified', 'approved'])
           .order('approved_at', { ascending: false })
-          .order('verified_at', { ascending: false }),
+          .order('verified_at', { ascending: false })
+          .limit(5000),
         supabase
           .from('imported_invoices')
           .select('*')
@@ -128,7 +133,8 @@ export default function VerifiedOrders() {
           .select('id, bottle_barcode, order_number, mode, organization_id, customer_name, customer_id, created_at')
           .eq('organization_id', organization.id)
           .not('order_number', 'is', null)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .limit(5000),
       ]);
 
       if (invoiceError) {
@@ -389,62 +395,6 @@ export default function VerifiedOrders() {
   };
 
   const parseDataField = parseImportDataField;
-
-  const applyFilters = () => {
-    let filtered = [...verifiedOrders];
-
-    // Type filter: match exact type (invoice, receipt, scanned)
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(order => (order.type || '') === typeFilter);
-    }
-
-    // Date filter: use approved_at first (what we set on verify), then verified_at, then created_at
-    if (dateFilter !== 'all') {
-      const now = new Date();
-      const filterDate = new Date();
-      
-      switch (dateFilter) {
-        case 'today':
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'week':
-          filterDate.setDate(now.getDate() - 7);
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'month':
-          filterDate.setMonth(now.getMonth() - 1);
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-      }
-
-      filtered = filtered.filter(order => {
-        const orderDate = new Date(order.approved_at || order.verified_at || order.created_at || 0);
-        return orderDate >= filterDate;
-      });
-    }
-
-    // Search filter: use same getters as display so search matches what user sees
-    if (search.trim()) {
-      const searchLower = search.toLowerCase().trim();
-      filtered = filtered.filter(order => {
-        const orderNum = String(getOrderNumber(order) || '').toLowerCase();
-        const customerName = String(getCustomerName(order) || '').toLowerCase();
-        const refNum = String(order.data_parsed?.reference_number || order.data_parsed?.invoice_number || '').toLowerCase();
-        return (
-          orderNum.includes(searchLower) ||
-          customerName.includes(searchLower) ||
-          refNum.includes(searchLower)
-        );
-      });
-    }
-
-    // Keep sort by latest first
-    const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
-    filtered.sort((a, b) => getOrderDate(b) - getOrderDate(a));
-
-    setFilteredOrders(filtered);
-    setPage(0); // Reset to first page when filters change
-  };
 
   // Normalize order number for matching (trim, strip leading zeros for numeric)
   const normalizeOrderNumForReverse = (num) => {
@@ -999,6 +949,70 @@ export default function VerifiedOrders() {
     const rows = order.data_parsed?.rows || order.data_parsed?.line_items || [];
     return rows.length;
   };
+
+  // Was recomputed via setState-in-useEffect on every `search` keystroke (no debounce),
+  // rerunning type/date/search filtering -- including getOrderNumber/getCustomerName, which
+  // parse nested JSON per order -- over the full verifiedOrders list each time. Memoized so
+  // it only reruns when the underlying data or (debounced) filter inputs actually change.
+  const filteredOrders = useMemo(() => {
+    let filtered = [...verifiedOrders];
+
+    // Type filter: match exact type (invoice, receipt, scanned)
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(order => (order.type || '') === typeFilter);
+    }
+
+    // Date filter: use approved_at first (what we set on verify), then verified_at, then created_at
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      const filterDate = new Date();
+
+      switch (dateFilter) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          filterDate.setDate(now.getDate() - 7);
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'month':
+          filterDate.setMonth(now.getMonth() - 1);
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+      }
+
+      filtered = filtered.filter(order => {
+        const orderDate = new Date(order.approved_at || order.verified_at || order.created_at || 0);
+        return orderDate >= filterDate;
+      });
+    }
+
+    // Search filter: use same getters as display so search matches what user sees
+    if (debouncedSearch.trim()) {
+      const searchLower = debouncedSearch.toLowerCase().trim();
+      filtered = filtered.filter(order => {
+        const orderNum = String(getOrderNumber(order) || '').toLowerCase();
+        const customerName = String(getCustomerName(order) || '').toLowerCase();
+        const refNum = String(order.data_parsed?.reference_number || order.data_parsed?.invoice_number || '').toLowerCase();
+        return (
+          orderNum.includes(searchLower) ||
+          customerName.includes(searchLower) ||
+          refNum.includes(searchLower)
+        );
+      });
+    }
+
+    // Keep sort by latest first
+    const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
+    filtered.sort((a, b) => getOrderDate(b) - getOrderDate(a));
+
+    return filtered;
+  }, [verifiedOrders, debouncedSearch, typeFilter, dateFilter]);
+
+  // Reset to first page whenever the filtered set changes underneath the current page.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, typeFilter, dateFilter]);
 
   if (loading) {
     return (

@@ -130,12 +130,15 @@ export default function QuickAdd() {
     const fetchGasTypes = async () => {
       setLoadingGasTypes(true);
       try {
+        // gas_types is a shared reference catalog (no organization_id column), but still
+        // uncapped -- add a defensive limit so it can't grow into an unbounded scan.
         const { data, error: fetchError } = await supabase
           .from('gas_types')
           .select('*')
           .order('category', { ascending: true })
           .order('group_name', { ascending: true })
-          .order('type', { ascending: true });
+          .order('type', { ascending: true })
+          .limit(2000);
         if (fetchError) throw fetchError;
         setGasTypes(data || []);
       } catch (err) {
@@ -161,7 +164,8 @@ export default function QuickAdd() {
           .from('locations')
           .select('id, name, province')
           .eq('organization_id', profile.organization_id)
-          .order('name', { ascending: true });
+          .order('name', { ascending: true })
+          .limit(1000);
         if (fetchError) throw fetchError;
         setLocations(data || []);
       } catch (err) {
@@ -182,7 +186,8 @@ export default function QuickAdd() {
         .from('ownership_values')
         .select('id, value')
         .eq('organization_id', profile.organization_id)
-        .order('value', { ascending: true });
+        .order('value', { ascending: true })
+        .limit(1000);
       if (!fetchError && data) {
         setOwners(data.map((item) => ({ id: item.id, name: item.value })));
       }

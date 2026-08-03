@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { finalizeCustomerBranchParentFields } from '../utils/customerParentConstraint';
@@ -335,9 +335,14 @@ export default function ImportSalesReceipts() {
         const descriptions = [...new Set(chunk.map(row => (row.description || '').trim()).filter(Boolean))];
         let validDescriptionSet = new Set();
         if (descriptions.length) {
+          // Was fetching the entire `cylinders` table (no filter of any kind) just to build a
+          // lookup set of valid descriptions. Bounded with .limit() as a safety net against
+          // Postgres statement timeouts; note this table also isn't scoped by organization_id
+          // here (pre-existing gap in this file, left as-is — see report).
           const { data: cylinders = [] } = await supabase
             .from('cylinders')
-            .select('description');
+            .select('description')
+            .limit(5000);
           validDescriptionSet = new Set((cylinders || []).map(c => (c.description || '').trim().toLowerCase()));
         }
 
@@ -532,9 +537,11 @@ export default function ImportSalesReceipts() {
       .in('details', receiptNumbers);
     const existingReceiptMap = new Map((existingReceipts || []).map(r => [r.details, r.id]));
     // Fetch all cylinders (by product_code and type)
+    // Same unbounded, unscoped full-table read as in handleImport above — bounded here too.
     const { data: cylinders = [] } = await supabase
       .from('cylinders')
-      .select('product_code, type');
+      .select('product_code, type')
+      .limit(5000);
     const validCylinderSet = new Set(
       (cylinders || []).flatMap(c => [
         (c.product_code || '').trim().toLowerCase(),
@@ -602,6 +609,20 @@ export default function ImportSalesReceipts() {
     setPreviewChecked(true);
     setLoading(false);
   }
+
+  // Rows eligible for the preview table (excludes skipped-duplicate / not-a-cylinder rows).
+  // Was recomputed as a plain `.map().filter()` directly in the render body — twice per render,
+  // once for the table body and once for the "showing first 20" count — so it reran on every
+  // render (e.g. while typing in unrelated inputs). Memoized so it only recomputes when the
+  // underlying preview data or row statuses actually change.
+  const visiblePreviewRows = useMemo(() => {
+    return preview
+      .map((row, i) => ({ row, i, status: rowStatuses[i] || {} }))
+      .filter(({ status }) =>
+        status.lineItemStatus !== 'Skipped (Not a cylinder)' &&
+        status.lineItemStatus !== 'Skipped (Duplicate)'
+      );
+  }, [preview, rowStatuses]);
 
   // Load saved mapping on mount or when columns change
   useEffect(() => {
@@ -677,12 +698,7 @@ export default function ImportSalesReceipts() {
                 </tr>
               </thead>
               <tbody>
-                {preview
-                  .map((row, i) => ({ row, i, status: rowStatuses[i] || {} }))
-                  .filter(({ status }) =>
-                    status.lineItemStatus !== 'Skipped (Not a cylinder)' &&
-                    status.lineItemStatus !== 'Skipped (Duplicate)'
-                  )
+                {visiblePreviewRows
                   .slice(0, 20)
                   .map(({ row, i, status }) => {
                     const rowErrors = validationErrors.filter(e => e.row === i);
@@ -702,14 +718,9 @@ export default function ImportSalesReceipts() {
                   })}
               </tbody>
             </table>
-            {preview
-              .map((row, i) => ({ row, i, status: rowStatuses[i] || {} }))
-              .filter(({ status }) =>
-                status.lineItemStatus !== 'Skipped (Not a cylinder)' &&
-                status.lineItemStatus !== 'Skipped (Duplicate)'
-              ).length > 20 && (
-                <div className="text-xs text-gray-500 mt-1">Showing first 20 imported rows only.</div>
-              )}
+            {visiblePreviewRows.length > 20 && (
+              <div className="text-xs text-gray-500 mt-1">Showing first 20 imported rows only.</div>
+            )}
           </div>
           {validationErrors.length > 0 && (
             <div className="text-red-700 bg-red-100 border border-red-300 rounded p-2 mt-2">

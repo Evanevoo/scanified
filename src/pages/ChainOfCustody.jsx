@@ -150,6 +150,10 @@ export default function ChainOfCustody() {
       const orgId = profile.organization_id;
 
       // Fetch chain of custody data in parallel
+      // Bounded with .limit() -- these were previously unbounded org-wide scans that
+      // could pull an org's entire history and trip Postgres statement timeouts.
+      // custody_audit_log in particular grows unbounded over time, so it gets the
+      // largest cap while still being bounded.
       const [recordsResult, eventsResult, documentsResult, signaturesResult, auditResult] = await Promise.all([
         supabase
           .from('chain_of_custody_records')
@@ -160,8 +164,9 @@ export default function ChainOfCustody() {
             to_party:profiles!chain_of_custody_records_to_party_fkey(full_name)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('custody_events')
           .select(`
@@ -170,8 +175,9 @@ export default function ChainOfCustody() {
             performer:profiles(full_name)
           `)
           .eq('organization_id', orgId)
-          .order('event_date', { ascending: false }),
-        
+          .order('event_date', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('custody_documents')
           .select(`
@@ -179,8 +185,9 @@ export default function ChainOfCustody() {
             custody:chain_of_custody_records(asset_id)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('custody_signatures')
           .select(`
@@ -189,8 +196,9 @@ export default function ChainOfCustody() {
             signer:profiles(full_name)
           `)
           .eq('organization_id', orgId)
-          .order('signed_at', { ascending: false }),
-        
+          .order('signed_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('custody_audit_log')
           .select(`
@@ -200,6 +208,7 @@ export default function ChainOfCustody() {
           `)
           .eq('organization_id', orgId)
           .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       if (recordsResult.error) throw recordsResult.error;

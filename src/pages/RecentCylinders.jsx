@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -75,7 +75,9 @@ export default function RecentCylinders() {
     }
   };
 
-  const filteredCylinders = cylinders.filter((c) => {
+  // Memoized so this 5-field scan (over up to 200 rows) only reruns when the source
+  // data or the search term actually change, not on every render.
+  const filteredCylinders = useMemo(() => cylinders.filter((c) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     return (
@@ -85,7 +87,7 @@ export default function RecentCylinders() {
       (c.description && c.description?.toLowerCase().includes(term)) ||
       (c.location && c.location.toLowerCase().includes(term))
     );
-  });
+  }), [cylinders, searchTerm]);
 
   const formatAddedDate = (isoString) => {
     if (!isoString) return '—';

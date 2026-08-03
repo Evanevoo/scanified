@@ -114,15 +114,23 @@ export default function BottleLocations() {
       setError(null);
       try {
         const [bRes, cRes, rRes, locRes] = await Promise.all([
+          // Unbounded org-wide fetch could pull an entire fleet's history and hit Postgres
+          // statement timeouts; cap consistent with other full-inventory bottle queries in
+          // this codebase (e.g. Assets.jsx, CustomerPricingOverrides.jsx). This page's
+          // "Physical bottles" total will undercount past the cap for very large fleets,
+          // which is an acceptable tradeoff vs. the whole page failing to load.
           supabase
             .from('bottles')
             .select('*')
             .eq('organization_id', organization.id)
-            .order('barcode_number'),
+            .order('barcode_number')
+            .limit(5000),
           supabase
             .from('customers')
             .select('CustomerListID, name')
-            .eq('organization_id', organization.id),
+            .eq('organization_id', organization.id)
+            .order('name')
+            .limit(5000),
           supabase
             .from('rentals')
             .select('id, customer_id, bottle_barcode, dns_product_code, dns_description, location, created_at')
@@ -130,7 +138,8 @@ export default function BottleLocations() {
             .eq('is_dns', true)
             .is('rental_end_date', null)
             .ilike('dns_description', '%Return not on balance%')
-            .order('customer_id'),
+            .order('customer_id')
+            .limit(5000),
           supabase
             .from('locations')
             .select('id', { count: 'exact', head: true })

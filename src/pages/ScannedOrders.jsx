@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
 import { Add, Remove, Edit, Save, Cancel } from '@mui/icons-material';
+import { useDebounce } from '../utils/performance';
 
 /** Rows from Asset Detail saves use order_number "manual" — not handset / Trackabout uploads. */
 function isWebAppManualBottleScan(row) {
@@ -33,6 +34,9 @@ export default function ScannedOrders() {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  /** Keep the input instantly responsive while the filter below (which re-derives
+   *  product codes per row) only recomputes ~280ms after typing settles. */
+  const debouncedSearch = useDebounce(search, 280);
   const [users, setUsers] = useState({});
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -92,7 +96,11 @@ export default function ScannedOrders() {
         .from('customers')
         .select('CustomerListID, name')
         .eq('organization_id', selectedOrg)
-        .order('name', { ascending: true });
+        .order('name', { ascending: true })
+        // Unbounded org-wide fetch; cap consistent with other full-customer-list
+        // queries in this codebase (e.g. BottleLocations.jsx) to avoid slow loads
+        // on orgs with large customer counts.
+        .limit(5000);
       if (!error) {
         setCustomers(
           (data || [])
@@ -121,7 +129,11 @@ export default function ScannedOrders() {
         .select('*')
         .not('order_number', 'is', null)
         .eq('organization_id', selectedOrg)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        // Unbounded org-wide scan history fetch caused slow loads / statement timeouts
+        // on orgs with lots of scan volume; cap to the most recent scans (same pattern
+        // already applied to the equivalent bottle_scans query in ImportApprovals.jsx).
+        .limit(5000);
       if (error) setError(error.message);
       else setOrders(data || []);
       setLoading(false);
@@ -303,18 +315,22 @@ export default function ScannedOrders() {
     return barcode ? (barcodeToProductCode[barcode] ?? '') : '';
   };
 
-  // Filter orders by search
-  const filteredOrders = dedupedOrders.filter(order => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    const productCode = getProductCode(order);
-    return (
-      (order.order_number && order.order_number.toLowerCase().includes(s)) ||
-      (order.customer_name && order.customer_name.toLowerCase().includes(s)) ||
-      (order.bottle_barcode && order.bottle_barcode.toLowerCase().includes(s)) ||
-      (productCode && productCode.toLowerCase().includes(s))
-    );
-  });
+  // Filter orders by search. Memoized (with the search term debounced) so this
+  // per-row scan -- including a product-code lookup per order -- doesn't rerun on
+  // every render/keystroke; only after the source rows or the settled search change.
+  const filteredOrders = React.useMemo(() => {
+    if (!debouncedSearch) return dedupedOrders;
+    const s = debouncedSearch.toLowerCase();
+    return dedupedOrders.filter(order => {
+      const productCode = getProductCode(order);
+      return (
+        (order.order_number && order.order_number.toLowerCase().includes(s)) ||
+        (order.customer_name && order.customer_name.toLowerCase().includes(s)) ||
+        (order.bottle_barcode && order.bottle_barcode.toLowerCase().includes(s)) ||
+        (productCode && productCode.toLowerCase().includes(s))
+      );
+    });
+  }, [dedupedOrders, debouncedSearch, barcodeToProductCode]);
 
   const editableOrdersCount = filteredOrders.filter(order => {
     const scanTime = parseDbTimestamp(order.timestamp || order.created_at) || new Date(0);

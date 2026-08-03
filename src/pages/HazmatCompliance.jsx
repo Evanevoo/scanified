@@ -137,6 +137,8 @@ export default function HazmatCompliance() {
       const orgId = profile.organization_id;
 
       // Fetch hazmat data in parallel
+      // Bounded with .limit() -- these were previously unbounded org-wide scans that
+      // could pull an org's entire history and trip Postgres statement timeouts.
       const [manifestsResult, reportsResult, itemsResult, certificationsResult, violationsResult] = await Promise.all([
         supabase
           .from('hazmat_manifests')
@@ -145,14 +147,16 @@ export default function HazmatCompliance() {
             items:hazmat_manifest_items(count)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('compliance_reports')
           .select('*')
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('hazmat_items')
           .select(`
@@ -160,8 +164,9 @@ export default function HazmatCompliance() {
             manifest:hazmat_manifests(manifest_number)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('hazmat_certifications')
           .select(`
@@ -169,8 +174,9 @@ export default function HazmatCompliance() {
             person:profiles(full_name)
           `)
           .eq('organization_id', orgId)
-          .order('expiry_date', { ascending: true }),
-        
+          .order('expiry_date', { ascending: true })
+          .limit(2000),
+
         supabase
           .from('compliance_violations')
           .select(`
@@ -180,6 +186,7 @@ export default function HazmatCompliance() {
           `)
           .eq('organization_id', orgId)
           .order('violation_date', { ascending: false })
+          .limit(2000)
       ]);
 
       if (manifestsResult.error) throw manifestsResult.error;

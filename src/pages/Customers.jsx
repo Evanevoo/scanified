@@ -293,7 +293,10 @@ function Customers({ profile }) {
         merged.sort((a, b) => compareCustomerRows(a, b, sortField, sortDirection));
         count = merged.length;
         if (searchTerm.trim()) {
-          data = merged;
+          // Search-across-org results aren't paginated with .range() below, so cap
+          // the merged (chunked .in() results) set here to avoid rendering/holding
+          // an unbounded number of rows for a broad search term on a large org.
+          data = merged.slice(0, 5000);
         } else {
           const from = (page - 1) * rowsPerPage;
           data = merged.slice(from, from + rowsPerPage);
@@ -313,7 +316,10 @@ function Customers({ profile }) {
         query = query.order(sortField, { ascending: sortDirection === 'asc' });
 
         if (searchTerm.trim()) {
-          const result = await query;
+          // No .range() here (search runs across the whole org, not just the current
+          // page), so cap with .limit() -- otherwise a broad search term on a large
+          // org fetches every matching row in one request.
+          const result = await query.limit(5000);
           data = result.data;
           error = result.error;
           count = result.count;
@@ -339,7 +345,14 @@ function Customers({ profile }) {
       // Resolve parent names for customers that have parent_customer_id
       const parentIds = [...new Set((data || []).map(c => c.parent_customer_id).filter(Boolean))];
       if (parentIds.length > 0) {
-        const { data: parents } = await supabase.from('customers').select('id, name').in('id', parentIds);
+        // Defense-in-depth: scope by organization_id explicitly rather than relying on
+        // RLS alone (parentIds are already org-scoped via `data`, but keep this query
+        // consistent with the rest of the file).
+        const { data: parents } = await supabase
+          .from('customers')
+          .select('id, name')
+          .in('id', parentIds)
+          .eq('organization_id', organization.id);
         const map = {};
         (parents || []).forEach(p => { map[p.id] = p.name; });
         setParentNames(map);
@@ -418,7 +431,14 @@ function Customers({ profile }) {
     if (!addDialogOpen || !organization?.id) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from('customers').select('id, name, CustomerListID').eq('organization_id', organization.id).order('name');
+      // Org-wide, unbounded by default (used for the "Under parent" Autocomplete) --
+      // cap it so opening the Add dialog on a large org doesn't pull every customer row.
+      const { data } = await supabase
+        .from('customers')
+        .select('id, name, CustomerListID')
+        .eq('organization_id', organization.id)
+        .order('name')
+        .limit(5000);
       if (!cancelled && data) setParentOptions(data);
     })();
     return () => { cancelled = true; };

@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Paper, Button, Grid, Card, CardContent, CardActions,
   Chip, IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
@@ -75,11 +75,16 @@ export default function SupportCenter() {
         setLoading(false);
         return;
       }
+      // Was unbounded (no .limit()) -- an org that has accumulated years of tickets would
+      // fetch its entire ticket history (plus a joined profile per ticket) on every load.
+      // Bounding to the most recent 5000 keeps this safe without changing behavior for
+      // any org under that size.
       const { data, error } = await supabase
         .from('support_tickets')
         .select(`*, profiles(email, full_name)`)
         .eq('organization_id', organization.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(5000);
       if (error) throw error;
       setTickets(data || []);
     } catch (error) {
@@ -286,11 +291,14 @@ export default function SupportCenter() {
     }
   };
 
-  const filteredTickets = tickets.filter(ticket => {
+  // Memoized: without this, the filter over the full ticket list reran on every render
+  // (every keystroke in the search box, every dialog open/close, every snackbar), not
+  // just when the underlying data or filter criteria actually change.
+  const filteredTickets = useMemo(() => tickets.filter(ticket => {
     const matchesSearch = ticket.subject.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = !selectedStatus || ticket.status === selectedStatus;
     return matchesSearch && matchesStatus;
-  });
+  }), [tickets, searchTerm, selectedStatus]);
 
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });

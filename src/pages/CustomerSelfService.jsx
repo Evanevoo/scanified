@@ -213,7 +213,9 @@ function CylinderTracking({ customerId }) {
         query = query.eq('status', trackingFilter);
       }
 
-      const { data, error } = await query.order('updated_at', { ascending: false });
+      // Bounded with .limit() -- a single customer's cylinder history could still grow
+      // large over time; this is a defensive cap, not a behavior change.
+      const { data, error } = await query.order('updated_at', { ascending: false }).limit(1000);
 
       if (error) throw error;
       setCylinders(data || []);
@@ -591,11 +593,14 @@ function ServiceRequests({ customerId }) {
   const fetchServiceRequests = async () => {
     setLoading(true);
     try {
+      // Bounded with .limit() -- the UI only ever renders the first 5 (see .slice(0, 5)
+      // below), so there's no reason to pull a customer's entire request history.
       const { data, error } = await supabase
         .from('service_requests')
         .select('*')
         .eq('customer_id', customerId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (error) throw error;
       setServiceRequests(data || []);
@@ -1101,10 +1106,13 @@ export default function CustomerSelfService() {
       
       // Fetch customer statistics
       // SECURITY: Only count bottles from user's organization
+      // head: true means Postgres returns only the exact count, not the matching rows --
+      // without it these were fetching every matching id row just to read res.count,
+      // an unbounded org-wide row fetch that was thrown away.
       const [cylindersRes, deliveriesRes, invoicesRes] = await Promise.all([
-        supabase.from('bottles').select('id', { count: 'exact' }).eq('status', 'active').eq('organization_id', organization.id),
-        supabase.from('deliveries').select('id', { count: 'exact' }).eq('status', 'pending').eq('organization_id', organization.id),
-        supabase.from('invoices').select('id', { count: 'exact' }).eq('status', 'overdue').eq('organization_id', organization.id),
+        supabase.from('bottles').select('id', { count: 'exact', head: true }).eq('status', 'active').eq('organization_id', organization.id),
+        supabase.from('deliveries').select('id', { count: 'exact', head: true }).eq('status', 'pending').eq('organization_id', organization.id),
+        supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue').eq('organization_id', organization.id),
       ]);
 
       const mockActivity = import.meta.env.DEV

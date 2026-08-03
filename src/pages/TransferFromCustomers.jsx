@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import {
@@ -76,13 +76,17 @@ export default function TransferFromCustomers() {
       if (customerError) throw customerError;
       setTargetCustomer(customerData);
 
-      // Get available source customers (exclude target customer)
+      // Get available source customers (exclude target customer). Was unbounded (no
+      // .limit()) -- fetched the org's entire customer list every time this page loads.
+      // Bounded to a generous cap since this feeds an Autocomplete the user searches
+      // through, not a paginated list.
       const { data: customersData, error: customersError } = await supabase
         .from('customers')
         .select('CustomerListID, name, customer_type, contact_details')
         .eq('organization_id', organization?.id)
         .neq('CustomerListID', id)
-        .order('name');
+        .order('name')
+        .limit(5000);
 
       if (customersError) throw customersError;
       setSourceCustomers(customersData || []);
@@ -99,11 +103,16 @@ export default function TransferFromCustomers() {
 
   const fetchCustomerAssets = async (customerId) => {
     try {
+      // A single customer's assigned bottles -- normally small, but large industrial
+      // accounts can carry thousands of cylinders, so this stays bounded rather than
+      // unbounded like the org-wide queries elsewhere on this page.
       const { data: assetsData, error: assetsError } = await supabase
         .from('bottles')
         .select('*')
         .eq('assigned_customer', customerId)
-        .eq('organization_id', organization?.id);
+        .eq('organization_id', organization?.id)
+        .order('created_at', { ascending: false })
+        .limit(5000);
 
       if (assetsError) throw assetsError;
       setAvailableAssets(assetsData || []);
@@ -190,16 +199,17 @@ export default function TransferFromCustomers() {
     }
   };
 
-  // Filter assets
-  const filteredAssets = availableAssets.filter(asset => {
+  // Filter assets. Memoized so typing in the search box (or any unrelated re-render,
+  // e.g. the transfer dialog opening) doesn't re-run this scan over every render.
+  const filteredAssets = useMemo(() => availableAssets.filter(asset => {
     const matchesStatus = statusFilter === 'all' || asset.status === statusFilter;
-    const matchesSearch = !searchTerm || 
+    const matchesSearch = !searchTerm ||
       asset.barcode_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       asset.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       asset.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     return matchesStatus && matchesSearch;
-  });
+  }), [availableAssets, statusFilter, searchTerm]);
 
   if (loading) {
     return (
