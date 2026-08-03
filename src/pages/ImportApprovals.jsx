@@ -1509,20 +1509,29 @@ export default function ImportApprovals() {
       
       // Check for auto-approval opportunities
       const autoApprovedRecords = [];
+      const autoApprovedOrderNumbers = [];
       const remainingRecords = [];
-      
+
       for (const record of individualRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
+        const result = await autoApproveIfQuantitiesMatch(record);
+        if (result.success) {
           autoApprovedRecords.push(record);
+          if (result.orderNumber) autoApprovedOrderNumbers.push(result.orderNumber);
         } else {
           remainingRecords.push(record);
         }
       }
-      
+
       if (autoApprovedRecords.length > 0) {
-        logger.debug(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
-        setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+        // Name the actual order(s) -- a bare count left users unable to tell which
+        // of their orders just vanished from this list and why (e.g. after editing
+        // a scan elsewhere changed the tracked quantities enough to match).
+        const names = autoApprovedOrderNumbers.length > 0
+          ? autoApprovedOrderNumbers.join(', ')
+          : `${autoApprovedRecords.length} record(s)`;
+        const message = `Auto-approved (quantities now match invoice) -- moved to Verified Orders: ${names}`;
+        logger.debug(message);
+        setSnackbar(message);
       }
       
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
@@ -1982,17 +1991,29 @@ export default function ImportApprovals() {
       if (!skipAutoApprove) {
         const autoApprovedIds = new Set();
         let autoApprovedCount = 0;
+        const autoApprovedOrderNumbers = [];
         for (const record of [...individualInvoices, ...individualReceipts]) {
           if (record.is_scanned_only) continue;
           if ((record.status || '').toLowerCase() !== 'pending') continue;
           if (!record._sourceTable || !record.id || autoApprovedIds.has(record.id)) continue;
           autoApprovedIds.add(record.id);
-          const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-          if (wasAutoApproved) autoApprovedCount += 1;
+          const result = await autoApproveIfQuantitiesMatch(record);
+          if (result.success) {
+            autoApprovedCount += 1;
+            if (result.orderNumber) autoApprovedOrderNumbers.push(result.orderNumber);
+          }
         }
         if (autoApprovedCount > 0) {
-          logger.debug(`Auto-approved ${autoApprovedCount} record(s) on load`);
-          setSnackbar(`Auto-approved ${autoApprovedCount} record(s) with matching quantities`);
+          // Name the order(s) -- this is the path that fires on page load/refetch,
+          // including right after navigating back from editing a scan on the detail
+          // page, which is exactly the sequence that made an order silently vanish
+          // from this list with no visible explanation.
+          const names = autoApprovedOrderNumbers.length > 0
+            ? autoApprovedOrderNumbers.join(', ')
+            : `${autoApprovedCount} record(s)`;
+          const message = `Auto-approved (quantities now match invoice) -- moved to Verified Orders: ${names}`;
+          logger.debug(message);
+          setSnackbar(message);
           // Refetch with fresh post-approval data (its own setPendingInvoices call
           // above supersedes this call's cleanedRecords). Awaiting it -- instead of
           // `return`-ing it directly -- means THIS call's own `silent` flag still
@@ -2371,8 +2392,8 @@ export default function ImportApprovals() {
       const remainingScannedRecords = [];
       
       for (const record of scannedOnlyRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
+        const result = await autoApproveIfQuantitiesMatch(record);
+        if (result.success) {
           autoApprovedScannedRecords.push(record);
         } else {
           remainingScannedRecords.push(record);
@@ -6885,14 +6906,14 @@ return (
       
       if (!quantitiesMatch) {
         logger.debug(`❌ Not auto-approving record ${record.id} - quantities don't match`);
-        return false;
+        return { success: false };
       }
 
       // Block auto-approve when shipped bottles are at a different customer.
       const { hasBottlesAtCustomers, bottlesAtCustomers } = await checkBottlesAtCustomers(record);
       if (hasBottlesAtCustomers) {
         logger.debug(`⚠️ Not auto-approving record ${record.id} - shipped bottles at a different customer:`, bottlesAtCustomers);
-        return false;
+        return { success: false };
       }
 
       logger.debug(`✅ Auto-approving record ${record.id} - quantities match; bottles at home or with delivery customer`);
@@ -6901,7 +6922,7 @@ return (
       const tableName = record._sourceTable || (record.is_scanned_only ? null : 'imported_invoices');
       if (!tableName) {
         logger.debug(`Skipping auto-approve for scanned-only record ${record.id} (no DB row)`);
-        return false;
+        return { success: false };
       }
 
       const recordId = record.originalId || record.id;
@@ -6912,7 +6933,7 @@ return (
         .maybeSingle();
       if (fetchErr || !existingRow) {
         logger.error('Auto-approve: could not load import row for verify persistence:', fetchErr);
-        return false;
+        return { success: false };
       }
 
       const existingData = parseImportDataField(existingRow.data);
@@ -6933,16 +6954,21 @@ return (
       if (error || !updatedRows || updatedRows.length === 0) {
         if (error) logger.error('Error auto-approving record:', error);
         else logger.debug(`Auto-approve update matched 0 rows for record ${record.id}`);
-        return false;
+        return { success: false };
       }
       
       // Trk matches Inv and record is approved — now assign bottles
       await assignBottlesToCustomer(record);
-      
-      return true;
+
+      // Report which order this was so callers can tell the user *what* just got
+      // auto-approved -- previously this just returned true/false, so a user
+      // editing a scan (e.g. switching RETURN to SHIP) and then navigating back to
+      // this list had no idea that action silently auto-approved a specific order
+      // and made it disappear from the pending queue.
+      return { success: true, orderNumber: orderNumber || null };
     } catch (error) {
       logger.error('Error in auto-approval:', error);
-      return false;
+      return { success: false };
     }
   }
 
