@@ -173,18 +173,26 @@ export async function closeOrphanOpenRentalsForOrg(
     groups.get(endDate).push(id);
   }
 
-  for (const [endDate, ids] of groups) {
-    const { data, error } = await supabaseClient
-      .from('rentals')
-      .update({
-        rental_end_date: endDate,
-        updated_at: updatedAt,
-      })
-      .eq('organization_id', organizationId)
-      .in('id', ids)
-      .is('rental_end_date', null)
-      .select('id');
+  // Distinct end-date groups don't depend on each other — fire them concurrently instead of
+  // one round trip at a time (this was the dominant source of the staggered/sequential
+  // request pattern on every page load, since SubscriptionContext runs this on mount).
+  const groupResults = await Promise.all(
+    Array.from(groups.entries()).map(async ([endDate, ids]) => {
+      const { data, error } = await supabaseClient
+        .from('rentals')
+        .update({
+          rental_end_date: endDate,
+          updated_at: updatedAt,
+        })
+        .eq('organization_id', organizationId)
+        .in('id', ids)
+        .is('rental_end_date', null)
+        .select('id');
+      return { endDate, ids, data, error };
+    }),
+  );
 
+  for (const { endDate, ids, data, error } of groupResults) {
     if (error) {
       errors.push(error.message || String(error));
       logger.warn('closeOrphanOpenRentalsForOrg group failed:', endDate, ids.length, error);
