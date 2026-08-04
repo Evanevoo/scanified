@@ -35,5 +35,13 @@
     "react": {
       "version": "detect"
     }
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/components/landing/HeroCylinderScene/**/*.jsx"],
+      "rules": {
+        "react/no-unknown-property": "off"
+      }
+    }
+  ]
 }

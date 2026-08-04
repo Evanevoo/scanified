@@ -19,6 +19,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import SEOHead, { SEOConfigs } from '../components/SEOHead';
 import { ParticleTextEffect } from '@/components/ui/particle-text-effect';
+import HeroCylinderScene from '../components/landing/HeroCylinderScene';
 import { marketingTokens } from '../config/marketingTokens';
 import { fetchPublicSubscriptionPlans } from '../services/publicPlansService';
 
@@ -168,12 +169,13 @@ export default function ModernLandingPage() {
       {/* Hero Section */}
       <section id="main-content" className="relative overflow-hidden py-24 md:py-32 bg-transparent">
         {/* Particle Text Effect Background */}
-        <ParticleTextEffect 
-          words={particleWords} 
+        <ParticleTextEffect
+          words={particleWords}
           asBackground={true}
           className="z-0"
           disabled={!!reduceMotion}
         />
+        <HeroCylinderScene reduceMotion={!!reduceMotion} className="z-[1]" />
         <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             <motion.div
