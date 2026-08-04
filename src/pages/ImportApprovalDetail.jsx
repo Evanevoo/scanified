@@ -912,8 +912,8 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
     if (!data) return '';
     
     // Try direct properties first
-    if (data.order_number || data.reference_number || data.invoice_number) {
-      return data.order_number || data.reference_number || data.invoice_number;
+    if (data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number) {
+      return data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number;
     }
     
     // Try to get from rows array

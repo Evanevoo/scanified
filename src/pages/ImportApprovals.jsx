@@ -7397,7 +7397,7 @@ return (
   async function checkBottlesAtCustomers(record) {
     try {
       const data = parseDataField(record.data);
-      const orderNumber = data.order_number || data.reference_number || data.invoice_number;
+      const orderNumber = data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number;
       const orderCustomerId = getCustomerId(data);
       const orderCustomerName = getCustomerInfo(data);
       
@@ -7631,12 +7631,13 @@ return (
       const rows = data.rows || data.line_items || [];
       let newCustomerName = getCustomerInfo(data);
 
-      let orderNumber = data.order_number || data.reference_number || data.invoice_number;
+      let orderNumber = data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number;
       if (!orderNumber && typeof record.id === 'string' && record.id.startsWith('scanned_')) {
         orderNumber = record.id.replace('scanned_', '');
       }
-      if (!orderNumber && rows.length > 0 && rows[0].order_number) {
-        orderNumber = rows[0].order_number;
+      if (!orderNumber && rows.length > 0) {
+        const firstRow = rows[0];
+        orderNumber = firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
       }
       if (!orderNumber) throw new Error('No order number found in record');
 
@@ -8967,10 +8968,10 @@ return (
 
   function getOrderNumber(data) {
     if (!data) return '';
-    
+
     // Try direct properties first (now set by splitImportIntoIndividualRecords)
-    if (data.order_number || data.reference_number || data.invoice_number) {
-      return data.order_number || data.reference_number || data.invoice_number;
+    if (data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number) {
+      return data.order_number || data.reference_number || data.invoice_number || data.sales_receipt_number;
     }
     
     // Try to get from rows array (fallback)
