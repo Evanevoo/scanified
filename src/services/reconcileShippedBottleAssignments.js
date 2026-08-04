@@ -4,6 +4,7 @@ import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssign
 import { resolveCustomerListId } from '../utils/resolveCustomerListId';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import { findStaleBarcodesForOrder } from '../utils/bottleScanRecency';
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -72,10 +73,17 @@ export async function reconcileShippedBottleAssignments(supabase, params) {
     if (!assignName) assignName = resolved.name || '';
   }
   const assignedCustomerValue = assignId || assignName;
+  const staleBarcodes = await findStaleBarcodesForOrder(supabase, organizationId, shipBarcodes, orderNumber);
 
   for (const rawBc of shipBarcodes) {
     const barcode = String(rawBc || '').trim();
     if (!barcode) continue;
+    if (staleBarcodes.has(barcode)) {
+      // Not pushed to `warnings` — callers read warnings.length as "count reassigned", and this
+      // barcode was deliberately left alone, not reassigned.
+      logger.warn('reconcileShippedBottleAssignments: skipped (newer scan on a different order):', barcode);
+      continue;
+    }
 
     const bottle = await findBottleRowByScanIdentifier(supabase, organizationId, barcode);
     if (!bottle) continue;

@@ -976,6 +976,24 @@ export default function Import() {
         logger.warn(`Auto-approve assignment skipped/failed for record ${recordId}: ${assignmentResult?.error || 'Unknown error'}`);
         return;
       }
+      const requestedCount = shipBarcodes.length + returnBarcodes.length;
+      const processedCount =
+        Number(assignmentResult?.data?.shipped || 0) +
+        Number(assignmentResult?.data?.returned || 0) +
+        Number(assignmentResult?.data?.created || 0) +
+        Number(assignmentResult?.data?.already_on_customer || 0);
+      if (processedCount < requestedCount) {
+        // Partial failure inside an auto-approve sweep has no UI surface to warn in (this runs headless
+        // on upload) — at minimum log the specific barcodes so "Delivered scan(s) with no renter" on the
+        // order detail page isn't the first place anyone finds out.
+        const detail =
+          (Array.isArray(assignmentResult?.data?.errors) && assignmentResult.data.errors.join('; ')) ||
+          (Array.isArray(assignmentResult?.data?.warnings) && assignmentResult.data.warnings.join('; ')) ||
+          'no detail returned';
+        logger.warn(
+          `Auto-approve: partial bottle assignment for record ${recordId}, order ${orderNumber} — ${processedCount}/${requestedCount} processed (${detail})`,
+        );
+      }
       logger.log(`Auto-approve: bottles assigned for record ${recordId}, order ${orderNumber}`);
     } catch (err) {
       logger.error('Auto-approve bottle assignment failed for record', recordId, err);

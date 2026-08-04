@@ -11,6 +11,7 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import {
   buildAssetPricingMap,
+  buildClassificationNodesById,
   buildCustomerOverrideMap,
   flattenCustomerPricingRowsToLegacyOverrides,
   computeMRRWithResolution,
@@ -25,16 +26,19 @@ const SubscriptionContext = createContext(null);
 /** PostgREST default max rows — page so large orgs are not silently truncated. */
 const PAGE_SIZE = 1000;
 
-/**
- * Columns needed for Rentals billing / backfill / orphan close.
- * Avoid select('*') — full bottle rows are the main payload cost on this page.
- */
-const BOTTLE_SELECT_NARROW =
-  'id, organization_id, barcode_number, barcode, product_code, product_type, asset_type, cylinder_type, gas_type, sku, display_label, description, name, asset_name, status, asset_status, ownership, assigned_customer, customer_id, customer_uuid, customer_name, classification_node_id, rental_start_date, delivery_date, purchase_date, location, days_at_location, created_at, last_location_update';
-
-function isUndefinedColumnError(err) {
-  return !!err && (err.code === '42703' || /column .* does not exist/i.test(String(err.message || '')));
-}
+const REALTIME_TABLES = [
+  'subscriptions',
+  'subscription_items',
+  'asset_type_pricing',
+  'asset_classification_nodes',
+  'customer_pricing',
+  'customer_pricing_overrides',
+  'subscription_invoices',
+  'payments',
+  'customers',
+  'lease_contracts',
+  'lease_contract_items',
+];
 
 export function SubscriptionProvider({ children }) {
   const { organization } = useAuth();
@@ -62,8 +66,6 @@ export function SubscriptionProvider({ children }) {
   const channelRef = useRef(null);
   /** Tracks the last successful (or attempted) fetch so we can throttle background refetches. */
   const lastFetchAtRef = useRef(0);
-  /** True after the first successful workspace paint — Update should not blank the page. */
-  const hasHydratedRef = useRef(false);
   /** Set to true while a fetch is in flight to avoid stacking concurrent refetches. */
   const fetchInFlightRef = useRef(false);
   /**
@@ -77,7 +79,6 @@ export function SubscriptionProvider({ children }) {
   useEffect(() => {
     if (!orgId) {
       missingTablesRef.current = new Set();
-      hasHydratedRef.current = false;
       return;
     }
     const key = `subscription-missing-tables:${orgId}`;
@@ -112,12 +113,12 @@ export function SubscriptionProvider({ children }) {
         || (fetchOptions.reconcile !== false && !runSilent);
       fetchInFlightRef.current = true;
       if (!runSilent) {
+        setLoading(true);
         setError(null);
-        if (!hasHydratedRef.current) setLoading(true);
       }
 
       try {
-      const withTimeout = (promise, label, ms = 20000) =>
+      const withTimeout = (promise, label, ms = 15000) =>
         Promise.race([
           promise,
           new Promise((_, reject) =>
@@ -184,57 +185,7 @@ export function SubscriptionProvider({ children }) {
         return { data: all, error: null };
       };
 
-      const fetchBottles = async () => {
-        let res = await safePaged(
-          'bottles',
-          () =>
-            supabase
-              .from('bottles')
-              .select(BOTTLE_SELECT_NARROW)
-              .eq('organization_id', orgId)
-              .order('id', { ascending: true }),
-        );
-        if (isUndefinedColumnError(res.error)) {
-          res = await safePaged(
-            'bottles',
-            () =>
-              supabase
-                .from('bottles')
-                .select('*')
-                .eq('organization_id', orgId)
-                .order('id', { ascending: true }),
-          );
-        }
-        return res;
-      };
-
-      const fetchOpenRentals = () =>
-        safePaged(
-          'rentals',
-          () =>
-            supabase
-              .from('rentals')
-              .select('*')
-              .eq('organization_id', orgId)
-              .is('rental_end_date', null)
-              .order('id', { ascending: true }),
-        );
-
-      const fetchCustomers = () =>
-        safePaged(
-          'customers',
-          () =>
-            supabase
-              .from('customers')
-              .select('*')
-              .eq('organization_id', orgId)
-              .order('id', { ascending: true }),
-        );
-
       const fetchClassificationNodes = async () => {
-        if (missingTablesRef.current.has('asset_classification_nodes')) {
-          return [];
-        }
         try {
           let cr = await supabase
             .from('asset_classification_nodes')
@@ -250,12 +201,7 @@ export function SubscriptionProvider({ children }) {
               .order('sort_order', { ascending: true })
               .order('name', { ascending: true });
           }
-          if (isMissingTableError(cr)) {
-            missingTablesRef.current.add('asset_classification_nodes');
-            persistMissingTables();
-            return [];
-          }
-          return !cr.error && cr.data ? cr.data : [];
+          return (!cr.error && cr.data) ? cr.data : [];
         } catch {
           return [];
         }
@@ -283,9 +229,20 @@ export function SubscriptionProvider({ children }) {
         safe('customer_pricing_overrides', supabase.from('customer_pricing_overrides').select('*').eq('organization_id', orgId)),
         safe('subscription_invoices', supabase.from('subscription_invoices').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('payments', supabase.from('payments').select('*').eq('organization_id', orgId).order('payment_date', { ascending: false })),
-        fetchCustomers(),
-        fetchBottles(),
-        fetchOpenRentals(),
+        safePaged('customers', () =>
+          supabase.from('customers').select('*').eq('organization_id', orgId).order('name').order('id', { ascending: true })
+        ),
+        safePaged('bottles', () =>
+          supabase
+            .from('bottles')
+            // Use broad select to tolerate schema differences across org databases.
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('id', { ascending: true })
+        ),
+        safePaged('rentals', () =>
+          supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null).order('id', { ascending: true })
+        ),
         safe('lease_contracts', supabase.from('lease_contracts').select('*').eq('organization_id', orgId).order('start_date', { ascending: false })),
         safe('lease_contract_items', supabase.from('lease_contract_items').select('*').eq('organization_id', orgId)),
         fetchClassificationNodes(),
@@ -303,26 +260,24 @@ export function SubscriptionProvider({ children }) {
       }));
       let openRentalsList = rentalsRes.data || [];
 
-      // Paint the Rentals UI as soon as reads finish — do not block on backfill/orphan writes.
-      if (mountedRef.current) {
-        setSubscriptions(subsRes.data || []);
-        setSubscriptionItems(itemsRes.data || []);
-        setAssetTypePricing(pricingRes.data || []);
-        setCustomerPricingRows(legacyPricingRes.data || []);
-        setCustomerPricingOverrides(overridesRes.data || []);
-        setInvoices(invoicesRes.data || []);
-        setPayments(paymentsRes.data || []);
-        setCustomers(custRes.data || []);
-        setBottles(bottlesList);
-        setOpenRentals(openRentalsList);
-        setLeaseContracts(leaseRes.data || []);
-        setLeaseContractItems(leaseItemsRes.data || []);
-        setClassificationNodes(classNodesList || []);
-        hasHydratedRef.current = true;
-        if (!runSilent) setLoading(false);
-      }
-
       if (runReconcile) {
+        // Build the pricing context from data already fetched above instead of letting the
+        // backfill step re-query customer_pricing/overrides/asset_type_pricing/customers/
+        // asset_classification_nodes on every reconcile pass.
+        const legacyFlatForBackfill = flattenCustomerPricingRowsToLegacyOverrides(legacyPricingRes.data || []);
+        const pricingCtxForBackfill = {
+          customerOverrideMap: buildCustomerOverrideMap({
+            legacyPricingOverrides: legacyFlatForBackfill,
+            customerPricingOverrides: overridesRes.data || [],
+            organizationId: orgId,
+            customers: custRes.data || [],
+          }),
+          assetPricingMap: buildAssetPricingMap(pricingRes.data || []),
+          defaults: defaultUnitRatesFromAssetPricingTable(pricingRes.data || []),
+          organizationId: orgId,
+          classificationNodes: classNodesList,
+          classificationNodesById: buildClassificationNodesById(classNodesList),
+        };
         // Loop until no more inserts so Update can backfill >500 bottles in one click.
         for (let pass = 0; pass < 20; pass += 1) {
           const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
@@ -332,10 +287,13 @@ export function SubscriptionProvider({ children }) {
               bottles: bottlesList,
               openRentals: openRentalsList,
               customers: custRes.data || [],
+              pricingCtx: pricingCtxForBackfill,
             },
           );
           if (backfillInserted <= 0) break;
-          const refetchRentals = await fetchOpenRentals();
+          const refetchRentals = await safePaged('rentals', () =>
+            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null).order('id', { ascending: true }),
+          );
           if (!refetchRentals.error && refetchRentals.data) {
             openRentalsList = refetchRentals.data;
           }
@@ -356,15 +314,28 @@ export function SubscriptionProvider({ children }) {
           console.warn('closeOrphanOpenRentalsForOrg:', orphanCloseErrors.join('; '));
         }
         if (orphansClosed > 0) {
-          const refetchAfterOrphans = await fetchOpenRentals();
+          const refetchAfterOrphans = await safePaged('rentals', () =>
+            supabase.from('rentals').select('*').eq('organization_id', orgId).is('rental_end_date', null).order('id', { ascending: true }),
+          );
           if (!refetchAfterOrphans.error && refetchAfterOrphans.data) {
             openRentalsList = refetchAfterOrphans.data;
           }
         }
-        if (mountedRef.current) {
-          setOpenRentals(openRentalsList);
-        }
       }
+
+      setSubscriptions(subsRes.data || []);
+      setSubscriptionItems(itemsRes.data || []);
+      setAssetTypePricing(pricingRes.data || []);
+      setCustomerPricingRows(legacyPricingRes.data || []);
+      setCustomerPricingOverrides(overridesRes.data || []);
+      setInvoices(invoicesRes.data || []);
+      setPayments(paymentsRes.data || []);
+      setCustomers(custRes.data || []);
+      setBottles(bottlesList);
+      setOpenRentals(openRentalsList);
+      setLeaseContracts(leaseRes.data || []);
+      setLeaseContractItems(leaseItemsRes.data || []);
+      if (mountedRef.current) setClassificationNodes(classNodesList);
       } catch (err) {
         console.error('SubscriptionContext fetch error:', err);
         if (mountedRef.current && !runSilent) setError(err.message);
@@ -413,12 +384,10 @@ export function SubscriptionProvider({ children }) {
     let debounceTimer = null;
     const scheduleSilentRefresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      // Keep short so Rentals reflects bottle/rental edits without a long wait;
-      // silent fetches skip reconcile so this is read-only and cheaper than Update.
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         fetchAll({ silent: true });
-      }, 1000);
+      }, 4000);
     };
 
     const channel = supabase.channel(`subscription-ctx-${orgId}`);
@@ -462,8 +431,8 @@ export function SubscriptionProvider({ children }) {
   useEffect(() => {
     if (!orgId) return;
     let debounceTimer = null;
-    /** Tab returns after edits elsewhere; 15s balances freshness vs repeating the workspace fetch too often. */
-    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 15_000;
+    /** Tab returns after edits elsewhere; 30s balances freshness vs repeating 11-query fetch too often. */
+    const VISIBILITY_REFRESH_MIN_INTERVAL_MS = 30_000;
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       const sinceLast = Date.now() - lastFetchAtRef.current;

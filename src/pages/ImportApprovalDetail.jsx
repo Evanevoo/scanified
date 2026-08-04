@@ -1287,16 +1287,73 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
     setRetryMissingAssignmentLoading(true);
     try {
+      // Guard: only assign/reconcile barcodes whose most recent scan ANYWHERE in the org actually
+      // belongs to this order. Without this, fixing an older order after a newer delivery to a
+      // different customer already happened silently reassigns the bottle back to the older (wrong)
+      // customer — confirmed on barcode 685952298 (delivered to Ens 7/29, then an older High Point
+      // order got "fixed" on 8/3 and clobbered it back to High Point). reconcileShippedBottleAssignments
+      // below is just as capable of doing this as the direct assign, so both need the same filter.
+      const normOrdForGuard = (n) => {
+        if (n == null || n === '') return '';
+        const s = String(n).trim();
+        return /^\d+$/.test(s) ? s.replace(/^0+/, '') || '0' : s;
+      };
+      const allCandidateBarcodes = [...new Set([...missingBarcodes, ...reconcileBarcodes])].filter(Boolean);
+      const staleBarcodes = [];
+      let currentBarcodes = missingBarcodes;
+      let filteredReconcileBarcodes = reconcileBarcodes;
+      if (allCandidateBarcodes.length > 0) {
+        const { data: latestScansAnywhere } = await supabase
+          .from('bottle_scans')
+          .select('bottle_barcode, order_number, mode, created_at')
+          .eq('organization_id', organization.id)
+          .in('bottle_barcode', allCandidateBarcodes);
+        const latestByBarcode = new Map();
+        (latestScansAnywhere || []).forEach((s) => {
+          const bc = String(s.bottle_barcode || '').trim();
+          if (!bc) return;
+          const t = new Date(s.created_at || 0).getTime();
+          const existing = latestByBarcode.get(bc);
+          if (!existing || t >= existing.time) {
+            latestByBarcode.set(bc, {
+              orderNumber: String(s.order_number || '').trim(),
+              mode: String(s.mode || '').toUpperCase(),
+              time: t,
+            });
+          }
+        });
+        const targetOrderNorm = normOrdForGuard(orderNum);
+        const isCurrent = (bc) => {
+          const latest = latestByBarcode.get(bc);
+          if (!latest) return true; // no scan history anywhere — safe to proceed from this order
+          return normOrdForGuard(latest.orderNumber) === targetOrderNorm;
+        };
+        currentBarcodes = missingBarcodes.filter((bc) => {
+          if (isCurrent(bc)) return true;
+          staleBarcodes.push(bc);
+          return false;
+        });
+        filteredReconcileBarcodes = reconcileBarcodes.filter((bc) => {
+          if (isCurrent(bc)) return true;
+          if (!staleBarcodes.includes(bc)) staleBarcodes.push(bc);
+          return false;
+        });
+      }
+
       let assignedCount = 0;
       let assignWarnings = null;
-      if (missingBarcodes.length > 0) {
+      if (staleBarcodes.length > 0) {
+        assignWarnings = `${staleBarcodes.length} barcode(s) skipped — a newer scan exists on a different order: ${staleBarcodes.join(', ')}. Fix that order instead.`;
+        logger.warn('handleFixDeliveredBottleAssignments: skipped stale barcodes', staleBarcodes);
+      }
+      if (currentBarcodes.length > 0) {
         const originalId = getOriginalId(invoiceNumber);
         const recordId = originalId ? coerceImportedRowPkForRpc(originalId) : null;
         const result = await bottleAssignmentService.assignBottles({
           organizationId: organization.id,
           customerId,
           customerName: displayCustomerName,
-          shipBarcodes: missingBarcodes,
+          shipBarcodes: currentBarcodes,
           returnBarcodes: [],
           importRecordId: recordId,
           importTable,
@@ -1304,12 +1361,16 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         });
         if (result.success) {
           assignedCount = result.data?.shipped ?? 0;
-          assignWarnings = result.data?.warnings;
+          if (result.data?.warnings) {
+            assignWarnings = assignWarnings
+              ? `${assignWarnings}; ${result.data.warnings}`
+              : result.data.warnings;
+          }
         } else {
-          assignWarnings = result.error;
+          assignWarnings = assignWarnings ? `${assignWarnings}; ${result.error}` : result.error;
           logger.warn('Fix delivered: assignBottles did not succeed, running reconcile', result.error);
         }
-      } else if (notFound.length > 0 && mismatchCount === 0) {
+      } else if (notFound.length > 0 && mismatchCount === 0 && staleBarcodes.length === 0) {
         setActionMessage(
           `No bottle rows found for: ${notFound.join(', ')}. Register these barcodes under Assets, then retry Fix delivered assignments.`,
         );
@@ -1319,7 +1380,7 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
       const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
         organizationId: organization.id,
-        shipBarcodes: reconcileBarcodes,
+        shipBarcodes: filteredReconcileBarcodes,
         customerId,
         customerName: displayCustomerName,
         orderNumber: String(orderNum).trim(),
@@ -1343,10 +1404,14 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
         setTimeout(() => setActionMessage(''), 12000);
         return;
       }
+      const staleNote =
+        staleBarcodes.length > 0
+          ? ` ⚠️ ${staleBarcodes.length} barcode(s) skipped (newer scan on a different order — fix that order instead): ${staleBarcodes.join(', ')}.`
+          : '';
       setActionMessage(
-        parts.length > 0
+        (parts.length > 0
           ? `Fixed delivered assignments (${parts.join('; ')}). Refreshing list…`
-          : 'Delivered assignments already match this order. Refreshing list…'
+          : 'Delivered assignments already match this order. Refreshing list…') + staleNote
       );
       setRefreshScannedBottlesTrigger((t) => t + 1);
       if (typeof refreshSilent === 'function') {
@@ -2277,11 +2342,19 @@ export default function ImportApprovalDetail({ invoiceNumber: propInvoiceNumber 
 
             if (errors.length > 0 && totalAssigned === 0) {
               setActionMessage(`Warning: ${errors.join('; ')}${reconcileNote}`);
+            } else if (errors.length > 0) {
+              // Partial failure: some barcodes on this order assigned fine, others didn't. Surfacing the
+              // specific barcodes here (not just a "(N warnings)" count) is what "Delivered scan(s) with
+              // no renter" on this page later has to catch instead — show it now, while it's actionable.
+              setActionMessage(
+                `Record verified — ${totalAssigned} bottle(s) processed, but ${errors.length} failed: ${errors.join('; ')}` +
+                (skipped > 0 ? ` (${skipped} skipped)` : '') +
+                reconcileNote
+              );
             } else {
               setActionMessage(
                 `Record verified successfully! ${totalAssigned} bottle(s) processed` +
                 (skipped > 0 ? `, ${skipped} skipped` : '') +
-                (errors.length > 0 ? ` (${errors.length} warnings)` : '') +
                 reconcileNote
               );
             }

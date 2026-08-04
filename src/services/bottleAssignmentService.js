@@ -13,6 +13,7 @@ import {
   isCustomerRowUuid,
 } from '../utils/resolveCustomerListId';
 import { findBottleRowByScanIdentifier } from '../utils/findBottleByScanIdentifier';
+import { findStaleBarcodesForOrder } from '../utils/bottleScanRecency';
 import { isSameCustomerIdentity } from '../utils/customerIdentityMatch';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssignedBottles';
@@ -157,10 +158,17 @@ async function assignShippedBottlesWithCustomerListId({
   let shipped = 0;
   const errors = [];
   const skipped = [];
+  const staleBarcodes = await findStaleBarcodesForOrder(supabase, organizationId, shipBarcodes, order);
 
   for (const rawBc of shipBarcodes || []) {
     const barcode = String(rawBc || '').trim();
     if (!barcode) continue;
+    if (staleBarcodes.has(barcode)) {
+      // A newer scan for this barcode belongs to a different order — assigning it to `order`'s
+      // customer here would clobber that newer delivery. Leave it alone; fix the newer order instead.
+      skipped.push(`${barcode}: newer scan exists on a different order`);
+      continue;
+    }
 
     const bottle = await findBottleRowByScanIdentifier(supabase, organizationId, barcode);
     if (!bottle) {
@@ -322,11 +330,26 @@ export const bottleAssignmentService = {
       const pImportId = importRecordIdForRpc(importRecordId);
       const hasReturns = Array.isArray(returnBarcodes) && returnBarcodes.length > 0;
 
+      // Filter out barcodes whose most recent scan belongs to a different, newer order BEFORE
+      // either write path (direct-ship or the assign_bottles_to_customer RPC) ever sees them —
+      // this order's approval must not clobber a delivery that has already moved on elsewhere
+      // (e.g. returned, refilled, and redelivered to someone else before this order got approved).
+      // Filtering here, once, covers the RPC path too, which is a Postgres function we can't
+      // patch from this codebase directly.
+      const staleShipBarcodes = await findStaleBarcodesForOrder(supabase, organizationId, shipBarcodes, orderNumber);
+      const safeShipBarcodes = (shipBarcodes || []).filter(
+        (bc) => !staleShipBarcodes.has(String(bc || '').trim()),
+      );
+      const staleSkippedNote =
+        staleShipBarcodes.size > 0
+          ? [`${staleShipBarcodes.size} barcode(s) skipped — newer scan on a different order: ${[...staleShipBarcodes].join(', ')}`]
+          : [];
+
       // Ship-only: direct bottle updates (skips RPC) when we can resolve CustomerListID (or customers.id fallback).
-      if ((resolved.id || resolved.customerListId) && shipBarcodes?.length && !hasReturns) {
+      if ((resolved.id || resolved.customerListId) && safeShipBarcodes.length && !hasReturns) {
         const early = await assignShippedBottlesWithCustomerListId({
           organizationId,
-          shipBarcodes,
+          shipBarcodes: safeShipBarcodes,
           customerRowId: resolved.id,
           customerListId: resolved.customerListId,
           customerName: displayName,
@@ -346,12 +369,12 @@ export const bottleAssignmentService = {
         logger.warn('bottleAssignmentService: direct ship assign failed, falling back to RPC', early.error);
       }
 
-      if (pCustomerUuid) {
+      if (pCustomerUuid && (safeShipBarcodes.length || hasReturns)) {
         const { data, error } = await supabase.rpc('assign_bottles_to_customer', {
           p_organization_id: organizationId,
           p_customer_id: pCustomerUuid,
           p_customer_name: displayName,
-          p_ship_barcodes: shipBarcodes,
+          p_ship_barcodes: safeShipBarcodes,
           p_return_barcodes: returnBarcodes,
           p_import_record_id: pImportId,
           p_import_table: importTable,
@@ -365,11 +388,11 @@ export const bottleAssignmentService = {
           logger.log('Bottle assignment result:', data);
           let resultData = { ...(data || {}) };
           const shipped = Number(resultData.shipped || 0);
-          if (shipped === 0 && shipBarcodes?.length) {
+          if (shipped === 0 && safeShipBarcodes.length) {
             const alreadyOnCustomer = await countShipBarcodesOnVerifyCustomer(
               supabase,
               organizationId,
-              shipBarcodes,
+              safeShipBarcodes,
               resolved.customerListId || resolved.id,
               displayName
             );
@@ -377,6 +400,9 @@ export const bottleAssignmentService = {
               resultData.shipped = alreadyOnCustomer;
               resultData.already_on_customer = alreadyOnCustomer;
             }
+          }
+          if (staleSkippedNote.length) {
+            resultData.warnings = [...(resultData.warnings || []), ...staleSkippedNote];
           }
           if (hasReturns) {
             await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
@@ -390,14 +416,14 @@ export const bottleAssignmentService = {
           return { success: true, data: resultData };
         }
 
-        if (error && resolved.id && isBottlesAssignedCustomerFkError(error) && shipBarcodes?.length) {
+        if (error && resolved.id && isBottlesAssignedCustomerFkError(error) && safeShipBarcodes.length) {
           logger.warn(
             'assign_bottles_to_customer failed bottles FK; using direct ship fallback (CustomerListID / id on bottles)',
             error.message
           );
           const fb = await assignShippedBottlesWithCustomerListId({
             organizationId,
-            shipBarcodes,
+            shipBarcodes: safeShipBarcodes,
             customerRowId: resolved.id,
             customerListId: resolved.customerListId,
             customerName: displayName,
@@ -419,6 +445,7 @@ export const bottleAssignmentService = {
               success: true,
               data: {
                 ...(fb.data || {}),
+                warnings: [...(fb.data?.warnings || []), ...staleSkippedNote],
                 note:
                   returnBarcodes?.length > 0
                     ? 'Ship barcodes were assigned via direct ship fallback; return barcodes finalized separately (rentals closed / inventory cleared).'
@@ -435,14 +462,14 @@ export const bottleAssignmentService = {
 
         if (data && data.success === false) {
           const derr = String(data.error || '');
-          if (resolved.id && shipBarcodes?.length && isBottlesAssignedCustomerFkError({ message: derr })) {
+          if (resolved.id && safeShipBarcodes.length && isBottlesAssignedCustomerFkError({ message: derr })) {
             logger.warn(
               'assign_bottles_to_customer returned failure with bottles FK; using direct ship fallback',
               derr
             );
             const fb = await assignShippedBottlesWithCustomerListId({
               organizationId,
-              shipBarcodes,
+              shipBarcodes: safeShipBarcodes,
               customerRowId: resolved.id,
               customerListId: resolved.customerListId,
               customerName: displayName,
@@ -464,6 +491,7 @@ export const bottleAssignmentService = {
                 success: true,
                 data: {
                   ...(fb.data || {}),
+                  warnings: [...(fb.data?.warnings || []), ...staleSkippedNote],
                   note:
                     returnBarcodes?.length > 0
                       ? 'Ship barcodes were assigned via direct ship fallback; return barcodes finalized separately (rentals closed / inventory cleared).'
@@ -476,10 +504,10 @@ export const bottleAssignmentService = {
         }
       }
 
-      if ((resolved.id || resolved.customerListId) && shipBarcodes?.length) {
-        return assignShippedBottlesWithCustomerListId({
+      if ((resolved.id || resolved.customerListId) && safeShipBarcodes.length) {
+        const fallback = await assignShippedBottlesWithCustomerListId({
           organizationId,
-          shipBarcodes,
+          shipBarcodes: safeShipBarcodes,
           customerRowId: resolved.id,
           customerListId: resolved.customerListId,
           customerName: displayName,
@@ -487,6 +515,18 @@ export const bottleAssignmentService = {
           defaultRentalAmount,
           defaultTaxRate,
         });
+        if (fallback.success && staleSkippedNote.length) {
+          fallback.data = { ...(fallback.data || {}), warnings: [...(fallback.data?.warnings || []), ...staleSkippedNote] };
+        }
+        return fallback;
+      }
+
+      if (staleShipBarcodes.size > 0 && !hasReturns) {
+        return {
+          success: false,
+          error: staleSkippedNote[0],
+          data: { shipped: 0, warnings: staleSkippedNote },
+        };
       }
 
       return {
