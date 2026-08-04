@@ -172,7 +172,7 @@ export default function ModernLandingPage() {
               </Badge>
             </motion.div>
             <motion.h1 
-              className="text-5xl md:text-7xl font-bold text-gray-900 mb-20 md:mb-32 leading-tight"
+              className="text-5xl md:text-7xl font-bold text-gray-900 mb-20 md:mb-32 leading-tight font-sans"
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.2 }}
@@ -185,7 +185,7 @@ export default function ModernLandingPage() {
                 transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.4 }}
               >
                 More{' '}
-                <span className="font-serif italic bg-gradient-to-r from-[#40B5AD] to-[#8B7BA8] bg-clip-text text-transparent">
+                <span className="font-serif italic text-gray-900">
                   visibility
                 </span>
                 .
