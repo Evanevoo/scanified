@@ -1,5 +1,5 @@
 import logger from '../utils/logger';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -369,6 +369,12 @@ export default function Settings() {
     email: user?.email || ''
   });
   const [profileChanged, setProfileChanged] = useState(false);
+  /**
+   * Baseline snapshot taken the moment real data lands, so the dirty-check effect below never
+   * compares live form state against a stale/default value while data is still loading (the
+   * cause of the false "Unsaved changes" badge on fresh page load). null until first synced.
+   */
+  const profilePristineRef = useRef(null);
 
   // Password
   const [currentPassword, setCurrentPassword] = useState('');
@@ -402,6 +408,7 @@ export default function Settings() {
     showAppIcon: true,
   });
   const [assetConfigChanged, setAssetConfigChanged] = useState(false);
+  const assetConfigPristineRef = useRef(null);
   const [appIconUploading, setAppIconUploading] = useState(false);
 
   // Barcode Format Configuration
@@ -418,6 +425,7 @@ export default function Settings() {
     serialNumberDescription: '2 letters followed by 8 digits',
   });
   const [barcodeConfigChanged, setBarcodeConfigChanged] = useState(false);
+  const barcodeConfigPristineRef = useRef(null);
 
 
   // Logo
@@ -491,14 +499,19 @@ export default function Settings() {
   // Initialize data
   useEffect(() => {
     if (profile) {
-      setProfileData({
+      const nextProfileData = {
         full_name: profile.full_name || '',
         email: user?.email || ''
-      });
+      };
+      setProfileData(nextProfileData);
+      // Capture the baseline in the same tick as the sync so the dirty-check effect below
+      // always has a matching pair to compare, instead of racing against it.
+      profilePristineRef.current = nextProfileData;
+      setProfileChanged(false);
     }
-    
+
     if (organization) {
-      setAssetConfig({
+      const nextAssetConfig = {
         assetType: organization.asset_type || 'cylinder',
         assetDisplayName: organization.asset_display_name || 'Gas Cylinder',
         assetDisplayNamePlural: organization.asset_display_name_plural || 'Gas Cylinders',
@@ -507,8 +520,11 @@ export default function Settings() {
         secondaryColor: organization.secondary_color || '#48C9B0',
         appIconUrl: organization.app_icon_url || '',
         showAppIcon: organization.show_app_icon !== false,
-      });
-      
+      };
+      setAssetConfig(nextAssetConfig);
+      assetConfigPristineRef.current = nextAssetConfig;
+      setAssetConfigChanged(false);
+
       // Load barcode config from organization's format_configuration
       const formatConfig = organization.format_configuration || {};
       const barcodeFormat = formatConfig.barcode_format || {
@@ -553,7 +569,7 @@ export default function Settings() {
         return 'custom';
       };
 
-      setBarcodeConfig({
+      const nextBarcodeConfig = {
         barcodeType: detectBarcodeType(barcodeFormat.pattern),
         barcodePattern: barcodeFormat.pattern,
         barcodeDescription: barcodeFormat.description,
@@ -564,42 +580,56 @@ export default function Settings() {
         serialNumberType: detectSerialNumberType(customerIdFormat.pattern),
         serialNumberPattern: customerIdFormat.pattern,
         serialNumberDescription: customerIdFormat.description,
-      });
-      
+      };
+      setBarcodeConfig(nextBarcodeConfig);
+      barcodeConfigPristineRef.current = nextBarcodeConfig;
+      setBarcodeConfigChanged(false);
+
+
       setLogoUrl(organization.logo_url || '');
     }
   }, [profile, organization]);
 
 
-  // Track changes
+  // Track changes — compare against the pristine snapshot captured when data was loaded
+  // (above), not against profile/organization directly. Comparing directly re-derives
+  // fallback defaults independently here, which can (a) momentarily disagree with the sync
+  // effect while profileData/assetConfig/barcodeConfig haven't re-rendered yet, and (b) use
+  // different fallback constants than the sync effect used, so it stays permanently "dirty".
+  // Skip the check entirely until a baseline actually exists (i.e. data has loaded once).
   useEffect(() => {
+    if (!profilePristineRef.current) return;
     setProfileChanged(
-      profileData.full_name !== (profile?.full_name || '')
+      profileData.full_name !== profilePristineRef.current.full_name
     );
-  }, [profileData, profile]);
+  }, [profileData]);
 
   useEffect(() => {
+    if (!assetConfigPristineRef.current) return;
+    const pristine = assetConfigPristineRef.current;
     setAssetConfigChanged(
-      assetConfig.assetType !== (organization?.asset_type || 'cylinder') ||
-      assetConfig.assetDisplayName !== (organization?.asset_display_name || '') ||
-      assetConfig.assetDisplayNamePlural !== (organization?.asset_display_name_plural || '') ||
-      assetConfig.appName !== (organization?.app_name || '') ||
-      assetConfig.primaryColor !== (organization?.primary_color || '#40B5AD') ||
-      assetConfig.secondaryColor !== (organization?.secondary_color || '#48C9B0') ||
-      assetConfig.appIconUrl !== (organization?.app_icon_url || '') ||
-      assetConfig.showAppIcon !== (organization?.show_app_icon !== false)
+      assetConfig.assetType !== pristine.assetType ||
+      assetConfig.assetDisplayName !== pristine.assetDisplayName ||
+      assetConfig.assetDisplayNamePlural !== pristine.assetDisplayNamePlural ||
+      assetConfig.appName !== pristine.appName ||
+      assetConfig.primaryColor !== pristine.primaryColor ||
+      assetConfig.secondaryColor !== pristine.secondaryColor ||
+      assetConfig.appIconUrl !== pristine.appIconUrl ||
+      assetConfig.showAppIcon !== pristine.showAppIcon
     );
-  }, [assetConfig, organization]);
+  }, [assetConfig]);
 
   useEffect(() => {
+    if (!barcodeConfigPristineRef.current) return;
+    const pristine = barcodeConfigPristineRef.current;
     setBarcodeConfigChanged(
-      barcodeConfig.barcodePattern !== (organization?.format_configuration?.barcode_format?.pattern || '^[A-Z0-9]{6,12}$') ||
-      barcodeConfig.barcodeDescription !== (organization?.format_configuration?.barcode_format?.description || '6-12 alphanumeric characters') ||
-      barcodeConfig.orderNumberPattern !== (organization?.format_configuration?.order_number_format?.pattern || '^ORD[0-9]{6}$') ||
-      barcodeConfig.orderNumberDescription !== (organization?.format_configuration?.order_number_format?.description || 'ORD followed by 6 digits') ||
-      barcodeConfig.orderNumberPrefix !== (organization?.format_configuration?.order_number_format?.prefix || 'ORD') ||
-      barcodeConfig.serialNumberPattern !== (organization?.format_configuration?.customer_id_format?.pattern || '^[A-Z0-9]{4,10}$') ||
-      barcodeConfig.serialNumberDescription !== (organization?.format_configuration?.customer_id_format?.description || '4-10 alphanumeric characters')
+      barcodeConfig.barcodePattern !== pristine.barcodePattern ||
+      barcodeConfig.barcodeDescription !== pristine.barcodeDescription ||
+      barcodeConfig.orderNumberPattern !== pristine.orderNumberPattern ||
+      barcodeConfig.orderNumberDescription !== pristine.orderNumberDescription ||
+      barcodeConfig.orderNumberPrefix !== pristine.orderNumberPrefix ||
+      barcodeConfig.serialNumberPattern !== pristine.serialNumberPattern ||
+      barcodeConfig.serialNumberDescription !== pristine.serialNumberDescription
     );
 
     // Load invoice template
