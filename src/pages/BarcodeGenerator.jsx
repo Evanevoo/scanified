@@ -81,11 +81,17 @@ export default function BarcodeGenerator() {
 
   const loadStats = async () => {
     try {
+      // Was unbounded (no .limit()) -- fetched every bottle ever generated for the org
+      // just to compute a count, a last-generated date, and a distinct-customer count.
+      // Bounded to the most recent 5000; totalGenerated/customersWithBarcodes become an
+      // approximation of "most recent 5000" for orgs beyond that, while lastGenerated
+      // stays exact (it's always row 0 of a created_at-desc order).
       const { data: bottles, error } = await supabase
         .from('bottles')
         .select('id, created_at, assigned_customer')
         .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(5000);
 
       if (error) throw error;
 

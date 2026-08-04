@@ -105,7 +105,10 @@ export default function PalletManagement() {
 
       const orgId = profile.organization_id;
 
-      // Fetch pallets, templates, and items in parallel
+      // Fetch pallets, templates, and items in parallel. All three are unbounded
+      // org-wide reads -- cap each so a long-lived org's full pallet/item history can't
+      // trigger a Postgres statement timeout on this page (pallet_items especially, since
+      // it accumulates one row per scanned bottle ever placed on a pallet).
       const [palletsResult, templatesResult, itemsResult] = await Promise.all([
         supabase
           .from('pallets')
@@ -115,14 +118,16 @@ export default function PalletManagement() {
             items:pallet_items(count)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('pallet_templates')
           .select('*')
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(1000),
+
         supabase
           .from('pallet_items')
           .select(`
@@ -132,6 +137,7 @@ export default function PalletManagement() {
           `)
           .eq('organization_id', orgId)
           .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       if (palletsResult.error) throw palletsResult.error;

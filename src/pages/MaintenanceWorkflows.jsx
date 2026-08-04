@@ -121,6 +121,8 @@ export default function MaintenanceWorkflows() {
       const orgId = profile.organization_id;
 
       // Fetch workflows, templates, and tasks in parallel
+      // Bounded with .limit() -- these were previously unbounded org-wide scans that
+      // could pull an org's entire history and trip Postgres statement timeouts.
       const [workflowsResult, templatesResult, tasksResult] = await Promise.all([
         supabase
           .from('maintenance_workflows')
@@ -130,14 +132,16 @@ export default function MaintenanceWorkflows() {
             created_user:profiles!maintenance_workflows_created_by_fkey(full_name, email)
           `)
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(2000),
+
         supabase
           .from('maintenance_templates')
           .select('*')
           .eq('organization_id', orgId)
-          .order('created_at', { ascending: false }),
-        
+          .order('created_at', { ascending: false })
+          .limit(1000),
+
         supabase
           .from('maintenance_tasks')
           .select(`
@@ -148,6 +152,7 @@ export default function MaintenanceWorkflows() {
           `)
           .eq('organization_id', orgId)
           .order('due_date', { ascending: true })
+          .limit(5000)
       ]);
 
       if (workflowsResult.error) throw workflowsResult.error;

@@ -88,10 +88,15 @@ export default function ComprehensiveRoleManager() {
     logger.log('🔄 fetchRoles called - refreshing roles list');
     try {
       // Fetch from roles table (UUID-based)
+      // NOTE: intentionally not filtered by organization_id -- this matches the
+      // existing behavior elsewhere in this file where the `roles` table is treated
+      // as a shared/global list (not touching that authorization logic here).
+      // .limit() only adds a defensive upper bound against unbounded growth.
       const { data: rolesData, error: rolesError } = await supabase
         .from('roles')
         .select('*')
-        .order('name');
+        .order('name')
+        .limit(1000);
 
       logger.log('📊 Roles query result:', { rolesData, rolesError });
 
@@ -125,11 +130,14 @@ export default function ComprehensiveRoleManager() {
   const fetchRolePermissions = async () => {
     setLoading(true);
     try {
+      // Bounded with .limit() as a defensive cap -- normally small (one row per role
+      // per org) but guards against unbounded growth over time.
       const { data, error } = await supabase
         .from('role_permissions')
         .select('*')
         .eq('organization_id', organization?.id || 'global')
-        .order('role_name');
+        .order('role_name')
+        .limit(500);
 
       if (error && error.code !== 'PGRST116') {
         logger.error('Error fetching role permissions:', error);

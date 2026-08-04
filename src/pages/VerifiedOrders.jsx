@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -49,14 +49,19 @@ import {
   supplementImportRowsForScannedOrders,
 } from '../utils/verifiedOrdersList';
 import { resolveOrderNumberFromListEntry } from '../utils/verifiedOrdersDedup';
+import { useDebounce } from '../utils/performance';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
   const navigate = useNavigate();
   const [verifiedOrders, setVerifiedOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // Raw `search` updates every keystroke so the input feels instant; the actual filter pass
+  // (below, over the full verifiedOrders list) runs against the debounced value so typing
+  // doesn't recompute getOrderNumber/getCustomerName (which parse nested JSON per order) on
+  // every character.
+  const debouncedSearch = useDebounce(search, 280);
   const [typeFilter, setTypeFilter] = useState('all'); // all, invoice, receipt, scanned
   const [dateFilter, setDateFilter] = useState('all'); // all, today, week, month
   const [page, setPage] = useState(0);
@@ -75,10 +80,6 @@ export default function VerifiedOrders() {
       fetchVerifiedOrders();
     }
   }, [organization?.id]);
-
-  useEffect(() => {
-    applyFilters();
-  }, [verifiedOrders, search, typeFilter, dateFilter]);
 
   const fetchVerifiedOrders = async () => {
     try {
@@ -99,20 +100,24 @@ export default function VerifiedOrders() {
         { data: pendingReceipts, error: pendingRecErr },
         { data: bottleScansList, error: bottleScanError },
       ] = await Promise.all([
+        // Verified/approved history grows without bound over the org's lifetime -- ordered
+        // by recency + capped so this doesn't fetch every order ever verified on every load.
         supabase
           .from('imported_invoices')
           .select('*')
           .eq('organization_id', organization.id)
           .in('status', ['verified', 'approved'])
           .order('approved_at', { ascending: false })
-          .order('verified_at', { ascending: false }),
+          .order('verified_at', { ascending: false })
+          .limit(5000),
         supabase
           .from('imported_sales_receipts')
           .select('*')
           .eq('organization_id', organization.id)
           .in('status', ['verified', 'approved'])
           .order('approved_at', { ascending: false })
-          .order('verified_at', { ascending: false }),
+          .order('verified_at', { ascending: false })
+          .limit(5000),
         supabase
           .from('imported_invoices')
           .select('*')
@@ -128,7 +133,8 @@ export default function VerifiedOrders() {
           .select('id, bottle_barcode, order_number, mode, organization_id, customer_name, customer_id, created_at')
           .eq('organization_id', organization.id)
           .not('order_number', 'is', null)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .limit(5000),
       ]);
 
       if (invoiceError) {
@@ -251,95 +257,79 @@ export default function VerifiedOrders() {
 
       const allOrders = [...importOrderRows, ...scannedOrders];
       
-      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
+      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals.
+      // Was a sequential await-in-loop issuing up to 2 Supabase round-trips per order
+      // (rentals, then bottle_scans) -- O(orders) queries. Now: one pass to figure out
+      // which orders actually need the fallback and collect their order numbers, one
+      // batched query per table for all of them, then apply results back. Same
+      // priority (rentals beats bottle_scans) and same "first match wins" behavior per
+      // order number as before -- just not one round-trip at a time.
+      const ordersNeedingFallback = [];
+      const fallbackOrderNums = new Set();
       for (const order of allOrders) {
         // First, try to extract customer name from invoice data using getCustomerName function
         // This properly checks all possible locations in the invoice data
         const customerNameFromInvoice = getCustomerName(order);
-        
+
         if (customerNameFromInvoice && customerNameFromInvoice !== 'N/A' && customerNameFromInvoice !== 'Unknown') {
           // Invoice has customer name - use it (this is the source of truth)
           order.customer_name = customerNameFromInvoice;
           if (!order.data_parsed) order.data_parsed = {};
           order.data_parsed.customer_name = customerNameFromInvoice;
-          logger.log(`✅ Found customer name from invoice data for order: ${customerNameFromInvoice}`);
         } else {
           // Invoice doesn't have customer name - fallback to bottle_scans or rentals
-          // Extract order number manually (getOrderNumber is defined later)
           let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
           if (!orderNum && order.data_parsed?.rows && order.data_parsed.rows.length > 0) {
             const firstRow = order.data_parsed.rows[0];
             orderNum = firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
           }
           if (orderNum && orderNum !== 'N/A') {
-            // Try to get customer name from rentals table first (more reliable than bottle_scans)
-            const { data: rentals } = await supabase
-              .from('rentals')
-              .select('customer_name')
-              .eq('order_number', orderNum)
-              .eq('organization_id', organization.id)
-              .limit(1);
-            
-            if (rentals && rentals.length > 0 && rentals[0].customer_name) {
-              order.customer_name = rentals[0].customer_name;
-              if (!order.data_parsed) order.data_parsed = {};
-              order.data_parsed.customer_name = rentals[0].customer_name;
-              logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentals[0].customer_name}`);
-            } else {
-              // Last resort: try to get customer name from bottle_scans (may be incorrect)
-              const { data: bottleScans } = await supabase
-                .from('bottle_scans')
-                .select('customer_name')
-                .eq('order_number', orderNum)
-                .eq('organization_id', organization.id)
-                .limit(1);
-              
-              if (bottleScans && bottleScans.length > 0 && bottleScans[0].customer_name) {
-                order.customer_name = bottleScans[0].customer_name;
-                if (!order.data_parsed) order.data_parsed = {};
-                order.data_parsed.customer_name = bottleScans[0].customer_name;
-                logger.log(`⚠️ Found customer name from bottle_scans for order ${orderNum} (fallback): ${bottleScans[0].customer_name}`);
-              }
-            }
+            ordersNeedingFallback.push({ order, orderNum });
+            fallbackOrderNums.add(orderNum);
+          }
+        }
+      }
+
+      if (fallbackOrderNums.size > 0) {
+        const orderNumList = Array.from(fallbackOrderNums);
+        const [{ data: fallbackRentals }, { data: fallbackScans }] = await Promise.all([
+          supabase
+            .from('rentals')
+            .select('order_number, customer_name')
+            .in('order_number', orderNumList)
+            .eq('organization_id', organization.id),
+          supabase
+            .from('bottle_scans')
+            .select('order_number, customer_name')
+            .in('order_number', orderNumList)
+            .eq('organization_id', organization.id),
+        ]);
+
+        const rentalNameByOrderNum = new Map();
+        (fallbackRentals || []).forEach((r) => {
+          if (r.customer_name && !rentalNameByOrderNum.has(r.order_number)) {
+            rentalNameByOrderNum.set(r.order_number, r.customer_name);
+          }
+        });
+        const scanNameByOrderNum = new Map();
+        (fallbackScans || []).forEach((s) => {
+          if (s.customer_name && !scanNameByOrderNum.has(s.order_number)) {
+            scanNameByOrderNum.set(s.order_number, s.customer_name);
+          }
+        });
+
+        for (const { order, orderNum } of ordersNeedingFallback) {
+          const name = rentalNameByOrderNum.get(orderNum) || scanNameByOrderNum.get(orderNum);
+          if (name) {
+            order.customer_name = name;
+            if (!order.data_parsed) order.data_parsed = {};
+            order.data_parsed.customer_name = name;
           }
         }
       }
 
       // One row per order number; invoice beats scanned when names differ (e.g. QB vs scan customer).
       const deduplicatedOrders = dedupeVerifiedOrdersByOrderNumber(allOrders);
-
-      // #region agent log
-      {
-        const probeNorm = '75794';
-        const normProbe = (o) =>
-          normalizeOrderNumForList(resolveOrderNumberFromListEntry(o) || o.order_number);
-        const pick = (list) =>
-          (list || [])
-            .filter((o) => normProbe(o) === probeNorm)
-            .map((o) => ({ type: o.type, displayType: o.displayType, id: String(o.id || '').slice(0, 24) }));
-        if (typeof fetch === 'function') {
-          fetch('http://127.0.0.1:7758/ingest/242000ab-af8f-404d-8cf3-4f163de25904', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fb3b83' },
-            body: JSON.stringify({
-              sessionId: 'fb3b83',
-              runId: 'post-fix-v2',
-              hypothesisId: 'V1-V3',
-              location: 'VerifiedOrders.jsx:fetchVerifiedOrders',
-              message: 'verified orders assembly for 75794',
-              data: {
-                importRows: pick(importOrderRows),
-                scannedRaw: pick(scannedOrdersRaw),
-                scannedKept: pick(scannedOrders),
-                deduped: pick(deduplicatedOrders),
-                inVerifiedOrderNums: verifiedOrderNums.has(probeNorm),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-        }
-      }
-      // #endregion
 
       // Sort by latest first (approved_at / verified_at / created_at descending)
       const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
@@ -389,62 +379,6 @@ export default function VerifiedOrders() {
   };
 
   const parseDataField = parseImportDataField;
-
-  const applyFilters = () => {
-    let filtered = [...verifiedOrders];
-
-    // Type filter: match exact type (invoice, receipt, scanned)
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(order => (order.type || '') === typeFilter);
-    }
-
-    // Date filter: use approved_at first (what we set on verify), then verified_at, then created_at
-    if (dateFilter !== 'all') {
-      const now = new Date();
-      const filterDate = new Date();
-      
-      switch (dateFilter) {
-        case 'today':
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'week':
-          filterDate.setDate(now.getDate() - 7);
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'month':
-          filterDate.setMonth(now.getMonth() - 1);
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-      }
-
-      filtered = filtered.filter(order => {
-        const orderDate = new Date(order.approved_at || order.verified_at || order.created_at || 0);
-        return orderDate >= filterDate;
-      });
-    }
-
-    // Search filter: use same getters as display so search matches what user sees
-    if (search.trim()) {
-      const searchLower = search.toLowerCase().trim();
-      filtered = filtered.filter(order => {
-        const orderNum = String(getOrderNumber(order) || '').toLowerCase();
-        const customerName = String(getCustomerName(order) || '').toLowerCase();
-        const refNum = String(order.data_parsed?.reference_number || order.data_parsed?.invoice_number || '').toLowerCase();
-        return (
-          orderNum.includes(searchLower) ||
-          customerName.includes(searchLower) ||
-          refNum.includes(searchLower)
-        );
-      });
-    }
-
-    // Keep sort by latest first
-    const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
-    filtered.sort((a, b) => getOrderDate(b) - getOrderDate(a));
-
-    setFilteredOrders(filtered);
-    setPage(0); // Reset to first page when filters change
-  };
 
   // Normalize order number for matching (trim, strip leading zeros for numeric)
   const normalizeOrderNumForReverse = (num) => {
@@ -999,6 +933,70 @@ export default function VerifiedOrders() {
     const rows = order.data_parsed?.rows || order.data_parsed?.line_items || [];
     return rows.length;
   };
+
+  // Was recomputed via setState-in-useEffect on every `search` keystroke (no debounce),
+  // rerunning type/date/search filtering -- including getOrderNumber/getCustomerName, which
+  // parse nested JSON per order -- over the full verifiedOrders list each time. Memoized so
+  // it only reruns when the underlying data or (debounced) filter inputs actually change.
+  const filteredOrders = useMemo(() => {
+    let filtered = [...verifiedOrders];
+
+    // Type filter: match exact type (invoice, receipt, scanned)
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(order => (order.type || '') === typeFilter);
+    }
+
+    // Date filter: use approved_at first (what we set on verify), then verified_at, then created_at
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      const filterDate = new Date();
+
+      switch (dateFilter) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          filterDate.setDate(now.getDate() - 7);
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'month':
+          filterDate.setMonth(now.getMonth() - 1);
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+      }
+
+      filtered = filtered.filter(order => {
+        const orderDate = new Date(order.approved_at || order.verified_at || order.created_at || 0);
+        return orderDate >= filterDate;
+      });
+    }
+
+    // Search filter: use same getters as display so search matches what user sees
+    if (debouncedSearch.trim()) {
+      const searchLower = debouncedSearch.toLowerCase().trim();
+      filtered = filtered.filter(order => {
+        const orderNum = String(getOrderNumber(order) || '').toLowerCase();
+        const customerName = String(getCustomerName(order) || '').toLowerCase();
+        const refNum = String(order.data_parsed?.reference_number || order.data_parsed?.invoice_number || '').toLowerCase();
+        return (
+          orderNum.includes(searchLower) ||
+          customerName.includes(searchLower) ||
+          refNum.includes(searchLower)
+        );
+      });
+    }
+
+    // Keep sort by latest first
+    const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
+    filtered.sort((a, b) => getOrderDate(b) - getOrderDate(a));
+
+    return filtered;
+  }, [verifiedOrders, debouncedSearch, typeFilter, dateFilter]);
+
+  // Reset to first page whenever the filtered set changes underneath the current page.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, typeFilter, dateFilter]);
 
   if (loading) {
     return (

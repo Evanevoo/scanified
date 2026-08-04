@@ -257,7 +257,14 @@ export default function LeaseAgreements() {
       if (!profile?.organization_id) return;
       if (fullPage) setLoading(true);
       try {
-        const data = await fetchBillingWorkspaceData(profile.organization_id);
+        // This page only ever reads leaseAgreements/customersData/allBottles -- skip the
+        // other 5 unbounded queries (rentals, a duplicate bottles-joined-to-customers
+        // query, locations, customer_pricing, organization_rental_classes) that
+        // fetchBillingWorkspaceData otherwise runs unconditionally. Was re-fetching all
+        // 8 on every load, save, delete, and renew.
+        const data = await fetchBillingWorkspaceData(profile.organization_id, {
+          skip: ['rentalsData', 'assignedBottles', 'locationsData', 'customerPricing', 'organizationRentalClasses'],
+        });
         setAgreements((data.leaseAgreements || []).filter(Boolean));
         setCustomers(data.customersData);
         setStats(computeLeaseAgreementStats(data.leaseAgreements));
@@ -347,7 +354,9 @@ export default function LeaseAgreements() {
 
   const fetchFreshBillingWorkspace = useCallback(async () => {
     if (!profile?.organization_id) throw new Error('No organization.');
-    return fetchBillingWorkspaceData(profile.organization_id);
+    return fetchBillingWorkspaceData(profile.organization_id, {
+      skip: ['rentalsData', 'assignedBottles', 'locationsData', 'customerPricing', 'organizationRentalClasses'],
+    });
   }, [profile?.organization_id]);
 
   const handleExportLeaseQuickBooksCsv = useCallback(async () => {
@@ -857,6 +866,19 @@ export default function LeaseAgreements() {
     });
   }, [agreements, debouncedSearch, statusFilter, activeTab]);
 
+  /** Tab-label counts. Were two separate `agreements.filter(...).length` calls inline in
+   *  JSX -- ran on every render (every keystroke in search, before the debounce even
+   *  applies, since the parent re-renders regardless) instead of only when `agreements`
+   *  actually changes. */
+  const agreementStatusCounts = useMemo(() => {
+    const counts = { expired: 0, renewed: 0 };
+    for (const a of agreements) {
+      if (a?.status === 'expired') counts.expired += 1;
+      else if (a?.status === 'renewed') counts.renewed += 1;
+    }
+    return counts;
+  }, [agreements]);
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -1162,8 +1184,8 @@ export default function LeaseAgreements() {
         <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, minHeight: 52 } }}>
           <Tab label={`All (${agreements.length})`} />
           <Tab label={`Active (${stats.activeAgreements})`} />
-          <Tab label={`Expired (${agreements.filter((a) => a.status === 'expired').length})`} />
-          <Tab label={`Renewed (${agreements.filter((a) => a.status === 'renewed').length})`} />
+          <Tab label={`Expired (${agreementStatusCounts.expired})`} />
+          <Tab label={`Renewed (${agreementStatusCounts.renewed})`} />
         </Tabs>
       </Box>
 

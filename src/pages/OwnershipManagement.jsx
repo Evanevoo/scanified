@@ -126,12 +126,15 @@ export default function OwnershipManagement() {
       setLoading(true);
       setError('');
       
-      // Load bottles
+      // Load bottles. This page manages ownership across an org's whole fleet, so it
+      // genuinely needs a broad read -- but still cap it so a very large org can't hit a
+      // Postgres statement timeout (same pattern applied to Subscriptions.jsx).
       const { data: bottlesData, error: bottlesError } = await supabase
         .from('bottles')
         .select('id, barcode_number, serial_number, product_code, gas_type, ownership, status, location, customer_name')
         .eq('organization_id', organization.id)
-        .order('barcode_number');
+        .order('barcode_number')
+        .limit(5000);
       
       if (bottlesError) throw bottlesError;
       
@@ -149,12 +152,14 @@ export default function OwnershipManagement() {
 
   const loadOwnershipValues = async () => {
     try {
-      // First, try to load from ownership_values table
+      // First, try to load from ownership_values table. Naturally small (one row per
+      // distinct ownership label an org uses), but capped defensively for consistency.
       const { data: ownershipData, error: ownershipError } = await supabase
         .from('ownership_values')
         .select('*')
         .eq('organization_id', organization.id)
-        .order('value');
+        .order('value')
+        .limit(1000);
       
       if (ownershipError && ownershipError.code !== 'PGRST116') {
         // If error is not "table doesn't exist", throw it
@@ -164,13 +169,15 @@ export default function OwnershipManagement() {
       if (ownershipData && ownershipData.length > 0) {
         setOwnershipValues(ownershipData);
       } else {
-        // Fallback: Extract unique ownership values from bottles
+        // Fallback: Extract unique ownership values from bottles. Same org-wide bottles
+        // table as loadData() above -- bound it the same way.
         const { data: bottlesData } = await supabase
           .from('bottles')
           .select('ownership')
           .eq('organization_id', organization.id)
           .not('ownership', 'is', null)
-          .not('ownership', 'eq', '');
+          .not('ownership', 'eq', '')
+          .limit(5000);
         
         const uniqueValues = [...new Set(bottlesData?.map(b => b.ownership).filter(Boolean))];
         const ownershipObjects = uniqueValues.map(value => ({

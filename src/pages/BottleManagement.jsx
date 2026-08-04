@@ -95,6 +95,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { formatLocationDisplay } from '../utils/locationDisplay';
 import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
+import { useDebounce } from '../utils/performance';
 
 import * as XLSX from 'xlsx';
 
@@ -113,6 +114,10 @@ const BottleManagement = () => {
   const [loading, setLoading] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState('');
+  // The raw searchTerm updates on every keystroke (so the input feels instant); the query
+  // below runs against the debounced value so typing doesn't fire a Supabase request (and a
+  // second, unrelated org-wide customers fetch) on every single character.
+  const debouncedSearchTerm = useDebounce(searchTerm, 280);
 
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -170,7 +175,7 @@ const BottleManagement = () => {
 
     }
 
-  }, [organization, page, rowsPerPage, searchTerm, statusFilter]); // Re-load when search/filter changes
+  }, [organization, page, rowsPerPage, debouncedSearchTerm, statusFilter]); // Re-load when search/filter changes
 
 
 
@@ -208,9 +213,9 @@ const BottleManagement = () => {
 
       // Apply search filter at database level for better performance
 
-      if (searchTerm) {
+      if (debouncedSearchTerm) {
 
-        const ilikeOperand = postgrestQuotedIlikeContains(searchTerm);
+        const ilikeOperand = postgrestQuotedIlikeContains(debouncedSearchTerm);
         if (ilikeOperand) {
           query = query.or(`serial_number.ilike.${ilikeOperand},barcode_number.ilike.${ilikeOperand},customer_name.ilike.${ilikeOperand},description.ilike.${ilikeOperand}`);
         }
@@ -297,6 +302,8 @@ const BottleManagement = () => {
 
     try {
 
+      // Org-wide select with no natural bound -- capped defensively (this ran
+      // unbounded on every keystroke before the search input was debounced above).
       const { data, error } = await supabase
 
         .from('customers')
@@ -305,7 +312,9 @@ const BottleManagement = () => {
 
         .eq('organization_id', organization.id)
 
-        .order('name');
+        .order('name')
+
+        .limit(5000);
 
 
 
@@ -725,8 +734,11 @@ const BottleManagement = () => {
               
 
               // Check if customer already exists in database OR is already queued for creation
+              // customerMap keys are already stored uppercased (see loadCustomers/upsert below),
+              // so a direct .has() lookup replaces an O(existingCustomers) rebuild-and-scan that
+              // used to run once per unique customer in the uploaded file.
 
-              const customerAlreadyExists = Array.from(customerMap.keys()).some(key => key.toUpperCase() === customerId);
+              const customerAlreadyExists = customerMap.has(customerId);
 
               const customerAlreadyQueued = customersToCreate.some(c => c.CustomerListID.toUpperCase() === customerId);
 
@@ -1491,6 +1503,12 @@ const BottleManagement = () => {
           description: editingBottle.description,
 
           gas_type: editingBottle.gas_type,
+
+          // 'type' is a separate legacy column that several pages (e.g. Assets.jsx)
+          // read for display/grouping instead of gas_type. It's only ever set at
+          // CSV import time otherwise, so it goes stale the moment gas_type is
+          // edited here unless we keep it in sync explicitly.
+          type: editingBottle.gas_type,
 
           status: editingBottle.status,
 

@@ -154,30 +154,41 @@ export default function CustomerPricingOverrides() {
       if (!organization?.id) return;
       try {
         const [custRes, bottleRes, bottleCustomerRes, rentalsRes, leaseRes] = await Promise.all([
+          // Unbounded org-wide reads: order by recency + cap so a large org can't trigger a
+          // Postgres statement timeout or drag page load down (see Subscriptions.jsx fix).
           supabase
             .from('customers')
             .select('id, CustomerListID, name, Name')
             .eq('organization_id', organization.id)
-            .order('name'),
+            .order('name')
+            .limit(5000),
           supabase
             .from('bottles')
             .select('product_code')
             .eq('organization_id', organization.id)
-            .not('product_code', 'is', null),
+            .not('product_code', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(5000),
           supabase
             .from('bottles')
             .select('assigned_customer, customer_id, customer_name')
-            .eq('organization_id', organization.id),
+            .eq('organization_id', organization.id)
+            .order('created_at', { ascending: false })
+            .limit(5000),
           supabase
             .from('rentals')
             .select('customer_id, customer_name')
             .eq('organization_id', organization.id)
-            .is('rental_end_date', null),
+            .is('rental_end_date', null)
+            .order('created_at', { ascending: false })
+            .limit(5000),
           supabase
             .from('lease_agreements')
             .select('customer_id, customer_name')
             .eq('organization_id', organization.id)
-            .eq('status', 'active'),
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(5000),
         ]);
         if (!active) return;
         if (!custRes.error) setFallbackCustomers(custRes.data || []);
@@ -233,10 +244,14 @@ export default function CustomerPricingOverrides() {
           }
           setFallbackLeaseCustomers([...byId.values()]);
         }
+        // Legacy per-customer pricing rows -- bound + order by recency to avoid an unbounded
+        // org-wide scan on large orgs (matches the fix applied to the queries above).
         const { data: legacyPricingRows, error: legacyPricingErr } = await supabase
           .from('customer_pricing')
           .select('*')
-          .eq('organization_id', organization.id);
+          .eq('organization_id', organization.id)
+          .order('created_at', { ascending: false })
+          .limit(5000);
         if (!legacyPricingErr) {
           const mapped = [];
           for (const row of legacyPricingRows || []) {
@@ -317,6 +332,18 @@ export default function CustomerPricingOverrides() {
     () => [...new Set(customerOptions.map((c) => canonicalCustomerListId(c)).filter(Boolean))],
     [customerOptions]
   );
+  // Built once per customerOptions change so `enriched` below can do an O(1) lookup per
+  // row instead of an O(customerOptions.length) .find() per row (that combo made customer
+  // name resolution O(rows * customers), which gets slow once both lists are large).
+  const customerOptionsById = useMemo(() => {
+    const m = new Map();
+    for (const c of customerOptions) {
+      if (c.id != null) m.set(String(c.id), c);
+      if (c.CustomerListID != null) m.set(String(c.CustomerListID), c);
+    }
+    return m;
+  }, [customerOptions]);
+
   const handleSelectAllCustomers = () => setBulkCustomers(allCustomerIds);
   const handleClearAllCustomers = () => setBulkCustomers([]);
   const selectedBulkCustomerOptions = useMemo(
@@ -370,10 +397,10 @@ export default function CustomerPricingOverrides() {
     }
 
     return [...merged.values()].map((o) => {
-      const cust = customerOptions.find((c) => c.id === o.customer_id || c.CustomerListID === o.customer_id);
+      const cust = customerOptionsById.get(String(o.customer_id));
       return { ...o, customerName: cust?.name || cust?.Name || o.customer_id };
     });
-  }, [ctx.customerPricingOverrides, legacyOverrides, customerOptions, fallbackLeaseCustomers]);
+  }, [ctx.customerPricingOverrides, legacyOverrides, customerOptionsById, fallbackLeaseCustomers]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return enriched;

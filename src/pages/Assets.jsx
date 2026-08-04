@@ -67,7 +67,11 @@ async function exportAllBottlesToCSV(organizationId) {
       .from('bottles')
       .select('*')
       .eq('organization_id', organizationId)
-      .order('barcode_number');
+      .order('barcode_number')
+      // Unbounded org-wide fetch could pull an entire fleet's history and hit Postgres
+      // statement timeouts; cap consistent with other full-inventory bottle queries
+      // in this codebase (e.g. CustomerPricingOverrides.jsx).
+      .limit(5000);
     
     if (error) throw error;
     
@@ -197,7 +201,14 @@ export default function Assets() {
           .from('bottles')
           .select('*')
           .eq('organization_id', organization.id)
-          .order('barcode_number'),
+          .order('barcode_number')
+          // Unbounded org-wide fetch caused slow loads / statement timeouts on larger
+          // fleets. Capped consistent with other full-inventory bottle queries in this
+          // codebase (e.g. CustomerPricingOverrides.jsx). NOTE: inventory KPI totals on
+          // this page are computed from this same result set, so orgs with more than
+          // 5000 bottles will see undercounted totals -- raise this limit (or move to a
+          // server-side aggregate) if that becomes a real issue.
+          .limit(5000),
         supabase
           .from('rentals')
           .select('id', { count: 'exact', head: true })

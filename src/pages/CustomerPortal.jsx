@@ -219,7 +219,7 @@ export default function CustomerPortal() {
           <Card>
             <CardContent>
               <Typography variant="h6" color="primary">
-                ${invoices.reduce((sum, inv) => sum + (inv.total || 0), 0).toFixed(2)}
+                ${invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0).toFixed(2)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total Spent
@@ -375,7 +375,7 @@ export default function CustomerPortal() {
                     <TableCell>
                       {new Date(invoice.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell>${invoice.total?.toFixed(2)}</TableCell>
+                    <TableCell>${invoice.total_amount?.toFixed(2)}</TableCell>
                     <TableCell>
                       <Chip
                         label={invoice.status}

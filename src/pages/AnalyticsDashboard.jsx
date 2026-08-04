@@ -39,7 +39,14 @@ export default function AnalyticsDashboard() {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      // Fetch various analytics data
+      // Fetch various analytics data. These were previously unbounded (no .limit()),
+      // so a busy org with a lot of activity in the selected window could return the
+      // entire matching history in one shot -- the same shape of query that has caused
+      // Postgres statement timeouts elsewhere in this app. Ordering by recency + capping
+      // at 5000 bounds the worst case; counts/sums become an approximation of "top 5000
+      // most recent" rather than the true total for orgs that blow past the cap within
+      // a single time range, which is an accepted trade-off (same one made in
+      // ImportApprovals.jsx) rather than a full fix (e.g. a server-side aggregate).
       const [
         { data: bottles },
         { data: customers },
@@ -51,36 +58,49 @@ export default function AnalyticsDashboard() {
           .from('bottles')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('customers')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('rentals')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
           .select('*')
           .eq('organization_id', organization.id)
-          .gte('created_at', startDate.toISOString()),
-        
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
-          .select('total')
+          .select('total_amount')
           .eq('organization_id', organization.id)
           .eq('status', 'paid')
           .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       // Calculate metrics
-      const totalRevenue = revenue?.reduce((sum, inv) => sum + (inv.total || 0), 0) || 0;
+      // invoices has no `total` column (only `total_amount`) -- this and the .select()
+      // above were both referencing a nonexistent field, so this was always computing
+      // 0 (a query for a nonexistent column errors, revenue ends up null/undefined).
+      const totalRevenue = revenue?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
       const activeBottles = bottles?.filter(b => b.status === 'active').length || 0;
       const pendingDeliveries = rentals?.filter(r => r.status === 'pending').length || 0;
       const completedDeliveries = rentals?.filter(r => r.status === 'delivered').length || 0;
@@ -99,18 +119,22 @@ export default function AnalyticsDashboard() {
           .select('*')
           .eq('organization_id', organization.id)
           .gte('created_at', previousPeriodStart.toISOString())
-          .lt('created_at', startDate.toISOString()),
-        
+          .lt('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000),
+
         supabase
           .from('invoices')
-          .select('total')
+          .select('total_amount')
           .eq('organization_id', organization.id)
           .eq('status', 'paid')
           .gte('created_at', previousPeriodStart.toISOString())
           .lt('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
-      const prevRevenueTotal = prevRevenueData?.reduce((sum, inv) => sum + (inv.total || 0), 0) || 0;
+      const prevRevenueTotal = prevRevenueData?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0;
       const revenueGrowth = prevRevenueTotal > 0 ? ((totalRevenue - prevRevenueTotal) / prevRevenueTotal) * 100 : 0;
 
       setAnalytics({
@@ -148,7 +172,7 @@ export default function AnalyticsDashboard() {
     const monthlyRevenue = {};
     invoices.forEach(invoice => {
       const month = new Date(invoice.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (invoice.total || 0);
+      monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (invoice.total_amount || 0);
     });
     
     return Object.entries(monthlyRevenue).map(([month, revenue]) => ({ month, revenue }));

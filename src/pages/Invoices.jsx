@@ -19,6 +19,7 @@ import {
   AccountBalance, CheckCircle, Warning, ExpandMore, ExpandLess, Edit as EditIcon,
 } from '@mui/icons-material';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { useDebounce } from '../utils/performance';
 
 export default function Invoices() {
   const { organization, user, profile } = useAuth();
@@ -28,6 +29,9 @@ export default function Invoices() {
 
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
+  /** Keep the input instantly responsive while the (potentially large) invoice list
+   *  filter below only recomputes ~280ms after typing settles. */
+  const debouncedSearch = useDebounce(search, 280);
   const [expandedId, setExpandedId] = useState(null);
   const [payOpen, setPayOpen] = useState(false);
   const [payInvoice, setPayInvoice] = useState(null);
@@ -60,7 +64,10 @@ export default function Invoices() {
           .from('invoices')
           .select('*')
           .eq('organization_id', organization.id)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          // Unbounded org-wide fetch previously pulled every legacy invoice ever created,
+          // which caused slow loads (and Postgres statement timeouts) on older orgs.
+          .limit(5000);
         if (!active) return;
         if (invErr) {
           if (invErr.code === '42P01') {
@@ -143,15 +150,15 @@ export default function Invoices() {
     let list = enriched;
     const f = tabFilters[tab];
     if (f !== 'all') list = list.filter((i) => i.status === f);
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter((i) =>
         getCustomerDisplayName(i).toLowerCase().includes(q) ||
         String(i.invoice_number || '').toLowerCase().includes(q)
       );
     }
     return list;
-  }, [enriched, tab, search]);
+  }, [enriched, tab, debouncedSearch]);
 
   const outstanding = enriched.filter((i) => i.status !== 'paid' && i.status !== 'void').reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0);
   const paidThisMonth = (() => {

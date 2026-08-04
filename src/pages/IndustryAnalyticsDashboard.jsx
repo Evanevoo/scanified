@@ -134,19 +134,31 @@ export default function IndustryAnalyticsDashboard() {
       if (!profile?.organization_id) return;
 
       try {
+        // These were unbounded org-wide scans (no .limit()) used only to derive counts --
+        // on a large org this pulls the entire bottles/customers/deliveries table on every
+        // dashboard load. Ordering by recency + capping bounds the worst case; the
+        // resulting counts become an approximation of "most recent 5000" instead of the
+        // true total once an org exceeds the cap, same trade-off already accepted for the
+        // analogous queries in AnalyticsDashboard.jsx and ImportApprovals.jsx.
         const [bottlesData, customersData, deliveriesData] = await Promise.all([
           supabase
             .from('bottles')
             .select('assigned_customer, location')
-            .eq('organization_id', profile.organization_id),
+            .eq('organization_id', profile.organization_id)
+            .order('created_at', { ascending: false })
+            .limit(5000),
           supabase
             .from('customers')
             .select('CustomerListID')
-            .eq('organization_id', profile.organization_id),
+            .eq('organization_id', profile.organization_id)
+            .order('created_at', { ascending: false })
+            .limit(5000),
           supabase
             .from('deliveries')
             .select('status')
             .eq('organization_id', profile.organization_id)
+            .order('created_at', { ascending: false })
+            .limit(5000)
         ]);
 
         const bottles = bottlesData.data || [];

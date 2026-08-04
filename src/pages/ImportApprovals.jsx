@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import { useDebounce } from '../utils/performance';
 import {
   duplicateBarcodeMessage,
   isDuplicateBarcodeDbError,
@@ -858,6 +859,10 @@ export default function ImportApprovals() {
       return '';
     }
   });
+  /** Filtering runs a full JSON-parse + match pass over every pending record, so the
+   *  text field stays instantly responsive while the expensive recompute below only
+   *  fires ~280ms after typing stops. */
+  const debouncedSearch = useDebounce(search, 280);
   const [locationFilter, setLocationFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
   const [auditDialog, setAuditDialog] = useState({ open: false, logs: [], title: '' });
@@ -1145,18 +1150,18 @@ export default function ImportApprovals() {
       const recordStatus = determineVerificationStatus(record);
       const filterReasons = [];
       
-      // Search filter
-      if (search) {
-        const searchLower = search.toLowerCase();
+      // Search filter (debounced -- see debouncedSearch)
+      if (debouncedSearch) {
+        const searchLower = debouncedSearch.toLowerCase();
         const orderNumLower = orderNum.toLowerCase();
         const customerName = getCustomerInfo(data).toLowerCase();
         const items = getLineItems(data);
         const productCodes = items.map(item => (item.product_code || '').toLowerCase()).join(' ');
-        
-        if (!orderNumLower.includes(searchLower) && 
-            !customerName.includes(searchLower) && 
+
+        if (!orderNumLower.includes(searchLower) &&
+            !customerName.includes(searchLower) &&
             !productCodes.includes(searchLower)) {
-          filterReasons.push(`Search filter: "${search}" not found`);
+          filterReasons.push(`Search filter: "${debouncedSearch}" not found`);
           logger.debug(`Filtering out record ${record.id} (${orderNum}): Search filter`);
           return false;
         }
@@ -1281,9 +1286,20 @@ export default function ImportApprovals() {
     return deduplicated;
   };
 
-  // Get filtered records
-  const filteredInvoices = deduplicateRecords(filterRecords(pendingInvoices));
-  const filteredReceipts = deduplicateRecords(filterRecords(pendingReceipts));
+  // Get filtered records. Memoized: this reruns the full filter + dedupe pass over
+  // every pending record (JSON-parsing each one's `data` field along the way), so
+  // recomputing it on every render -- including every keystroke in the search box,
+  // and every unrelated state change elsewhere on this page -- was what made typing
+  // in search feel like it "kept loading": a synchronous full-list recompute
+  // blocking the main thread, not an actual stuck network request.
+  const filteredInvoices = useMemo(
+    () => deduplicateRecords(filterRecords(pendingInvoices)),
+    [pendingInvoices, debouncedSearch, statusFilter, locationFilter]
+  );
+  const filteredReceipts = useMemo(
+    () => deduplicateRecords(filterRecords(pendingReceipts)),
+    [pendingReceipts, debouncedSearch, statusFilter, locationFilter]
+  );
 
   /** Stats match the visible import list (same filter + dedupe as "X imports showing"). */
   const verificationStats = useMemo(() => {
@@ -1338,7 +1354,13 @@ export default function ImportApprovals() {
   }, [filteredInvoices]);
 
   // Sort by best available date/time, newest first.
-  // Prefer scan/upload timestamps, then import/receipt dates.
+  // Prefer the actual system timestamp (when this record was scanned/imported into
+  // Scanified) over document-derived dates. The document dates (data.date,
+  // invoice_date, receipt_date, etc, pulled from the imported file's own contents)
+  // reflect when the invoice/receipt was written -- not when it was scanned -- and
+  // are frequently date-only, which collapses many unrelated records onto the same
+  // UTC-midnight sort key and leaves ties in non-chronological order. Only fall back
+  // to a document date when no real system timestamp exists on the record at all.
   const getSortableScanTime = (record) => {
     const parseToEpoch = (raw) => {
       if (raw == null || raw === '') return 0;
@@ -1355,6 +1377,12 @@ export default function ImportApprovals() {
     const summary = data?.summary || null;
 
     const candidates = [
+      record?.created_at,
+      record?.updated_at,
+      record?.uploaded_at,
+      data?.created_at,
+      data?.uploaded_at,
+      summary?.uploaded_at,
       data?.date,
       data?.invoice_date,
       data?.receipt_date,
@@ -1363,12 +1391,6 @@ export default function ImportApprovals() {
       firstRow?.receipt_date,
       data?.scan_date,
       firstRow?.scan_date,
-      record?.created_at,
-      record?.updated_at,
-      record?.uploaded_at,
-      data?.created_at,
-      data?.uploaded_at,
-      summary?.uploaded_at
     ];
 
     for (const c of candidates) {
@@ -1377,6 +1399,20 @@ export default function ImportApprovals() {
     }
     return 0;
   };
+  /**
+   * Whole days this record has been waiting, from the same timestamp the sort uses.
+   * A pending order means bottles are physically at the customer while billing
+   * nothing, so age is a revenue signal -- the dashboard surfaces the oldest one,
+   * and this puts the same number on the card you land on.
+   * Returns null when no usable timestamp exists (don't show a misleading "0d").
+   */
+  const getRecordAgeDays = (record) => {
+    const ts = getSortableScanTime(record);
+    if (!ts || ts <= 0) return null;
+    const days = Math.floor((Date.now() - ts) / 86400000);
+    return Number.isFinite(days) && days >= 0 ? days : null;
+  };
+
   const sortedFilteredInvoices = useMemo(() => {
     return [...(filteredInvoices || [])].sort((a, b) => getSortableScanTime(b) - getSortableScanTime(a));
   }, [filteredInvoices]);
@@ -1499,20 +1535,29 @@ export default function ImportApprovals() {
       
       // Check for auto-approval opportunities
       const autoApprovedRecords = [];
+      const autoApprovedOrderNumbers = [];
       const remainingRecords = [];
-      
+
       for (const record of individualRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
+        const result = await autoApproveIfQuantitiesMatch(record);
+        if (result.success) {
           autoApprovedRecords.push(record);
+          if (result.orderNumber) autoApprovedOrderNumbers.push(result.orderNumber);
         } else {
           remainingRecords.push(record);
         }
       }
-      
+
       if (autoApprovedRecords.length > 0) {
-        logger.debug(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
-        setSnackbar(`Auto-approved ${autoApprovedRecords.length} records with matching quantities`);
+        // Name the actual order(s) -- a bare count left users unable to tell which
+        // of their orders just vanished from this list and why (e.g. after editing
+        // a scan elsewhere changed the tracked quantities enough to match).
+        const names = autoApprovedOrderNumbers.length > 0
+          ? autoApprovedOrderNumbers.join(', ')
+          : `${autoApprovedRecords.length} record(s)`;
+        const message = `Auto-approved (quantities now match invoice) -- moved to Verified Orders: ${names}`;
+        logger.debug(message);
+        setSnackbar(message);
       }
       
       // Don't set pendingInvoices here - let fetchVerificationStats handle it
@@ -1679,17 +1724,27 @@ export default function ImportApprovals() {
       // Check which orders are approved (from imported_invoices/receipts) - do not show as scanned-only
       const approvedOrderNumbers = new Set();
       
+      // Unbounded org-wide history query, refetched on every list load/refresh -- was one
+      // of the contributors to slow loads and, on larger orgs, to Postgres statement
+      // timeouts. Ordering + a generous cap bounds the worst case without changing which
+      // recently-approved orders this lookup actually needs to consider; a real fix would
+      // scope this to only the orders present in the current batch rather than full org
+      // history, but that's a larger change than a safe limit addition.
       const [approvedInvoicesResult, approvedReceiptsResult] = await Promise.all([
         supabase
           .from('imported_invoices')
           .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
-          .or('status.in.(approved,verified),auto_approved.eq.true'),
+          .or('status.in.(approved,verified),auto_approved.eq.true')
+          .order('approved_at', { ascending: false, nullsFirst: false })
+          .limit(5000),
         supabase
           .from('imported_sales_receipts')
           .select('data, status, approved_at, verified_at, auto_approved')
           .eq('organization_id', organization.id)
           .or('status.in.(approved,verified),auto_approved.eq.true')
+          .order('approved_at', { ascending: false, nullsFirst: false })
+          .limit(5000)
       ]);
       
       const approvedImports = [...(approvedInvoicesResult.data || []), ...(approvedReceiptsResult.data || [])];
@@ -1962,19 +2017,40 @@ export default function ImportApprovals() {
       if (!skipAutoApprove) {
         const autoApprovedIds = new Set();
         let autoApprovedCount = 0;
+        const autoApprovedOrderNumbers = [];
         for (const record of [...individualInvoices, ...individualReceipts]) {
           if (record.is_scanned_only) continue;
           if ((record.status || '').toLowerCase() !== 'pending') continue;
           if (!record._sourceTable || !record.id || autoApprovedIds.has(record.id)) continue;
           autoApprovedIds.add(record.id);
-          const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-          if (wasAutoApproved) autoApprovedCount += 1;
+          const result = await autoApproveIfQuantitiesMatch(record);
+          if (result.success) {
+            autoApprovedCount += 1;
+            if (result.orderNumber) autoApprovedOrderNumbers.push(result.orderNumber);
+          }
         }
         if (autoApprovedCount > 0) {
-          logger.debug(`Auto-approved ${autoApprovedCount} record(s) on load`);
-          setSnackbar(`Auto-approved ${autoApprovedCount} record(s) with matching quantities`);
-          if (!silent) setLoading(true);
-          return fetchVerificationStats(true, true);
+          // Name the order(s) -- this is the path that fires on page load/refetch,
+          // including right after navigating back from editing a scan on the detail
+          // page, which is exactly the sequence that made an order silently vanish
+          // from this list with no visible explanation.
+          const names = autoApprovedOrderNumbers.length > 0
+            ? autoApprovedOrderNumbers.join(', ')
+            : `${autoApprovedCount} record(s)`;
+          const message = `Auto-approved (quantities now match invoice) -- moved to Verified Orders: ${names}`;
+          logger.debug(message);
+          setSnackbar(message);
+          // Refetch with fresh post-approval data (its own setPendingInvoices call
+          // above supersedes this call's cleanedRecords). Awaiting it -- instead of
+          // `return`-ing it directly -- means THIS call's own `silent` flag still
+          // decides whether to clear the loading spinner below, regardless of the
+          // recursive call being silent=true. Previously the spinner never cleared
+          // when auto-approve fired during a non-silent (visible) load, because
+          // neither the outer call's own setLoading(false) (skipped by the early
+          // return) nor the inner silent call's (skipped because silent=true) ever ran.
+          await fetchVerificationStats(true, true);
+          if (!silent) setLoading(false);
+          return;
         }
       }
 
@@ -2043,8 +2119,15 @@ export default function ImportApprovals() {
   // Fetch all customers once for lookup (name->id and id->name)
   async function fetchCustomers() {
     if (customerLookupDone.current) return;
+    if (!organization?.id) return;
     try {
-      const { data: customers, error } = await supabase.from('customers').select('CustomerListID, name');
+      // Was missing the organization filter entirely -- relied solely on RLS to scope
+      // this to the current org, with no defense-in-depth filter and no row limit.
+      const { data: customers, error } = await supabase
+        .from('customers')
+        .select('CustomerListID, name')
+        .eq('organization_id', organization.id)
+        .limit(10000);
       if (error) throw error;
       const nameToId = {};
       const idToName = {};
@@ -2069,13 +2152,18 @@ export default function ImportApprovals() {
         return;
       }
       
+      // Same bound already used for the bottle_scans fetch in fetchVerificationStats --
+      // this was unbounded (full org scan history), a contributor to slow loads and,
+      // on larger orgs, Postgres statement timeouts.
       const { data: scannedRows, error } = await supabase
         .from('bottle_scans')
         .select('order_number, bottle_barcode')
-        .eq('organization_id', organization.id);
-      
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false })
+        .limit(5000);
+
       if (error) throw error;
-      
+
       const counts = {};
       const allOrderNumbers = new Set();
       (scannedRows || []).forEach(row => {
@@ -2101,12 +2189,15 @@ export default function ImportApprovals() {
         return;
       }
       
-      // Get from bottle_scans table
+      // Get from bottle_scans table. Same bound already used elsewhere in this file for
+      // the same table -- this was unbounded (full org scan history, every column).
       const { data: scannedRows, error: scanError } = await supabase
         .from('bottle_scans')
         .select('*')
-        .eq('organization_id', organization.id);
-      
+        .eq('organization_id', organization.id)
+        .order('created_at', { ascending: false })
+        .limit(5000);
+
       if (scanError) {
         logger.error('Error fetching bottle_scans:', scanError);
         // Continue with empty array
@@ -2327,8 +2418,8 @@ export default function ImportApprovals() {
       const remainingScannedRecords = [];
       
       for (const record of scannedOnlyRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
-        if (wasAutoApproved) {
+        const result = await autoApproveIfQuantitiesMatch(record);
+        if (result.success) {
           autoApprovedScannedRecords.push(record);
         } else {
           remainingScannedRecords.push(record);
@@ -3182,530 +3273,6 @@ export default function ImportApprovals() {
       setTimeout(() => startAutoScanning(), 100);
     }
   };
-
-  // Real approval logic for invoices
-  async function processInvoice(invoiceData) {
-    try {
-      // Parse the data structure - invoiceData is the row.data from imported_invoices
-      const parsedData = parseDataField(invoiceData);
-      const rows = parsedData.rows || parsedData.line_items || [];
-      
-      if (!rows || rows.length === 0) {
-        return { success: false, error: 'No data found in import' };
-      }
-
-      // Get customer info from the first row
-      const firstRow = rows[0];
-      const customerId = firstRow.customer_id;
-      const customerName = firstRow.customer_name;
-
-      // Get invoice number from first row
-      const invoiceNumber = firstRow.invoice_number || firstRow.reference_number || firstRow.order_number;
-      if (!invoiceNumber) {
-        return { success: false, error: 'No invoice number found' };
-      }
-
-      // Check if scanning has been done for this invoice
-      const { data: scannedData } = await supabase
-        .from('cylinder_scans')
-        .select('*')
-        .eq('order_number', invoiceNumber)
-        .or(`invoice_number.eq.${invoiceNumber}`);
-
-      if (!scannedData || scannedData.length === 0) {
-        return { success: false, error: 'No scanning has been done for this invoice. Please scan the bottles before verification.' };
-      }
-
-      // Get or create customer with enhanced duplicate prevention
-      let customer = null;
-      
-      // Get current user's organization for proper filtering
-      if (!organization?.id) {
-        return { success: false, error: 'User not assigned to an organization' };
-      }
-      
-      // First, try to find customer by ID within the organization
-      if (customerId) {
-        const { data: existing } = await supabase
-          .from('customers')
-          .select('CustomerListID, name')
-          .eq('CustomerListID', customerId)
-          .eq('organization_id', organization.id);
-        
-        if (existing && existing.length > 0) {
-          customer = existing[0];
-        }
-      }
-      
-      // If not found by ID, try to find by name within the organization
-      if (!customer && customerName) {
-        const { data: existing } = await supabase
-          .from('customers')
-          .select('CustomerListID, name')
-          .ilike('name', customerName)
-          .eq('organization_id', organization.id);
-        
-        if (existing && existing.length > 0) {
-          customer = existing[0];
-        } else {
-          // Create new customer with proper duplicate handling
-          try {
-            const newCustomerId = customerId || `80000448-${Date.now()}S`;
-            const { data: created, error: createError } = await supabase
-              .from('customers')
-              .insert(
-                finalizeCustomerBranchParentFields({
-                  name: customerName,
-                  CustomerListID: newCustomerId,
-                  organization_id: userProfile.organization_id,
-                  barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                  customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                })
-              )
-              .select('CustomerListID, name')
-              .single();
-
-            if (createError) {
-              if (createError.code === '23505') {
-                // Duplicate key error - customer already exists, try to find it
-                const { data: existingCustomer } = await supabase
-                  .from('customers')
-                  .select('CustomerListID, name')
-                  .eq('CustomerListID', newCustomerId)
-                  .eq('organization_id', userProfile.organization_id)
-                  .single();
-
-                if (existingCustomer) {
-                  customer = existingCustomer;
-                } else {
-                  return { success: false, error: 'Customer already exists in another organization' };
-                }
-              } else {
-                return { success: false, error: `Error creating customer: ${createError.message}` };
-              }
-            } else {
-              customer = created;
-            }
-          } catch (err) {
-            return { success: false, error: `Error creating customer: ${err.message}` };
-          }
-        }
-      }
-      if (!customer) return { success: false, error: 'No customer found or created' };
-
-      // Create invoice
-      const { data: inv, error: invErr } = await supabase.from('invoices').insert({
-        details: invoiceNumber,
-        customer_id: customer.CustomerListID,
-        invoice_date: firstRow.date || new Date().toISOString().split('T')[0],
-        amount: 0
-      }).select('id').single();
-      if (invErr) return { success: false, error: invErr.message };
-
-      // Create line items
-      for (const row of rows) {
-        const { error: lineItemError } = await supabase.from('invoice_line_items').insert({
-          invoice_id: inv.id,
-          product_code: row.product_code,
-          qty_out: row.qty_out || 0,
-          qty_in: row.qty_in || 0,
-          description: row.description || row.product_code,
-          rate: row.rate || 0,
-          amount: row.amount || 0,
-          serial_number: row.serial_number || row.product_code
-        });
-        if (lineItemError) {
-          logger.error('Error creating line item:', lineItemError);
-        }
-      }
-
-      const warnings = [];
-      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization.id);
-      for (const scan of scannedData) {
-        if (scan.cylinder_barcode) {
-          // Check for existing open rental
-          const { data: existingRental } = await supabase
-            .from('rentals')
-            .select('customer_id, rental_start_date')
-            .eq('bottle_barcode', scan.cylinder_barcode)
-            .is('rental_end_date', null)
-            .single();
-
-          if (existingRental && existingRental.customer_id !== customer.CustomerListID) {
-            warnings.push({
-              bottle: scan.cylinder_barcode,
-              existingCustomer: existingRental.customer_id,
-              newCustomer: customer.CustomerListID,
-              message: `Bottle ${scan.cylinder_barcode} is currently rented to customer ${existingRental.customer_id} and will be reassigned to ${customer.CustomerListID}`
-            });
-          }
-
-          // Get location for this delivery
-          const deliveryLocation = scan.location || customer.city || customer.address || 'Unknown';
-          
-          // Update bottle assignment AND location
-          const { error: bottleError } = await supabase
-            .from('bottles')
-            .update({ 
-              assigned_customer: customer.CustomerListID,
-              location: deliveryLocation, // Update location to customer's location
-              last_location_update: new Date().toISOString()
-            })
-            .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-          
-          if (bottleError) {
-            logger.error('Error assigning bottle to customer:', bottleError);
-          } else {
-            logger.debug(`✅ Updated bottle ${scan.cylinder_barcode} - Customer: ${customer.CustomerListID}, Location: ${deliveryLocation}`);
-          }
-
-          // Create rental record for delivered bottles (qty_out > 0)
-          if (scan.qty && scan.qty > 0) {
-            // Get tax rate for the location
-            let taxRate = 0;
-            let taxCode = 'GST+PST';
-            const rentalLocation = scan.location || 'SASKATOON';
-            
-            try {
-              const { data: locationData } = await supabase
-                .from('locations')
-                .select('total_tax_rate')
-                .eq('id', rentalLocation.toLowerCase())
-                .single();
-              
-              if (locationData) {
-                taxRate = locationData.total_tax_rate;
-              }
-            } catch (e) {
-              logger.warn('Could not fetch tax rate for location:', rentalLocation);
-            }
-
-            const { data: bottleRow } = await supabase
-              .from('bottles')
-              .select(
-                'id, barcode_number, product_code, category, description, type, location'
-              )
-              .eq('barcode_number', scan.cylinder_barcode)
-              .eq('organization_id', organization.id)
-              .maybeSingle();
-            const rental_amount = bottleRow
-              ? monthlyRateForNewRental(customer.CustomerListID, bottleRow, pricingCtx)
-              : monthlyRateForProductPlaceholder(customer.CustomerListID, '', pricingCtx);
-
-            const { error: rentalError } = await supabase
-              .from('rentals')
-              .insert({
-                organization_id: organization.id,
-                bottle_id: bottleRow?.id ?? null,
-                bottle_barcode: scan.cylinder_barcode,
-                customer_id: customer.CustomerListID,
-                rental_start_date: new Date().toISOString().split('T')[0],
-                rental_end_date: null,
-                rental_type: 'monthly',
-                rental_amount,
-                location: rentalLocation,
-                tax_code: taxCode,
-                tax_rate: taxRate
-              });
-            
-            if (rentalError) {
-              logger.error('Error creating rental record:', rentalError);
-            }
-          }
-
-          // End rental for returned bottles (RETURN scan or negative qty)
-          const scanMode = String(scan.mode || scan.scan_mode || '').toUpperCase();
-          const scanAction = String(scan.action || '').toLowerCase();
-          const isReturnScan =
-            (scan.qty != null && Number(scan.qty) < 0)
-            || scanMode === 'RETURN'
-            || scanMode === 'PICKUP'
-            || scanMode === 'IN'
-            || scanAction === 'in';
-          if (isReturnScan) {
-            const scanBc = scan.cylinder_barcode || scan.bottle_barcode;
-            try {
-              await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
-                returnBarcodes: [scanBc],
-                customerId: customer?.CustomerListID,
-                customerName: customer?.name,
-                endDate: firstRow?.date,
-              });
-            } catch (rentalUpdateError) {
-              logger.error('Error ending rental record:', rentalUpdateError);
-            }
-          }
-        }
-      }
-
-      return { success: true, warnings: warnings };
-    } catch (e) {
-      return { success: false, error: e.message };
-    }
-  }
-
-  // Real approval logic for receipts
-  async function processReceipt(receiptData) {
-    try {
-      // Parse the data structure - receiptData is the row.data from imported_sales_receipts
-      const parsedData = parseDataField(receiptData);
-      const rows = parsedData.rows || parsedData.line_items || [];
-      
-      if (!rows || rows.length === 0) {
-        return { success: false, error: 'No data found in import' };
-      }
-
-      // Get customer info from the first row
-      const firstRow = rows[0];
-      const customerId = firstRow.customer_id;
-      const customerName = firstRow.customer_name;
-
-      // Get receipt number from first row
-      const receiptNumber = firstRow.sales_receipt_number || firstRow.reference_number || firstRow.order_number;
-      if (!receiptNumber) {
-        return { success: false, error: 'No receipt number found' };
-      }
-
-      // Check if scanning has been done for this receipt
-      const { data: scannedData } = await supabase
-        .from('cylinder_scans')
-        .select('*')
-        .eq('order_number', receiptNumber)
-        .or(`invoice_number.eq.${receiptNumber}`);
-
-      if (!scannedData || scannedData.length === 0) {
-        return { success: false, error: 'No scanning has been done for this receipt. Please scan the bottles before verification.' };
-      }
-
-      // Get or create customer with enhanced duplicate prevention
-      let customer = null;
-      
-      // Get current user's organization for proper filtering
-      if (!organization?.id) {
-        return { success: false, error: 'User not assigned to an organization' };
-      }
-      
-      // First, try to find customer by ID within the organization
-      if (customerId) {
-        const { data: existing } = await supabase
-          .from('customers')
-          .select('CustomerListID, name')
-          .eq('CustomerListID', customerId)
-          .eq('organization_id', organization.id);
-        
-        if (existing && existing.length > 0) {
-          customer = existing[0];
-        }
-      }
-      
-      // If not found by ID, try to find by name within the organization
-      if (!customer && customerName) {
-        const { data: existing } = await supabase
-          .from('customers')
-          .select('CustomerListID, name')
-          .ilike('name', customerName)
-          .eq('organization_id', organization.id);
-        
-        if (existing && existing.length > 0) {
-          customer = existing[0];
-        } else {
-          // Create new customer with proper duplicate handling
-          try {
-            const newCustomerId = customerId || `80000448-${Date.now()}S`;
-            const { data: created, error: createError } = await supabase
-              .from('customers')
-              .insert(
-                finalizeCustomerBranchParentFields({
-                  name: customerName,
-                  CustomerListID: newCustomerId,
-                  organization_id: userProfile.organization_id,
-                  barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                  customer_barcode: `*%${newCustomerId.toLowerCase().replace(/\s+/g, '')}*`,
-                })
-              )
-              .select('CustomerListID, name')
-              .single();
-
-            if (createError) {
-              if (createError.code === '23505') {
-                // Duplicate key error - customer already exists, try to find it
-                const { data: existingCustomer } = await supabase
-                  .from('customers')
-                  .select('CustomerListID, name')
-                  .eq('CustomerListID', newCustomerId)
-                  .eq('organization_id', userProfile.organization_id)
-                  .single();
-
-                if (existingCustomer) {
-                  customer = existingCustomer;
-                } else {
-                  return { success: false, error: 'Customer already exists in another organization' };
-                }
-              } else {
-                return { success: false, error: `Error creating customer: ${createError.message}` };
-              }
-            } else {
-              customer = created;
-            }
-          } catch (err) {
-            return { success: false, error: `Error creating customer: ${err.message}` };
-          }
-        }
-      }
-      if (!customer) return { success: false, error: 'No customer found or created' };
-
-      // Create receipt (using invoices table)
-      const { data: receipt, error: receiptErr } = await supabase.from('invoices').insert({
-        details: receiptNumber,
-        customer_id: customer.CustomerListID,
-        invoice_date: firstRow.date || new Date().toISOString().split('T')[0],
-        amount: 0
-      }).select('id').single();
-      if (receiptErr) return { success: false, error: receiptErr.message };
-
-      // Create line items
-      for (const row of rows) {
-        const { error: lineItemError } = await supabase.from('invoice_line_items').insert({
-          invoice_id: receipt.id,
-          product_code: row.product_code,
-          qty_out: row.qty_out || 0,
-          qty_in: row.qty_in || 0,
-          description: row.description || row.product_code,
-          rate: row.rate || 0,
-          amount: row.amount || 0,
-          serial_number: row.serial_number || row.product_code
-        });
-        if (lineItemError) {
-          logger.error('Error creating line item:', lineItemError);
-        }
-      }
-
-      const warnings = [];
-      const pricingCtx = await fetchOrgRentalPricingContext(supabase, organization.id);
-      for (const scan of scannedData) {
-        if (scan.cylinder_barcode) {
-          // Check for existing open rental
-          const { data: existingRental } = await supabase
-            .from('rentals')
-            .select('customer_id, rental_start_date')
-            .eq('bottle_barcode', scan.cylinder_barcode)
-            .is('rental_end_date', null)
-            .single();
-
-          if (existingRental && existingRental.customer_id !== customer.CustomerListID) {
-            warnings.push({
-              bottle: scan.cylinder_barcode,
-              existingCustomer: existingRental.customer_id,
-              newCustomer: customer.CustomerListID,
-              message: `Bottle ${scan.cylinder_barcode} is currently rented to customer ${existingRental.customer_id} and will be reassigned to ${customer.CustomerListID}`
-            });
-          }
-
-          // Get location for this delivery
-          const deliveryLocation = scan.location || customer.city || customer.address || 'Unknown';
-          
-          // Update bottle assignment AND location
-          const { error: bottleError } = await supabase
-            .from('bottles')
-            .update({ 
-              assigned_customer: customer.CustomerListID,
-              location: deliveryLocation, // Update location to customer's location
-              last_location_update: new Date().toISOString()
-            })
-            .eq('barcode_number', scan.cylinder_barcode)
-            .eq('organization_id', organization.id); // SECURITY: Only update bottles from user's organization
-          
-          if (bottleError) {
-            logger.error('Error assigning bottle to customer:', bottleError);
-          } else {
-            logger.debug(`✅ Updated bottle ${scan.cylinder_barcode} - Customer: ${customer.CustomerListID}, Location: ${deliveryLocation}`);
-          }
-
-          // Create rental record for delivered bottles (qty_out > 0)
-          if (scan.qty && scan.qty > 0) {
-            // Get tax rate for the location
-            let taxRate = 0;
-            let taxCode = 'GST+PST';
-            const rentalLocation = scan.location || 'SASKATOON';
-            
-            try {
-              const { data: locationData } = await supabase
-                .from('locations')
-                .select('total_tax_rate')
-                .eq('id', rentalLocation.toLowerCase())
-                .single();
-              
-              if (locationData) {
-                taxRate = locationData.total_tax_rate;
-              }
-            } catch (e) {
-              logger.warn('Could not fetch tax rate for location:', rentalLocation);
-            }
-
-            const { data: bottleRow } = await supabase
-              .from('bottles')
-              .select(
-                'id, barcode_number, product_code, category, description, type, location'
-              )
-              .eq('barcode_number', scan.cylinder_barcode)
-              .eq('organization_id', organization.id)
-              .maybeSingle();
-            const rental_amount = bottleRow
-              ? monthlyRateForNewRental(customer.CustomerListID, bottleRow, pricingCtx)
-              : monthlyRateForProductPlaceholder(customer.CustomerListID, '', pricingCtx);
-
-            const { error: rentalError } = await supabase
-              .from('rentals')
-              .insert({
-                organization_id: organization.id,
-                bottle_id: bottleRow?.id ?? null,
-                bottle_barcode: scan.cylinder_barcode,
-                customer_id: customer.CustomerListID,
-                rental_start_date: new Date().toISOString().split('T')[0],
-                rental_end_date: null,
-                rental_type: 'monthly',
-                rental_amount,
-                location: rentalLocation,
-                tax_code: taxCode,
-                tax_rate: taxRate
-              });
-            
-            if (rentalError) {
-              logger.error('Error creating rental record:', rentalError);
-            }
-          }
-
-          // End rental for returned bottles (RETURN scan or negative qty)
-          const scanMode = String(scan.mode || scan.scan_mode || '').toUpperCase();
-          const scanAction = String(scan.action || '').toLowerCase();
-          const isReturnScan =
-            (scan.qty != null && Number(scan.qty) < 0)
-            || scanMode === 'RETURN'
-            || scanMode === 'PICKUP'
-            || scanMode === 'IN'
-            || scanAction === 'in';
-          if (isReturnScan) {
-            const scanBc = scan.cylinder_barcode || scan.bottle_barcode;
-            try {
-              await finalizeVerifiedReturnBarcodes(supabase, organization.id, {
-                returnBarcodes: [scanBc],
-                customerId: customer?.CustomerListID,
-                customerName: customer?.name,
-                endDate: firstRow?.date,
-              });
-            } catch (rentalUpdateError) {
-              logger.error('Error ending rental record:', rentalUpdateError);
-            }
-          }
-        }
-      }
-
-      return { success: true, warnings: warnings };
-    } catch (e) {
-      return { success: false, error: e.message };
-    }
-  }
 
   // Enhanced utility functions for professional display
   function getProductInfo(lineItem) {
@@ -5855,6 +5422,24 @@ export default function ImportApprovals() {
                       size="small"
                       icon={VERIFICATION_STATES[determineVerificationStatus(invoice)].icon}
                     />
+                    {(() => {
+                      // Age only earns attention once it's been sitting a while -- showing
+                      // "0d" on everything would just be noise on a busy queue.
+                      const ageDays = getRecordAgeDays(invoice);
+                      if (ageDays == null || ageDays < 3) return null;
+                      const stale = ageDays >= 14;
+                      return (
+                        <Tooltip title={`Waiting ${ageDays} day${ageDays === 1 ? '' : 's'} for verification`}>
+                          <Chip
+                            label={`${ageDays}d`}
+                            size="small"
+                            variant="outlined"
+                            color={stale ? 'error' : 'warning'}
+                            sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                          />
+                        </Tooltip>
+                      );
+                    })()}
                     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                       <Typography variant="h6" color="primary" fontWeight={600}>
                         {orderNum}
@@ -7478,14 +7063,14 @@ return (
       
       if (!quantitiesMatch) {
         logger.debug(`❌ Not auto-approving record ${record.id} - quantities don't match`);
-        return false;
+        return { success: false };
       }
 
       // Block auto-approve when shipped bottles are at a different customer.
       const { hasBottlesAtCustomers, bottlesAtCustomers } = await checkBottlesAtCustomers(record);
       if (hasBottlesAtCustomers) {
         logger.debug(`⚠️ Not auto-approving record ${record.id} - shipped bottles at a different customer:`, bottlesAtCustomers);
-        return false;
+        return { success: false };
       }
 
       logger.debug(`✅ Auto-approving record ${record.id} - quantities match; bottles at home or with delivery customer`);
@@ -7494,7 +7079,7 @@ return (
       const tableName = record._sourceTable || (record.is_scanned_only ? null : 'imported_invoices');
       if (!tableName) {
         logger.debug(`Skipping auto-approve for scanned-only record ${record.id} (no DB row)`);
-        return false;
+        return { success: false };
       }
 
       const recordId = record.originalId || record.id;
@@ -7505,7 +7090,7 @@ return (
         .maybeSingle();
       if (fetchErr || !existingRow) {
         logger.error('Auto-approve: could not load import row for verify persistence:', fetchErr);
-        return false;
+        return { success: false };
       }
 
       const existingData = parseImportDataField(existingRow.data);
@@ -7526,16 +7111,21 @@ return (
       if (error || !updatedRows || updatedRows.length === 0) {
         if (error) logger.error('Error auto-approving record:', error);
         else logger.debug(`Auto-approve update matched 0 rows for record ${record.id}`);
-        return false;
+        return { success: false };
       }
       
       // Trk matches Inv and record is approved — now assign bottles
       await assignBottlesToCustomer(record);
-      
-      return true;
+
+      // Report which order this was so callers can tell the user *what* just got
+      // auto-approved -- previously this just returned true/false, so a user
+      // editing a scan (e.g. switching RETURN to SHIP) and then navigating back to
+      // this list had no idea that action silently auto-approved a specific order
+      // and made it disappear from the pending queue.
+      return { success: true, orderNumber: orderNumber || null };
     } catch (error) {
       logger.error('Error in auto-approval:', error);
-      return false;
+      return { success: false };
     }
   }
 
@@ -7643,10 +7233,16 @@ return (
       // Resolve to a CustomerListID so downstream pages (Customer Detail, Asset Detail, Bottle Locations, Reports) all match.
       clearResolveCustomerListIdMemo();
       let newCustomerId = getCustomerId(data) || null;
+      // Hoisted out of the block below (was block-scoped, so unavailable to the RNB
+      // balance check further down) -- lets that check also match bottles.assigned_customer
+      // against the resolved customers.id UUID, not just CustomerListID/name, matching
+      // ImportApprovalDetail.jsx's more thorough version of the same check.
+      let resolvedCustomerForBalance = null;
       {
         const resolved =
           (await resolveCustomerListId(supabase, organization?.id, newCustomerId)) ||
           (await resolveCustomerListId(supabase, organization?.id, newCustomerName));
+        resolvedCustomerForBalance = resolved || null;
         if (resolved?.customerListId) {
           newCustomerId = resolved.customerListId;
           if (!newCustomerName || newCustomerName === 'Unknown') {
@@ -7727,7 +7323,7 @@ return (
         const allBc = [...new Set([...shipArr, ...retArr])];
         const { data: bottleRows } = await supabase
           .from('bottles')
-          .select('barcode_number, product_code, assigned_customer, customer_name')
+          .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
           .eq('organization_id', organization.id)
           .in('barcode_number', allBc);
         const bottleMap = new Map();
@@ -7737,7 +7333,7 @@ return (
           if (missing.length > 0) {
             const { data: extra } = await supabase
               .from('bottles')
-              .select('barcode_number, product_code, assigned_customer, customer_name')
+              .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
               .eq('organization_id', organization.id);
             (extra || []).forEach(b => {
               const norm = normalizeBarcode(b.barcode_number);
@@ -7749,9 +7345,41 @@ return (
             });
           }
         }
+        // Matches ImportApprovalDetail.jsx's RNB check: some barcodes are only
+        // resolvable via serial_number rather than barcode_number (e.g. a bottle
+        // scanned/entered by serial). Without this fallback, ImportApprovals.jsx's
+        // "Approve" button could flag a return as RNB that ImportApprovalDetail.jsx's
+        // "Verify This Record" would have correctly matched -- inconsistent behavior
+        // between the two approval entry points for the same order.
+        const stillUnmapped = allBc.filter((bc) => !bottleMap.has(String(bc).trim()));
+        if (stillUnmapped.length > 0) {
+          const { data: serialRows } = await supabase
+            .from('bottles')
+            .select('barcode_number, serial_number, product_code, assigned_customer, customer_name')
+            .eq('organization_id', organization.id)
+            .in('serial_number', stillUnmapped.map((x) => String(x).trim()));
+          (serialRows || []).forEach((b) => {
+            const sn = String(b.serial_number || '').trim();
+            stillUnmapped.forEach((raw) => {
+              if (sn && sn === String(raw).trim()) {
+                bottleMap.set(String(raw).trim(), b);
+              }
+            });
+          });
+        }
         const custId = String(newCustomerId || '').trim();
         const custName = String(newCustomerName || '').trim();
         const custNameLower = custName.toLowerCase();
+        // Also matches ImportApprovalDetail.jsx: bottles.assigned_customer can hold
+        // customers.id (uuid) instead of CustomerListID in some records -- without
+        // this, a return could be wrongly flagged RNB purely because the stored
+        // identity uses the other id form than what's being compared against.
+        const balanceRowIdLower = resolvedCustomerForBalance?.id
+          ? String(resolvedCustomerForBalance.id).trim().toLowerCase()
+          : '';
+        const balanceResolvedNameLower = resolvedCustomerForBalance?.name
+          ? String(resolvedCustomerForBalance.name).trim().toLowerCase()
+          : '';
         for (const retBc of retArr) {
           const retNorm = normalizeBarcode(retBc);
           const latestScan = latestOrderScanModeByBarcode.get(retNorm);
@@ -7764,8 +7392,12 @@ return (
           const cn = String(bottle.customer_name || '').trim();
           const acLower = ac.toLowerCase();
           const cnLower = cn.toLowerCase();
-          const idMatch = custId && (ac === custId || acLower === custId.toLowerCase());
-          const nameMatch = custNameLower && (acLower === custNameLower || cnLower === custNameLower);
+          const idMatch =
+            (custId && (ac === custId || acLower === custId.toLowerCase())) ||
+            (balanceRowIdLower && acLower === balanceRowIdLower);
+          const nameMatch =
+            (custNameLower && (acLower === custNameLower || cnLower === custNameLower)) ||
+            (balanceResolvedNameLower && (cnLower === balanceResolvedNameLower || acLower === balanceResolvedNameLower));
           const onBalance = idMatch || nameMatch;
           if (!onBalance) {
             returnsNotOnBalance.push({ barcode: retBc, product_code: (bottle.product_code || '').trim() });
@@ -8952,18 +8584,6 @@ return (
       await handleBulkDeleteInvoices();
     }
   };
-
-  // Process invoice data for verification
-  async function processInvoice(invoiceData) {
-    // Implementation for processing invoice data
-    logger.debug('Processing invoice:', invoiceData);
-  }
-
-  // Process receipt data for verification
-  async function processReceipt(receiptData) {
-    // Implementation for processing receipt data
-    logger.debug('Processing receipt:', receiptData);
-  }
 
   function getOrderNumber(data) {
     if (!data) return '';

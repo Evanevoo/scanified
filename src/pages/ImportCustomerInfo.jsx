@@ -179,12 +179,15 @@ async function findExistingCustomer(customerName, customerId, organizationId) {
   
   // Strategy 4: Fuzzy name matching (case-insensitive) within organization
   if (customerName && organizationId) {
+    // Only the first match is ever used below, so cap the result set instead of returning
+    // every fuzzy name match in the org.
     const { data: customers, error } = await supabase
       .from('customers')
       .select('CustomerListID, name')
       .ilike('name', `%${customerName.trim()}%`)
-      .eq('organization_id', organizationId);
-    
+      .eq('organization_id', organizationId)
+      .limit(1);
+
     if (customers && customers.length > 0 && !error) {
       // Return the first match (most exact)
       return customers[0];
@@ -536,11 +539,17 @@ const ImportCustomerInfo = () => {
       }
       
       // Name-only matching: build a lookup of existing customers by normalized name.
+      // This intentionally checks against the org's whole customer list (a row in the import
+      // file can match any existing customer by name, not just ones already referenced in this
+      // batch), but was previously fetched with no bound at all, which is a real statement-timeout
+      // risk for orgs with very large customer lists. Capped as a safety net; two narrow columns
+      // keeps the payload small enough that this should comfortably cover normal org sizes.
       logger.log(`Checking ${validCustomers.length} customers against database by name...`);
       const { data: existingCustomersByOrg, error: existingCustomersError } = await supabase
         .from('customers')
         .select('CustomerListID, name')
-        .eq('organization_id', profile.organization_id);
+        .eq('organization_id', profile.organization_id)
+        .limit(10000);
       if (existingCustomersError) throw existingCustomersError;
 
       const existingCustomerMap = new Map();
@@ -711,12 +720,15 @@ const ImportCustomerInfo = () => {
           .map(c => c.barcode.toLowerCase().trim());
         
         if (barcodesToCheck.length > 0) {
-          // Fetch all customers with matching barcodes (case-insensitive)
+          // Fetch all customers with matching barcodes (case-insensitive).
+          // Same statement-timeout risk as the name lookup above (unbounded org-wide scan) —
+          // capped as a safety net for large orgs.
           const { data: allCustomers, error: allCustomersError } = await supabase
             .from('customers')
             .select('barcode, CustomerListID, name')
             .eq('organization_id', profile.organization_id)
-            .not('barcode', 'is', null);
+            .not('barcode', 'is', null)
+            .limit(10000);
           
           if (!allCustomersError && allCustomers) {
             // Filter to find matches (case-insensitive)

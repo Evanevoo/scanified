@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Box,
@@ -33,6 +33,7 @@ import {
   scanRecordModeFamily,
 } from '../utils/orderScanApprovalStatus';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { useDebounce } from '../utils/performance';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -184,6 +185,9 @@ export default function AssetHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  /** Keep the input instantly responsive while the multi-field record filter below
+   *  only recomputes ~280ms after typing settles. */
+  const debouncedSearchTerm = useDebounce(searchTerm, 280);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [recordEditId, setRecordEditId] = useState(null);
@@ -332,6 +336,21 @@ export default function AssetHistory() {
     }
     setLoading(false);
   };
+
+  // Memoized (with the search term debounced) so this multi-field, per-row lowercasing
+  // pass over the record log doesn't rerun on every render/keystroke -- only after the
+  // source records or the settled search term change.
+  const filteredRecords = useMemo(() => {
+    if (!debouncedSearchTerm) return records;
+    const s = debouncedSearchTerm.toLowerCase();
+    return records.filter(r =>
+      r.type?.toLowerCase().includes(s) ||
+      r.user?.toLowerCase().includes(s) ||
+      r.location?.toLowerCase().includes(s) ||
+      r.data?.toLowerCase().includes(s) ||
+      r.notes?.toLowerCase().includes(s)
+    );
+  }, [records, debouncedSearchTerm]);
 
   if (loading) {
     return (
@@ -498,14 +517,7 @@ export default function AssetHistory() {
           </TableHead>
           <TableBody>
             {(() => {
-              const filtered = records.filter(r =>
-                !searchTerm ||
-                r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
-              );
+              const filtered = filteredRecords;
               if (filtered.length === 0) {
                 return (
                   <TableRow>

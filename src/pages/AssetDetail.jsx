@@ -1371,6 +1371,10 @@ export default function AssetDetail() {
       }
       if (editData.gas_type !== undefined) {
         updateData.gas_type = editData.gas_type || null;
+        // Keep the legacy 'type' column in sync -- Assets.jsx and other pages
+        // read bottle.type for display/grouping, but only CSV import ever wrote
+        // it, so it went stale as soon as gas_type was edited anywhere else.
+        updateData.type = editData.gas_type || null;
       }
       if (finalStatus !== undefined) {
         updateData.status = NORMAL_STATUSES.includes(finalStatus) ? finalStatus : normalizeStatus(finalStatus);

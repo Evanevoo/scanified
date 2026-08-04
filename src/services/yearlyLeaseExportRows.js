@@ -22,16 +22,25 @@ export function buildYearlyLeaseExportRows(workspace) {
   }
 
   const norm = (v) => String(v || '').trim().toLowerCase();
+  const normName = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+  // Built once instead of doing customers.find(...) (O(customers)) per agreement inside
+  // the .map() below -- same O(agreements x customers) shape as the Rentals billing bug
+  // fixed earlier this session, just in the export path here instead of every render.
+  const customersByKey = new Map();
+  for (const c of customers) {
+    const listIdKey = norm(c.CustomerListID);
+    if (listIdKey) customersByKey.set(listIdKey, c);
+    const idKey = norm(c.id);
+    if (idKey) customersByKey.set(idKey, c);
+    const nameKey = normName(c.name || c.Name);
+    if (nameKey && !customersByKey.has(nameKey)) customersByKey.set(nameKey, c);
+  }
 
   const findCustomer = (customerId, customerName) => {
-    const id = String(customerId || '').trim();
-    const nk = String(customerName || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    return customers.find(
-      (c) =>
-        norm(c.CustomerListID) === norm(id)
-        || norm(c.id) === norm(id)
-        || String(c.name || c.Name || '').trim().replace(/\s+/g, ' ').toLowerCase() === nk,
-    );
+    const id = norm(customerId);
+    const nk = normName(customerName);
+    return (id && customersByKey.get(id)) || (nk && customersByKey.get(nk)) || undefined;
   };
 
   return agreements

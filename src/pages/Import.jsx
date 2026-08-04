@@ -911,6 +911,7 @@ export default function Import() {
         .from(table)
         .select('id, data')
         .eq('id', recordId)
+        .eq('organization_id', organizationId)
         .single();
       if (recErr || !record) return;
 
@@ -1077,11 +1078,18 @@ export default function Import() {
   // Used to skip insert for new imports, skip already-verified, and UPDATE only pending on re-import.
   async function getExistingOrderRecordsForOrg(type, organizationId) {
     const table = type === 'invoice' ? 'imported_invoices' : 'imported_sales_receipts';
+    // This intentionally needs to check against existing records org-wide (a re-imported invoice
+    // could match any prior record, not just ones from this batch), but without a bound this pulls
+    // every pending/verified/approved import row (including its full data JSON) the org has ever
+    // had, which can hit Postgres statement timeouts for older orgs. Order by recency + cap so the
+    // most-likely-to-match (newest) records are always included.
     const { data: records, error } = await supabase
       .from(table)
       .select('id, data, status')
       .eq('organization_id', organizationId)
-      .in('status', ['pending', 'verified', 'approved']);
+      .in('status', ['pending', 'verified', 'approved'])
+      .order('created_at', { ascending: false })
+      .limit(5000);
     if (error) {
       logger.warn('Could not fetch records for skip/update check:', error);
       return new Map();
@@ -1259,12 +1267,17 @@ export default function Import() {
       // delete any leftover "UNKNOWN"-keyed pending records whose rows contain the same order.
       if (updatedIds.length > 0 && importedOrderNumbers.length > 0) {
         try {
+          // Bounded safety net: this scans the org's pending queue (not the full imported_invoices
+          // history) but has no inherent cap, so add order+limit to avoid an unbounded fetch if the
+          // pending queue grows large.
           const { data: allPending } = await supabase
             .from('imported_invoices')
             .select('id, data')
             .eq('organization_id', userProfile.organization_id)
             .eq('status', 'pending')
-            .not('id', 'in', `(${[...insertedIds, ...updatedIds].join(',')})`);
+            .not('id', 'in', `(${[...insertedIds, ...updatedIds].join(',')})`)
+            .order('created_at', { ascending: false })
+            .limit(5000);
           const staleIds = [];
           (allPending || []).forEach(rec => {
             const d = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
@@ -1504,6 +1517,36 @@ export default function Import() {
     saveAs(blob, 'skipped_items_debug.csv');
   }
 
+  // Fetch only the customers relevant to this import batch (matched by CustomerListID,
+  // case-insensitively) instead of pulling the org's entire customers table. The old code did
+  // `.eq('organization_id', orgId)` with no other filter, which scans/returns every customer the
+  // org has ever had just to check existence for the (much smaller) set of IDs in this file.
+  // Chunked to keep each request's URL/filter list a reasonable size for large imports.
+  async function fetchExistingCustomerIdsForImport(customerIdsRaw, organizationId) {
+    const idVariants = new Set();
+    (customerIdsRaw || []).forEach(raw => {
+      const trimmed = (raw || '').toString().trim();
+      if (!trimmed) return;
+      idVariants.add(trimmed);
+      idVariants.add(trimmed.toUpperCase());
+      idVariants.add(trimmed.toLowerCase());
+    });
+    const ids = [...idVariants];
+    const existing = new Set();
+    if (ids.length === 0) return existing;
+    const CHUNK_SIZE = 200;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const { data } = await supabase
+        .from('customers')
+        .select('CustomerListID')
+        .eq('organization_id', organizationId)
+        .in('CustomerListID', chunk);
+      (data || []).forEach(c => existing.add((c.CustomerListID || '').trim().toLowerCase()));
+    }
+    return existing;
+  }
+
   // Check preview statuses for both types (bulk queries - much faster)
   async function checkPreviewStatuses() {
     setLoading(true);
@@ -1534,15 +1577,15 @@ export default function Import() {
     const refNumbers = preview.map(r => String(r.reference_number || '')).filter(Boolean);
     const uniqueRefs = [...new Set(refNumbers)];
     const productCodes = [...new Set(preview.map(r => r.product_code).filter(Boolean))];
+    const previewCustomerIds = preview.map(r => r.customer_id).filter(Boolean);
 
-    const [customersRes, bottlesRes, receiptsRes, invoicesRes] = await Promise.all([
-      supabase.from('customers').select('CustomerListID').eq('organization_id', userProfile.organization_id),
+    const [existingCustomerIds, bottlesRes, receiptsRes, invoicesRes] = await Promise.all([
+      fetchExistingCustomerIdsForImport(previewCustomerIds, userProfile.organization_id),
       productCodes.length ? supabase.from('bottles').select('barcode_number').in('barcode_number', productCodes).eq('organization_id', userProfile.organization_id) : { data: [] },
       uniqueRefs.length ? supabase.from('sales_receipts').select('id,sales_receipt_number').in('sales_receipt_number', uniqueRefs) : { data: [] },
       uniqueRefs.length ? supabase.from('invoices').select('id,details').in('details', uniqueRefs) : { data: [] }
     ]);
 
-    const existingCustomerIds = new Set((customersRes.data || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
     const bottleSet = new Set((bottlesRes.data || []).map(b => b.barcode_number));
     const receiptByNumber = new Map((receiptsRes.data || []).map(r => [String(r.sales_receipt_number), r]));
     const invoiceByDetails = new Map((invoicesRes.data || []).map(i => [String(i.details), i]));
@@ -1668,19 +1711,10 @@ export default function Import() {
     
     logger.log('All customer IDs from preview:', allCustomerIds);
     
-    // Check which customers exist in THIS organization
-    const { data: existingCustomers, error: fetchError } = await supabase
-      .from('customers')
-      .select('CustomerListID')
-      .eq('organization_id', userProfile.organization_id);
-    
-    if (fetchError) {
-      logger.error('Error fetching existing customers:', fetchError);
-      toast.error('Error checking existing customers');
-      return;
-    }
-    
-    const existingIds = new Set((existingCustomers || []).map(c => (c.CustomerListID || '').trim().toLowerCase()));
+    // Check which of the preview's customer IDs already exist in THIS organization.
+    // Scoped to allCustomerIds instead of fetching every customer the org has (see
+    // fetchExistingCustomerIdsForImport for why the org-wide fetch was a problem).
+    const existingIds = await fetchExistingCustomerIdsForImport(allCustomerIds, userProfile.organization_id);
     const missingCustomerIds = allCustomerIds.filter(cid => !existingIds.has(cid));
     
     logger.log('Missing customer IDs:', missingCustomerIds);

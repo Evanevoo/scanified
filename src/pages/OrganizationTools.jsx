@@ -428,6 +428,10 @@ export default function OrganizationTools() {
           serial_number: editForm.serial_number,
           barcode_number: editForm.barcode_number,
           gas_type: editForm.gas_type || null,
+          // Keep the legacy 'type' column in sync -- same fix as BottleManagement.jsx
+          // and AssetDetail.jsx earlier this session; Assets.jsx and others read
+          // bottle.type for display/grouping, not gas_type.
+          type: editForm.gas_type || null,
           status: editForm.status
         })
         .eq('id', editingBottle);

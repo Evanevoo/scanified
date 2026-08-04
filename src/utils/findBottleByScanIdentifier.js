@@ -8,14 +8,28 @@ export async function findBottleRowByScanIdentifier(supabase, organizationId, ra
   const id = String(rawIdentifier ?? '').trim();
   if (!id || !organizationId) return null;
 
+  // Requests up to 2 rows (not just 1) so a duplicate barcode/serial in the org
+  // can be detected and flagged instead of silently assigning whichever row
+  // Postgres happens to return first. Ordered by updated_at so the choice is
+  // at least deterministic (most recently touched bottle) rather than arbitrary.
+  const warnIfAmbiguous = (rows, matchField, matchValue) => {
+    if (rows && rows.length > 1) {
+      logger.warn(
+        `findBottleRowByScanIdentifier: ambiguous match -- ${rows.length} bottles share ${matchField}="${matchValue}" in org ${organizationId} (ids: ${rows.map((r) => r.id).join(', ')}). Using the most recently updated one; the underlying duplicate should be investigated/merged.`
+      );
+    }
+  };
+
   const fetchByBarcode = async (bn) => {
     const { data, error } = await supabase
       .from('bottles')
       .select('*')
       .eq('organization_id', organizationId)
       .eq('barcode_number', bn)
-      .limit(1);
+      .order('updated_at', { ascending: false })
+      .limit(2);
     if (error) logger.warn('findBottleRowByScanIdentifier barcode:', error.message);
+    warnIfAmbiguous(data, 'barcode_number', bn);
     return data?.[0] || null;
   };
 
@@ -33,8 +47,10 @@ export async function findBottleRowByScanIdentifier(supabase, organizationId, ra
     .select('*')
     .eq('organization_id', organizationId)
     .eq('serial_number', id)
-    .limit(1);
+    .order('updated_at', { ascending: false })
+    .limit(2);
   if (se) logger.warn('findBottleRowByScanIdentifier serial:', se.message);
+  warnIfAmbiguous(serialRows, 'serial_number', id);
   if (serialRows?.[0]) return serialRows[0];
 
   return null;

@@ -13,13 +13,34 @@ export function getDeviceTimezone(): string | null {
 }
 
 /**
+ * Supabase/Postgres timestamp columns here are `timestamp without time zone`, so
+ * PostgREST serializes them with no trailing Z/offset (e.g. "2026-08-02T17:00:00")
+ * even though the stored instant is UTC. `new Date(isoString)` on a string with no
+ * offset is parsed as *device-local* time, not UTC -- so a scan stored as 17:00 UTC
+ * (10:00 local in Mountain time) rendered as-is instead of converting, showing
+ * "5:00 PM" for something that actually happened at 10:00 AM. Treat any timestamp
+ * with no explicit offset as UTC before constructing the Date, matching the web
+ * app's `parseDbTimestamp` (src/utils/parseDbTimestamp.js).
+ */
+function parseDbTimestamp(isoString: string): Date {
+  let s = isoString.trim();
+  if (/^\d{4}-\d{2}-\d{2}\s+\d/.test(s)) s = s.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d)/, '$1T$2');
+  if (s.endsWith('+00') || s.endsWith('-00')) s = s.slice(0, -3) + 'Z';
+  const hasExplicitTz = s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s);
+  if (!hasExplicitTz) {
+    s = s.replace(/\.\d+$/, '') + 'Z';
+  }
+  return new Date(s);
+}
+
+/**
  * Format an ISO date string for display in the user's local timezone.
  * Use this for all user-facing timestamps (scans, fills, etc).
  */
 export function formatDateTimeLocal(isoString: string | null | undefined): string {
   if (!isoString) return '—';
   try {
-    const d = new Date(isoString);
+    const d = parseDbTimestamp(isoString);
     if (Number.isNaN(d.getTime())) return '—';
     const tz = getDeviceTimezone();
     if (tz) {
@@ -41,7 +62,7 @@ export function formatDateTimeLocal(isoString: string | null | undefined): strin
 export function formatDateLocal(isoString: string | null | undefined): string {
   if (!isoString) return '—';
   try {
-    const d = new Date(isoString);
+    const d = parseDbTimestamp(isoString);
     if (Number.isNaN(d.getTime())) return '—';
     const tz = getDeviceTimezone();
     if (tz) {
@@ -59,7 +80,7 @@ export function formatDateLocal(isoString: string | null | undefined): string {
 export function formatTimeLocal(isoString: string | null | undefined): string {
   if (!isoString) return '—';
   try {
-    const d = new Date(isoString);
+    const d = parseDbTimestamp(isoString);
     if (Number.isNaN(d.getTime())) return '—';
     const tz = getDeviceTimezone();
     if (tz) {
