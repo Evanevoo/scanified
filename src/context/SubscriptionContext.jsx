@@ -11,6 +11,7 @@ import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
 import {
   buildAssetPricingMap,
+  buildClassificationNodesById,
   buildCustomerOverrideMap,
   flattenCustomerPricingRowsToLegacyOverrides,
   computeMRRWithResolution,
@@ -155,6 +156,28 @@ export function SubscriptionProvider({ children }) {
         return res;
       };
 
+      const fetchClassificationNodes = async () => {
+        try {
+          let cr = await supabase
+            .from('asset_classification_nodes')
+            .select('id, organization_id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
+            .eq('organization_id', orgId)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true });
+          if (cr.error?.code === '42703') {
+            cr = await supabase
+              .from('asset_classification_nodes')
+              .select('id, organization_id, parent_id, name, sort_order')
+              .eq('organization_id', orgId)
+              .order('sort_order', { ascending: true })
+              .order('name', { ascending: true });
+          }
+          return (!cr.error && cr.data) ? cr.data : [];
+        } catch {
+          return [];
+        }
+      };
+
       const [
         subsRes,
         itemsRes,
@@ -168,6 +191,7 @@ export function SubscriptionProvider({ children }) {
         rentalsRes,
         leaseRes,
         leaseItemsRes,
+        classNodesList,
       ] = await Promise.all([
         safe('subscriptions', supabase.from('subscriptions').select('*').eq('organization_id', orgId).order('created_at', { ascending: false })),
         safe('subscription_items', supabase.from('subscription_items').select('*').eq('organization_id', orgId)),
@@ -190,6 +214,7 @@ export function SubscriptionProvider({ children }) {
         ),
         safe('lease_contracts', supabase.from('lease_contracts').select('*').eq('organization_id', orgId).order('start_date', { ascending: false })),
         safe('lease_contract_items', supabase.from('lease_contract_items').select('*').eq('organization_id', orgId)),
+        fetchClassificationNodes(),
       ]);
 
       if (!mountedRef.current) return;
@@ -205,6 +230,23 @@ export function SubscriptionProvider({ children }) {
       let openRentalsList = rentalsRes.data || [];
 
       if (runReconcile) {
+        // Build the pricing context from data already fetched above instead of letting the
+        // backfill step re-query customer_pricing/overrides/asset_type_pricing/customers/
+        // asset_classification_nodes on every reconcile pass.
+        const legacyFlatForBackfill = flattenCustomerPricingRowsToLegacyOverrides(legacyPricingRes.data || []);
+        const pricingCtxForBackfill = {
+          customerOverrideMap: buildCustomerOverrideMap({
+            legacyPricingOverrides: legacyFlatForBackfill,
+            customerPricingOverrides: overridesRes.data || [],
+            organizationId: orgId,
+            customers: custRes.data || [],
+          }),
+          assetPricingMap: buildAssetPricingMap(pricingRes.data || []),
+          defaults: defaultUnitRatesFromAssetPricingTable(pricingRes.data || []),
+          organizationId: orgId,
+          classificationNodes: classNodesList,
+          classificationNodesById: buildClassificationNodesById(classNodesList),
+        };
         // Loop until no more inserts so Update can backfill >500 bottles in one click.
         for (let pass = 0; pass < 20; pass += 1) {
           const { inserted: backfillInserted } = await backfillOpenRentalsForAssignedBottles(
@@ -214,6 +256,7 @@ export function SubscriptionProvider({ children }) {
               bottles: bottlesList,
               openRentals: openRentalsList,
               customers: custRes.data || [],
+              pricingCtx: pricingCtxForBackfill,
             },
           );
           if (backfillInserted <= 0) break;
@@ -263,27 +306,6 @@ export function SubscriptionProvider({ children }) {
       setOpenRentals(openRentalsList);
       setLeaseContracts(leaseRes.data || []);
       setLeaseContractItems(leaseItemsRes.data || []);
-
-      let classNodesList = [];
-      try {
-        let cr = await supabase
-          .from('asset_classification_nodes')
-          .select('id, organization_id, parent_id, name, sort_order, default_monthly_price, default_yearly_price')
-          .eq('organization_id', orgId)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true });
-        if (cr.error?.code === '42703') {
-          cr = await supabase
-            .from('asset_classification_nodes')
-            .select('id, organization_id, parent_id, name, sort_order')
-            .eq('organization_id', orgId)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true });
-        }
-        if (!cr.error && cr.data) classNodesList = cr.data;
-      } catch {
-        classNodesList = [];
-      }
       if (mountedRef.current) setClassificationNodes(classNodesList);
       } catch (err) {
         console.error('SubscriptionContext fetch error:', err);

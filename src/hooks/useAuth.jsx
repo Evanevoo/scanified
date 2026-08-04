@@ -196,14 +196,15 @@ export const AuthProvider = ({ children }) => {
 
         // Step 2: If profile has an organization_id, fetch the organization
         if (profileData?.organization_id) {
-          // First check if organization is deleted
-          const { data: orgCheck, error: orgCheckError } = await supabase
+          // Single fetch: '*' already includes deleted_at, so the deleted-vs-active branch
+          // is decided from one round trip instead of a separate existence check first.
+          const { data: orgData, error: orgError } = await supabase
             .from('organizations')
-            .select('id, name, deleted_at, deletion_reason')
+            .select('*')
             .eq('id', profileData.organization_id)
             .single();
 
-          if (orgCheck && orgCheck.deleted_at) {
+          if (orgData && orgData.deleted_at) {
             // Organization has been deleted
             logger.error('Auth: Organization has been deleted');
             // Clear organization but keep user and profile
@@ -212,14 +213,6 @@ export const AuthProvider = ({ children }) => {
             authFlowInProgressRef.current = false;
             return;
           }
-
-          // Fetch the active organization
-          const { data: orgData, error: orgError } = await supabase
-            .from('organizations')
-            .select('*')
-            .eq('id', profileData.organization_id)
-            .is('deleted_at', null) // Only fetch active (non-deleted) organizations
-            .single();
 
           if (orgError) {
             logger.error('Auth: Error fetching organization:', orgError);

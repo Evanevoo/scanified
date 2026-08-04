@@ -93,11 +93,25 @@ export async function backfillOpenRentalsForAssignedBottles(
 
   if (candidates.length === 0) return { inserted: 0, errors: [] };
 
-  const pricingCtx = await fetchOrgRentalPricingContext(supabaseClient, organizationId);
-  let inserted = 0;
-  const errors = [];
+  // Caller can pass in a pricing context it already fetched this cycle (e.g. SubscriptionContext's
+  // fetchAll) to avoid re-querying customer_pricing/overrides/asset_type_pricing/customers/
+  // asset_classification_nodes on every backfill pass.
+  const pricingCtx =
+    workspace.pricingCtx || (await fetchOrgRentalPricingContext(supabaseClient, organizationId));
 
+  // Dedupe within this pass so two candidates resolving to the same bottle id/barcode
+  // (mirrors the old sequential-insert index-update guard) don't both get inserted.
+  const seenKeys = new Set();
+  const rows = [];
   for (const bottle of candidates) {
+    const bid = bottle?.id != null ? String(bottle.id).trim() : '';
+    const barcode = String(bottle.barcode_number || bottle.barcode || '').trim();
+    const dedupeKey = bid || barcode.toUpperCase();
+    if (dedupeKey) {
+      if (seenKeys.has(dedupeKey)) continue;
+      seenKeys.add(dedupeKey);
+    }
+
     const assigned = String(
       bottle.assigned_customer || bottle.customer_uuid || bottle.customer_id || '',
     ).trim();
@@ -105,33 +119,41 @@ export async function backfillOpenRentalsForAssignedBottles(
     const rentCustomerId = assigned || customer?.CustomerListID || customer?.id || '';
     const rentCustomerName =
       String(bottle.customer_name || '').trim() || customer?.name || customer?.Name || '';
-    const barcode = String(bottle.barcode_number || bottle.barcode || '').trim();
     const pricingKey = customer?.CustomerListID || rentCustomerId;
     const rental_amount = monthlyRateForNewRental(pricingKey, bottle, pricingCtx);
 
-    const { error } = await supabaseClient.from('rentals').insert({
-      organization_id: organizationId,
-      customer_id: rentCustomerId,
-      customer_name: rentCustomerName,
-      bottle_id: bottle.id ?? null,
-      bottle_barcode: barcode || null,
-      rental_start_date: inferRentalStartDateFromBottle(bottle),
-      rental_end_date: null,
-      rental_amount,
-      rental_type: 'monthly',
-      tax_rate: 0.11,
-      location: bottle.location || 'SASKATOON',
-      status: 'active',
-      is_dns: false,
+    rows.push({
+      __barcode: barcode || String(bottle.id ?? ''),
+      row: {
+        organization_id: organizationId,
+        customer_id: rentCustomerId,
+        customer_name: rentCustomerName,
+        bottle_id: bottle.id ?? null,
+        bottle_barcode: barcode || null,
+        rental_start_date: inferRentalStartDateFromBottle(bottle),
+        rental_end_date: null,
+        rental_amount,
+        rental_type: 'monthly',
+        tax_rate: 0.11,
+        location: bottle.location || 'SASKATOON',
+        status: 'active',
+        is_dns: false,
+      },
     });
+  }
 
+  // Bulk-insert in chunks instead of one round trip per bottle.
+  const CHUNK_SIZE = 200;
+  let inserted = 0;
+  const errors = [];
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabaseClient.from('rentals').insert(chunk.map((c) => c.row));
     if (error) {
-      errors.push(`${barcode || bottle.id}: ${error.message}`);
+      errors.push(`bulk insert (${chunk.length} rows, e.g. ${chunk[0].__barcode}): ${error.message}`);
       continue;
     }
-    inserted += 1;
-    if (bottle.id) rentalIndex.bottleIds.add(String(bottle.id).trim());
-    if (barcode) rentalIndex.barcodes.add(barcode.toUpperCase());
+    inserted += chunk.length;
   }
 
   return { inserted, errors };

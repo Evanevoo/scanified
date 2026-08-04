@@ -160,26 +160,34 @@ export async function closeOrphanOpenRentalsForOrg(
   let closed = 0;
   const updatedAt = new Date().toISOString();
 
+  // Group rentals by resolved end date so most closes (the common case: everyone shares
+  // defaultEndDate) go out as one bulk update instead of one round trip per rental.
+  const groups = new Map();
   for (const rental of toClose) {
     const id = rental?.id;
     if (!id) continue;
     const normBc = rentalBarcodeNorm(rental);
-    const endDate = (normBc && scanDates.get(normBc)) || defaultEndDate;
+    const rawEndDate = (normBc && scanDates.get(normBc)) || defaultEndDate;
+    const endDate = toYmd(rawEndDate) || defaultEndDate;
+    if (!groups.has(endDate)) groups.set(endDate, []);
+    groups.get(endDate).push(id);
+  }
 
+  for (const [endDate, ids] of groups) {
     const { data, error } = await supabaseClient
       .from('rentals')
       .update({
-        rental_end_date: toYmd(endDate) || defaultEndDate,
+        rental_end_date: endDate,
         updated_at: updatedAt,
       })
       .eq('organization_id', organizationId)
-      .eq('id', id)
+      .in('id', ids)
       .is('rental_end_date', null)
       .select('id');
 
     if (error) {
       errors.push(error.message || String(error));
-      logger.warn('closeOrphanOpenRentalsForOrg rental failed:', id, error);
+      logger.warn('closeOrphanOpenRentalsForOrg group failed:', endDate, ids.length, error);
       continue;
     }
     closed += (data || []).length;

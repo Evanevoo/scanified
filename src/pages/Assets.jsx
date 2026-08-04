@@ -159,26 +159,11 @@ export default function Assets() {
   const [rnbCount, setRnbCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { profile, organization } = useAuth();
-  const [organizationName, setOrganizationName] = useState('');
+  const { organization } = useAuth();
 
   useEffect(() => {
     fetchBottles();
   }, [organization?.id]);
-
-  useEffect(() => {
-    async function fetchOrgName() {
-      if (profile?.organization_id) {
-        const { data, error } = await supabase
-          .from('organizations')
-          .select('name')
-          .eq('id', profile.organization_id)
-          .single();
-        if (data) setOrganizationName(data.name);
-      }
-    }
-    fetchOrgName();
-  }, [profile]);
 
   const fetchBottles = async () => {
     setLoading(true);
@@ -401,7 +386,7 @@ export default function Assets() {
             <Box>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25, flexWrap: 'wrap' }}>
                 <Chip label="Inventory" color="primary" size="small" sx={{ borderRadius: 999, fontWeight: 700 }} />
-                <Chip label={organization?.name || organizationName || 'Organization'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
+                <Chip label={organization?.name || 'Organization'} size="small" variant="outlined" sx={{ borderRadius: 999 }} />
               </Stack>
               <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em' }}>
                 Bottle inventory

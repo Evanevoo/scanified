@@ -48,7 +48,6 @@ import {
   parseImportDataField,
   supplementImportRowsForScannedOrders,
 } from '../utils/verifiedOrdersList';
-import { resolveOrderNumberFromListEntry } from '../utils/verifiedOrdersDedup';
 
 export default function VerifiedOrders() {
   const { organization } = useAuth();
@@ -251,95 +250,84 @@ export default function VerifiedOrders() {
 
       const allOrders = [...importOrderRows, ...scannedOrders];
       
-      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals
+      // For orders without customer names, try to get from invoice data first, then fallback to bottle_scans or rentals.
+      // Resolve invoice-sourced names synchronously, then batch-fetch rentals/bottle_scans for the
+      // remainder in one round trip each instead of up to two awaited queries per order.
+      const ordersNeedingLookup = [];
       for (const order of allOrders) {
-        // First, try to extract customer name from invoice data using getCustomerName function
-        // This properly checks all possible locations in the invoice data
         const customerNameFromInvoice = getCustomerName(order);
-        
+
         if (customerNameFromInvoice && customerNameFromInvoice !== 'N/A' && customerNameFromInvoice !== 'Unknown') {
-          // Invoice has customer name - use it (this is the source of truth)
           order.customer_name = customerNameFromInvoice;
           if (!order.data_parsed) order.data_parsed = {};
           order.data_parsed.customer_name = customerNameFromInvoice;
           logger.log(`✅ Found customer name from invoice data for order: ${customerNameFromInvoice}`);
         } else {
-          // Invoice doesn't have customer name - fallback to bottle_scans or rentals
-          // Extract order number manually (getOrderNumber is defined later)
           let orderNum = order.order_number || order.data_parsed?.order_number || order.data_parsed?.reference_number || order.data_parsed?.invoice_number;
           if (!orderNum && order.data_parsed?.rows && order.data_parsed.rows.length > 0) {
             const firstRow = order.data_parsed.rows[0];
             orderNum = firstRow.order_number || firstRow.invoice_number || firstRow.reference_number || firstRow.sales_receipt_number;
           }
           if (orderNum && orderNum !== 'N/A') {
-            // Try to get customer name from rentals table first (more reliable than bottle_scans)
-            const { data: rentals } = await supabase
+            ordersNeedingLookup.push({ order, orderNum });
+          }
+        }
+      }
+
+      if (ordersNeedingLookup.length > 0) {
+        const orderNums = [...new Set(ordersNeedingLookup.map((e) => e.orderNum))];
+        const rentalNameByOrderNum = new Map();
+        const scanNameByOrderNum = new Map();
+        const LOOKUP_CHUNK = 150;
+
+        for (let i = 0; i < orderNums.length; i += LOOKUP_CHUNK) {
+          const slice = orderNums.slice(i, i + LOOKUP_CHUNK);
+          const [{ data: rentalsRows }, { data: scanRows }] = await Promise.all([
+            supabase
               .from('rentals')
-              .select('customer_name')
-              .eq('order_number', orderNum)
+              .select('rental_order_number, customer_name')
               .eq('organization_id', organization.id)
-              .limit(1);
-            
-            if (rentals && rentals.length > 0 && rentals[0].customer_name) {
-              order.customer_name = rentals[0].customer_name;
-              if (!order.data_parsed) order.data_parsed = {};
-              order.data_parsed.customer_name = rentals[0].customer_name;
-              logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentals[0].customer_name}`);
-            } else {
-              // Last resort: try to get customer name from bottle_scans (may be incorrect)
-              const { data: bottleScans } = await supabase
-                .from('bottle_scans')
-                .select('customer_name')
-                .eq('order_number', orderNum)
-                .eq('organization_id', organization.id)
-                .limit(1);
-              
-              if (bottleScans && bottleScans.length > 0 && bottleScans[0].customer_name) {
-                order.customer_name = bottleScans[0].customer_name;
-                if (!order.data_parsed) order.data_parsed = {};
-                order.data_parsed.customer_name = bottleScans[0].customer_name;
-                logger.log(`⚠️ Found customer name from bottle_scans for order ${orderNum} (fallback): ${bottleScans[0].customer_name}`);
-              }
+              .in('rental_order_number', slice),
+            supabase
+              .from('bottle_scans')
+              .select('order_number, customer_name')
+              .eq('organization_id', organization.id)
+              .in('order_number', slice),
+          ]);
+          (rentalsRows || []).forEach((r) => {
+            if (r.customer_name && !rentalNameByOrderNum.has(r.rental_order_number)) {
+              rentalNameByOrderNum.set(r.rental_order_number, r.customer_name);
             }
+          });
+          (scanRows || []).forEach((s) => {
+            if (s.customer_name && !scanNameByOrderNum.has(s.order_number)) {
+              scanNameByOrderNum.set(s.order_number, s.customer_name);
+            }
+          });
+        }
+
+        for (const { order, orderNum } of ordersNeedingLookup) {
+          // Prefer rentals (more reliable than bottle_scans), matching prior per-order lookup order.
+          const rentalName = rentalNameByOrderNum.get(orderNum);
+          if (rentalName) {
+            order.customer_name = rentalName;
+            if (!order.data_parsed) order.data_parsed = {};
+            order.data_parsed.customer_name = rentalName;
+            logger.log(`✅ Found customer name from rentals for order ${orderNum}: ${rentalName}`);
+            continue;
+          }
+          const scanName = scanNameByOrderNum.get(orderNum);
+          if (scanName) {
+            order.customer_name = scanName;
+            if (!order.data_parsed) order.data_parsed = {};
+            order.data_parsed.customer_name = scanName;
+            logger.log(`⚠️ Found customer name from bottle_scans for order ${orderNum} (fallback): ${scanName}`);
           }
         }
       }
 
       // One row per order number; invoice beats scanned when names differ (e.g. QB vs scan customer).
       const deduplicatedOrders = dedupeVerifiedOrdersByOrderNumber(allOrders);
-
-      // #region agent log
-      {
-        const probeNorm = '75794';
-        const normProbe = (o) =>
-          normalizeOrderNumForList(resolveOrderNumberFromListEntry(o) || o.order_number);
-        const pick = (list) =>
-          (list || [])
-            .filter((o) => normProbe(o) === probeNorm)
-            .map((o) => ({ type: o.type, displayType: o.displayType, id: String(o.id || '').slice(0, 24) }));
-        if (typeof fetch === 'function') {
-          fetch('http://127.0.0.1:7758/ingest/242000ab-af8f-404d-8cf3-4f163de25904', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fb3b83' },
-            body: JSON.stringify({
-              sessionId: 'fb3b83',
-              runId: 'post-fix-v2',
-              hypothesisId: 'V1-V3',
-              location: 'VerifiedOrders.jsx:fetchVerifiedOrders',
-              message: 'verified orders assembly for 75794',
-              data: {
-                importRows: pick(importOrderRows),
-                scannedRaw: pick(scannedOrdersRaw),
-                scannedKept: pick(scannedOrders),
-                deduped: pick(deduplicatedOrders),
-                inVerifiedOrderNums: verifiedOrderNums.has(probeNorm),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-        }
-      }
-      // #endregion
 
       // Sort by latest first (approved_at / verified_at / created_at descending)
       const getOrderDate = (order) => new Date(order.approved_at || order.verified_at || order.created_at || 0).getTime();
