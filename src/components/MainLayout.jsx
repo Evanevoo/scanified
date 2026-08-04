@@ -29,6 +29,13 @@ import CommandPalette from './CommandPalette';
 import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import Avatar from '@mui/material/Avatar';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Badge from '@mui/material/Badge';
+import Divider from '@mui/material/Divider';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { useNotifications, useAppStore } from '../store/appStore';
 import { SearchInputWithIcon, APP_SHELL_SEARCH_INPUT_CLASSNAME } from './ui/search-input-with-icon';
 import { postgrestQuotedIlikeContains } from '../utils/postgrestFilterEscape';
 import { isOrgOwnerProfile, isPlatformOwnerProfile, roleDisplayName } from '../constants/roles';
@@ -65,6 +72,10 @@ export default function MainLayout({ children }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [notificationsAnchorEl, setNotificationsAnchorEl] = useState(null);
+  const notifications = useNotifications();
+  const removeNotification = useAppStore((state) => state.removeNotification);
+  const clearNotifications = useAppStore((state) => state.clearNotifications);
   const searchRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
@@ -596,9 +607,76 @@ export default function MainLayout({ children }) {
                 ? nameParts.map((n) => n[0]).join('').slice(0, 2).toUpperCase()
                 : '?'}
             </Avatar>
-            <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)', border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' } }} aria-label="Notifications">
-              <NotificationsIcon />
+            <IconButton
+              sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)', border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' } }}
+              onClick={(e) => setNotificationsAnchorEl(e.currentTarget)}
+              aria-label="Notifications"
+              aria-haspopup="true"
+              aria-expanded={Boolean(notificationsAnchorEl)}
+            >
+              <Badge badgeContent={notifications.length} color="error" max={9}>
+                <NotificationsIcon />
+              </Badge>
             </IconButton>
+            <Menu
+              anchorEl={notificationsAnchorEl}
+              open={Boolean(notificationsAnchorEl)}
+              onClose={() => setNotificationsAnchorEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{ paper: { sx: { width: 340, maxWidth: '90vw', maxHeight: 420 } } }}
+            >
+              <Box sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                  Notifications
+                </Typography>
+                {notifications.length > 0 && (
+                  <Button
+                    size="small"
+                    onClick={() => { clearNotifications(); setNotificationsAnchorEl(null); }}
+                    sx={{ textTransform: 'none', fontWeight: 700, minWidth: 0 }}
+                  >
+                    Clear all
+                  </Button>
+                )}
+              </Box>
+              <Divider />
+              {notifications.length === 0 ? (
+                <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
+                  <CheckCircleOutlineIcon sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    {"You're all caught up"}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+                    No new notifications right now.
+                  </Typography>
+                </Box>
+              ) : (
+                notifications.map((n) => (
+                  <MenuItem
+                    key={n.id}
+                    onClick={() => { removeNotification(n.id); }}
+                    sx={{ whiteSpace: 'normal', alignItems: 'flex-start', gap: 1, py: 1.25 }}
+                  >
+                    {n.type === 'error' ? (
+                      <ErrorOutlineIcon fontSize="small" color="error" sx={{ mt: 0.25 }} />
+                    ) : (
+                      <CheckCircleOutlineIcon fontSize="small" color="success" sx={{ mt: 0.25 }} />
+                    )}
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {n.title || 'Notification'}
+                      </Typography>
+                      {n.message && (
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                          {n.message}
+                        </Typography>
+                      )}
+                    </Box>
+                  </MenuItem>
+                ))
+              )}
+            </Menu>
             <IconButton sx={{ color: 'text.primary', width: 40, height: 40, flexShrink: 0, bgcolor: isDarkShell ? alpha('#fff', 0.08) : 'rgba(255,255,255,0.72)', border: isDarkShell ? `1px solid ${alpha('#fff', 0.12)}` : '1px solid rgba(255,255,255,0.8)', '&:hover': { bgcolor: isDarkShell ? alpha('#fff', 0.14) : 'rgba(255,255,255,0.92)' } }} onClick={() => navigate('/settings')} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
