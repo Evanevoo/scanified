@@ -1488,9 +1488,16 @@ export default function ImportApprovals() {
       // Check for auto-approval opportunities
       const autoApprovedRecords = [];
       const remainingRecords = [];
-      
+
+      const [pendingQuantityMatchByRecord, pendingBottlesAtCustomersByRecord] = await Promise.all([
+        batchCheckQuantityMatch(individualRecords),
+        batchCheckBottlesAtCustomers(individualRecords),
+      ]);
       for (const record of individualRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record, {
+          quantitiesMatch: pendingQuantityMatchByRecord.get(record.id),
+          ...(pendingBottlesAtCustomersByRecord.get(record.id) || { hasBottlesAtCustomers: false, bottlesAtCustomers: [] }),
+        });
         if (wasAutoApproved) {
           autoApprovedRecords.push(record);
         } else {
@@ -1950,12 +1957,25 @@ export default function ImportApprovals() {
       if (!skipAutoApprove) {
         const autoApprovedIds = new Set();
         let autoApprovedCount = 0;
+        const autoApproveCandidates = [];
         for (const record of [...individualInvoices, ...individualReceipts]) {
           if (record.is_scanned_only) continue;
           if ((record.status || '').toLowerCase() !== 'pending') continue;
           if (!record._sourceTable || !record.id || autoApprovedIds.has(record.id)) continue;
           autoApprovedIds.add(record.id);
-          const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+          autoApproveCandidates.push(record);
+        }
+        // Batch the read-side checks for every candidate into a handful of queries instead
+        // of a bottle_scans+bottles pair (plus a nested per-barcode loop) per record.
+        const [quantityMatchByRecord, bottlesAtCustomersByRecord] = await Promise.all([
+          batchCheckQuantityMatch(autoApproveCandidates),
+          batchCheckBottlesAtCustomers(autoApproveCandidates),
+        ]);
+        for (const record of autoApproveCandidates) {
+          const wasAutoApproved = await autoApproveIfQuantitiesMatch(record, {
+            quantitiesMatch: quantityMatchByRecord.get(record.id),
+            ...(bottlesAtCustomersByRecord.get(record.id) || { hasBottlesAtCustomers: false, bottlesAtCustomers: [] }),
+          });
           if (wasAutoApproved) autoApprovedCount += 1;
         }
         if (autoApprovedCount > 0) {
@@ -2313,9 +2333,16 @@ export default function ImportApprovals() {
       // Check for auto-approval opportunities in scanned-only records
       const autoApprovedScannedRecords = [];
       const remainingScannedRecords = [];
-      
+
+      const [scannedQuantityMatchByRecord, scannedBottlesAtCustomersByRecord] = await Promise.all([
+        batchCheckQuantityMatch(scannedOnlyRecords),
+        batchCheckBottlesAtCustomers(scannedOnlyRecords),
+      ]);
       for (const record of scannedOnlyRecords) {
-        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record);
+        const wasAutoApproved = await autoApproveIfQuantitiesMatch(record, {
+          quantitiesMatch: scannedQuantityMatchByRecord.get(record.id),
+          ...(scannedBottlesAtCustomersByRecord.get(record.id) || { hasBottlesAtCustomers: false, bottlesAtCustomers: [] }),
+        });
         if (wasAutoApproved) {
           autoApprovedScannedRecords.push(record);
         } else {
@@ -6983,6 +7010,85 @@ return (
     }
   }
 
+  // Batched equivalent of checkQuantityMatch — one pair of queries (bottle_scans, bottles)
+  // for ALL records instead of one pair per record. Same per-record matching logic, just
+  // computed against pre-fetched data instead of an awaited query inside a loop.
+  async function batchCheckQuantityMatch(records) {
+    const results = new Map();
+    const recordsWithOrder = [];
+    const allVariants = new Set();
+
+    for (const record of records) {
+      const data = parseDataField(record.data);
+      const orderNumber = getOrderNumber(data);
+      if (!orderNumber) {
+        results.set(record.id, false);
+        continue;
+      }
+      const orderVariants = buildImportOrderVariants(orderNumber);
+      orderVariants.forEach((v) => allVariants.add(v));
+      recordsWithOrder.push({ record, data, orderVariants });
+    }
+
+    if (recordsWithOrder.length === 0) return results;
+
+    try {
+      const { data: scannedData, error: scannedError } = await supabase
+        .from('bottle_scans')
+        .select(BOTTLE_SCANS_QTY_SELECT)
+        .in('order_number', Array.from(allVariants))
+        .eq('organization_id', organization?.id);
+
+      if (scannedError) {
+        logger.error('Error fetching scanned data (batched):', scannedError);
+        recordsWithOrder.forEach(({ record }) => results.set(record.id, false));
+        return results;
+      }
+
+      const allScanRows = scannedData || [];
+      const allBarcodes = collectBarcodeLookupFromScans(allScanRows);
+      let barcodeToProduct = {};
+      if (allBarcodes.length > 0) {
+        const { data: bottles } = await supabase
+          .from('bottles')
+          .select('barcode_number, product_code, type')
+          .eq('organization_id', organization?.id)
+          .in('barcode_number', allBarcodes);
+        barcodeToProduct = buildBarcodeToProductMap(bottles, allScanRows);
+      }
+
+      // Index scan rows by order_number string so each record can pull its own subset
+      // without re-querying — mirrors the .in('order_number', orderVariants) filter above.
+      const scanRowsByVariant = new Map();
+      allScanRows.forEach((row) => {
+        const key = String(row.order_number).trim();
+        if (!scanRowsByVariant.has(key)) scanRowsByVariant.set(key, []);
+        scanRowsByVariant.get(key).push(row);
+      });
+
+      for (const { record, data, orderVariants } of recordsWithOrder) {
+        const rows = data.rows || data.line_items || [];
+        const seen = new Set();
+        const scanRows = [];
+        orderVariants.forEach((variant) => {
+          const key = String(variant).trim();
+          (scanRowsByVariant.get(key) || []).forEach((row) => {
+            if (!seen.has(row)) {
+              seen.add(row);
+              scanRows.push(row);
+            }
+          });
+        });
+        results.set(record.id, trackedQtyMatchesInvoice(rows, scanRows, barcodeToProduct));
+      }
+    } catch (error) {
+      logger.error('Error checking quantity match (batched):', error);
+      recordsWithOrder.forEach(({ record }) => results.set(record.id, false));
+    }
+
+    return results;
+  }
+
   // Check if scanned quantities match invoice quantities (same logic as card Trk/Inv counts).
   async function checkQuantityMatch(record) {
     try {
@@ -7268,6 +7374,109 @@ return (
     }
   }
 
+  // Batched equivalent of checkBottlesAtCustomers — one bottle_scans query + one bottles
+  // query for ALL records, instead of one bottle_scans query per record PLUS one bottles
+  // query per scanned barcode per record (the nested N+1 that caused the Order Verification
+  // slowdown). Same per-record blocking logic, computed against pre-fetched data.
+  async function batchCheckBottlesAtCustomers(records) {
+    const results = new Map();
+    const recordsWithOrder = [];
+    const allOrderNumbers = new Set();
+
+    for (const record of records) {
+      const data = parseDataField(record.data);
+      const orderNumber = data.order_number || data.reference_number || data.invoice_number;
+      if (!orderNumber) {
+        results.set(record.id, { hasBottlesAtCustomers: false, bottlesAtCustomers: [] });
+        continue;
+      }
+      allOrderNumbers.add(orderNumber);
+      recordsWithOrder.push({
+        record,
+        orderNumber,
+        orderCustomerId: getCustomerId(data),
+        orderCustomerName: getCustomerInfo(data),
+      });
+    }
+
+    if (recordsWithOrder.length === 0) return results;
+
+    try {
+      const { data: bottleScans, error: scanError } = await supabase
+        .from('bottle_scans')
+        .select('bottle_barcode, order_number')
+        .in('order_number', Array.from(allOrderNumbers))
+        .eq('organization_id', organization?.id)
+        .or('mode.eq.SHIP,mode.eq.DELIVERY,mode.eq.delivery');
+
+      if (scanError) throw scanError;
+
+      const barcodesByOrder = new Map();
+      (bottleScans || []).forEach((scan) => {
+        if (!scan.bottle_barcode || !scan.order_number) return;
+        const key = String(scan.order_number).trim();
+        if (!barcodesByOrder.has(key)) barcodesByOrder.set(key, new Set());
+        barcodesByOrder.get(key).add(scan.bottle_barcode);
+      });
+
+      const allBarcodes = new Set();
+      barcodesByOrder.forEach((set) => set.forEach((b) => allBarcodes.add(b)));
+
+      const bottleByBarcode = new Map();
+      if (allBarcodes.size > 0) {
+        const { data: bottles } = await supabase
+          .from('bottles')
+          .select('id, barcode_number, assigned_customer, customer_name, status')
+          .eq('organization_id', organization?.id)
+          .in('barcode_number', Array.from(allBarcodes));
+        (bottles || []).forEach((b) => {
+          if (!bottleByBarcode.has(b.barcode_number)) bottleByBarcode.set(b.barcode_number, b);
+        });
+      }
+
+      for (const { record, orderNumber, orderCustomerId, orderCustomerName } of recordsWithOrder) {
+        const scannedBarcodes = barcodesByOrder.get(String(orderNumber).trim()) || new Set();
+        const bottlesAtCustomers = [];
+
+        for (const barcode of scannedBarcodes) {
+          const bottle = bottleByBarcode.get(barcode);
+          if (!bottle) continue;
+          if (!isBottleAtCustomerByStatus(bottle.status)) continue;
+          if (
+            isSameCustomerIdentity(
+              orderCustomerId,
+              orderCustomerName,
+              bottle.customer_name,
+              bottle.assigned_customer
+            )
+          ) {
+            continue;
+          }
+          bottlesAtCustomers.push({
+            barcode: bottle.barcode_number,
+            currentCustomer: bottle.customer_name || bottle.assigned_customer || null,
+            status: bottle.status,
+          });
+        }
+
+        results.set(record.id, {
+          hasBottlesAtCustomers: bottlesAtCustomers.length > 0,
+          bottlesAtCustomers,
+        });
+      }
+    } catch (error) {
+      logger.error('Error checking bottles at customers (batched):', error);
+      // Match the single-record function's error behavior: assume bottles might be at
+      // customers (block auto-approve, require manual verification) rather than silently
+      // letting every candidate through.
+      recordsWithOrder.forEach(({ record }) => {
+        results.set(record.id, { hasBottlesAtCustomers: true, bottlesAtCustomers: [] });
+      });
+    }
+
+    return results;
+  }
+
   // Block auto-approve when shipped bottles are at a different customer (not the delivery customer).
   async function checkBottlesAtCustomers(record) {
     try {
@@ -7347,17 +7556,24 @@ return (
   }
 
   // Auto-approve when quantities match and shipped bottles are at home or already with the delivery customer.
-  async function autoApproveIfQuantitiesMatch(record) {
+  // `precomputed`, when provided (batched call sites pass the result of batchCheckQuantityMatch/
+  // batchCheckBottlesAtCustomers), skips the per-record checkQuantityMatch/checkBottlesAtCustomers
+  // queries entirely instead of re-fetching what the batch already fetched for every record.
+  async function autoApproveIfQuantitiesMatch(record, precomputed) {
     try {
-      const quantitiesMatch = await checkQuantityMatch(record);
-      
+      const quantitiesMatch = precomputed
+        ? precomputed.quantitiesMatch
+        : await checkQuantityMatch(record);
+
       if (!quantitiesMatch) {
         logger.debug(`❌ Not auto-approving record ${record.id} - quantities don't match`);
         return false;
       }
 
       // Block auto-approve when shipped bottles are at a different customer.
-      const { hasBottlesAtCustomers, bottlesAtCustomers } = await checkBottlesAtCustomers(record);
+      const { hasBottlesAtCustomers, bottlesAtCustomers } = precomputed
+        ? precomputed
+        : await checkBottlesAtCustomers(record);
       if (hasBottlesAtCustomers) {
         logger.debug(`⚠️ Not auto-approving record ${record.id} - shipped bottles at a different customer:`, bottlesAtCustomers);
         return false;
