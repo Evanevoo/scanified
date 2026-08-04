@@ -3,9 +3,10 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { supabase } from '../supabase/client';
 import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, CircularProgress, Alert, Button, Card, CardContent, Grid, Stack, Chip
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Alert, Button, Card, CardContent, Grid, Stack, Chip
 } from '@mui/material';
 import { useAuth } from '../hooks/useAuth';
+import { StatsSkeleton, TableSkeleton } from '../components/SmoothLoading';
 
 function normalizeFillStatus(status) {
   const value = (status || '').toString().trim().toLowerCase();
@@ -362,8 +363,9 @@ export default function Assets() {
   if (loading) return (
     <Box sx={{ minHeight: '100%', bgcolor: 'transparent', py: 2, borderRadius: 0, overflow: 'visible' }}>
       <Paper elevation={0} sx={{ width: '100%', p: { xs: 2, md: 3 }, borderRadius: 3, boxShadow: 'none', border: '1px solid rgba(15, 23, 42, 0.08)', bgcolor: '#fcfcfb', overflow: 'visible' }}>
-        <Box p={4} textAlign="center">
-          <CircularProgress />
+        <StatsSkeleton count={7} />
+        <Box sx={{ mt: 3 }}>
+          <TableSkeleton rows={5} columns={9} />
         </Box>
       </Paper>
     </Box>

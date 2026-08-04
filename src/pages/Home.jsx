@@ -13,7 +13,6 @@ import {
   CardContent,
   Typography,
   Button,
-  LinearProgress,
   IconButton,
   Tooltip,
   Stack,
@@ -36,6 +35,7 @@ import {
   QrCodeScanner,
 } from '@mui/icons-material';
 import { commonStyles, brandColors } from '../styles/theme';
+import { StatsSkeleton, CardSkeleton } from '../components/SmoothLoading';
 import {
   countCustomersWithOpenRentals,
   rentalCoveragePercent,
@@ -226,11 +226,14 @@ export default function Home() {
 
   if (loading) {
     return (
-      <Box sx={{ p: 4 }}>
-        <LinearProgress sx={{ borderRadius: '4px', height: 6 }} />
-        <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
-          Loading dashboard…
-        </Typography>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <CardSkeleton count={1} />
+        <Box sx={{ mt: 3 }}>
+          <StatsSkeleton count={4} />
+        </Box>
+        <Box sx={{ mt: 3 }}>
+          <CardSkeleton count={2} />
+        </Box>
       </Box>
     );
   }

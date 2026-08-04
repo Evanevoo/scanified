@@ -59,6 +59,7 @@ import {
 } from '../services/openRentalsBillingBasis';
 import { useDebounce } from '../utils/performance';
 import EmailInvoiceDialog from '../components/EmailInvoiceDialog';
+import { TableSkeleton } from '../components/SmoothLoading';
 import BulkEmailPreviewDialog from '../components/BulkEmailPreviewDialog';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -3726,9 +3727,8 @@ export default function Subscriptions() {
 
   if (ctx.loading && !hasWorkspaceData) {
     return (
-      <Box sx={{ p: 4 }}>
-        <LinearProgress sx={{ borderRadius: 1 }} />
-        <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>Loading rentals...</Typography>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+        <TableSkeleton rows={8} columns={8} />
       </Box>
     );
   }
@@ -4064,7 +4064,23 @@ export default function Subscriptions() {
                     onClick={() => { if (!sub.isVirtual) navigate(`/rentals/${sub.id}`); }}
                   >
                     <TableCell sx={stickyCustomerColSx}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          ...(sub.customer_id && {
+                            cursor: 'pointer',
+                            width: 'fit-content',
+                            '&:hover': { color: 'primary.main', textDecoration: 'underline' },
+                          }),
+                        }}
+                        onClick={(e) => {
+                          const id = String(sub.customer_id || '').trim();
+                          if (!id) return;
+                          e.stopPropagation();
+                          navigate(`/customer/${encodeURIComponent(id)}`);
+                        }}
+                      >
                         {getCustomerDisplayLabel(sub.customer, parentNameById) || sub.customer_id}
                       </Typography>
                       <Typography
