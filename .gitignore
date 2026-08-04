@@ -161,4 +161,7 @@ backups/
 YOUR_BACKUP_CONFIG.md
 
 # Local duplicate checkout (nested repo); do not commit
-scanified/.worktrees/
+scanified/
+
+# Isolated worktree directory for feature work
+worktrees/
