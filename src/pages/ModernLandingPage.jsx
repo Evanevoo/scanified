@@ -18,7 +18,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import SEOHead, { SEOConfigs } from '../components/SEOHead';
-import { ParticleTextEffect } from '@/components/ui/particle-text-effect';
+import GravityHeroBackground from '@/components/ui/gravity-hero-background';
 import { marketingTokens } from '../config/marketingTokens';
 import { fetchPublicSubscriptionPlans } from '../services/publicPlansService';
 
@@ -107,15 +107,6 @@ export default function ModernLandingPage() {
     return () => window.clearTimeout(timer);
   }, [location.pathname, location.hash, reduceMotion]);
 
-  // Words for particle effect background
-  const particleWords = [
-    assetConfig.appName?.toUpperCase() || "SCANIFIED",
-    "TRACKING",
-    "ASSETS",
-    "MANAGEMENT",
-    "ANALYTICS"
-  ];
-
   const features = [
     {
       icon: <MapPin className="w-6 h-6 text-white" />,
@@ -167,13 +158,7 @@ export default function ModernLandingPage() {
       
       {/* Hero Section */}
       <section id="main-content" className="relative overflow-hidden py-24 md:py-32 bg-transparent">
-        {/* Particle Text Effect Background */}
-        <ParticleTextEffect 
-          words={particleWords} 
-          asBackground={true}
-          className="z-0"
-          disabled={!!reduceMotion}
-        />
+        <GravityHeroBackground />
         <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             <motion.div
@@ -192,14 +177,18 @@ export default function ModernLandingPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.2 }}
             >
-              Track Every {assetConfig.assetTypeSingular || 'Asset'},
-              <motion.span 
+              Less guesswork.
+              <motion.span
                 className="block text-gray-900"
                 initial={{ opacity: 0, x: -50 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.4 }}
               >
-                Optimize Every Operation
+                More{' '}
+                <span className="font-serif italic bg-gradient-to-r from-[#40B5AD] to-[#8B7BA8] bg-clip-text text-transparent">
+                  visibility
+                </span>
+                .
               </motion.span>
             </motion.h1>
             <motion.div 
