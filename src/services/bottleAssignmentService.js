@@ -18,6 +18,30 @@ import { isSameCustomerIdentity } from '../utils/customerIdentityMatch';
 import { isCustomerOwnedOwnership, CUSTOMER_OWNED_STORED_STATUS } from '../utils/bottleOwnership';
 import { createOpenRentalForShippedBottle } from './backfillOpenRentalsForAssignedBottles';
 
+/** Normalizes an invoice/order date (or Date-ish value) to YYYY-MM-DD; null if unparseable. */
+function toIsoDateOnly(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (usDate) {
+    const month = usDate[1].padStart(2, '0');
+    const day = usDate[2].padStart(2, '0');
+    return `${usDate[3]}-${month}-${day}`;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().split('T')[0];
+}
+
+/** Matches the normalization callers use as keys when building a barcode -> ship-date map. */
+function normalizeBarcodeForDateLookup(b) {
+  if (b == null || b === '') return '';
+  const s = String(b).trim();
+  return s.replace(/^0+/, '') || s;
+}
+
 /** Full customer row for RPC (`customers.id`) and direct ship updates. */
 async function resolveCustomerForAssignment(organizationId, customerId, customerName) {
   const name = String(customerName || '').trim();
@@ -133,6 +157,8 @@ async function assignShippedBottlesWithCustomerListId({
   orderNumber,
   defaultRentalAmount = 10,
   defaultTaxRate = 0.11,
+  shipDate = null,
+  shipBarcodeDates = {},
 }) {
   const rowId = String(customerRowId || '').trim();
   const listId = String(customerListId || '').trim();
@@ -201,12 +227,19 @@ async function assignShippedBottlesWithCustomerListId({
     }
 
     const today = new Date().toISOString().split('T')[0];
+    // Prefer the barcode's actual scan date, then the order's date, over "today" — otherwise a
+    // delivery scanned days before someone approves the order gets a rental_start_date of the
+    // approval day, which shows up as a second, phantom "Delivery" entry in movement history.
+    const effectiveShipDate =
+      toIsoDateOnly(shipBarcodeDates?.[normalizeBarcodeForDateLookup(barcode)]) ||
+      toIsoDateOnly(shipDate) ||
+      today;
     const patchBase = {
       previous_assigned_customer: bottle.assigned_customer,
       previous_status: bottle.status,
       customer_name: name,
       status: isCustomerOwnedOwnership(bottle.ownership) ? CUSTOMER_OWNED_STORED_STATUS : 'rented',
-      rental_start_date: today,
+      rental_start_date: effectiveShipDate,
       last_verified_order: order || null,
       updated_at: new Date().toISOString(),
     };
@@ -234,7 +267,7 @@ async function assignShippedBottlesWithCustomerListId({
       bottle: { ...bottle, barcode_number: canonicalBarcode, assigned_customer: rentalCustomerId, customer_name: name },
       customerId: rentalCustomerId,
       customerName: name,
-      rentalStartDate: today,
+      rentalStartDate: effectiveShipDate,
       orderNumber: order || null,
     });
     if (rentalResult.error) {
@@ -303,6 +336,7 @@ export const bottleAssignmentService = {
     defaultTaxRate = 0.11,
     orderNumber = null,
     endDate = null,
+    shipBarcodeDates = {},
   }) {
     try {
       if (isTemporaryCustomerIdentity(customerId) || isTemporaryCustomerIdentity(customerName)) {
@@ -356,12 +390,15 @@ export const bottleAssignmentService = {
           orderNumber,
           defaultRentalAmount,
           defaultTaxRate,
+          shipDate: endDate,
+          shipBarcodeDates,
         });
         if (early.success) {
           return {
             success: true,
             data: {
               ...(early.data || {}),
+              stale_skipped: staleShipBarcodes.size,
               note: 'Assigned via direct ship path (CustomerListID on bottles; RPC skipped).',
             },
           };
@@ -404,6 +441,7 @@ export const bottleAssignmentService = {
           if (staleSkippedNote.length) {
             resultData.warnings = [...(resultData.warnings || []), ...staleSkippedNote];
           }
+          resultData.stale_skipped = staleShipBarcodes.size;
           if (hasReturns) {
             await finalizeVerifiedReturnBarcodes(supabase, organizationId, {
               returnBarcodes,
@@ -430,6 +468,8 @@ export const bottleAssignmentService = {
             orderNumber,
             defaultRentalAmount,
             defaultTaxRate,
+            shipDate: endDate,
+            shipBarcodeDates,
           });
           if (fb.success) {
             if (hasReturns) {
@@ -446,6 +486,7 @@ export const bottleAssignmentService = {
               data: {
                 ...(fb.data || {}),
                 warnings: [...(fb.data?.warnings || []), ...staleSkippedNote],
+                stale_skipped: staleShipBarcodes.size,
                 note:
                   returnBarcodes?.length > 0
                     ? 'Ship barcodes were assigned via direct ship fallback; return barcodes finalized separately (rentals closed / inventory cleared).'
@@ -476,6 +517,8 @@ export const bottleAssignmentService = {
               orderNumber,
               defaultRentalAmount,
               defaultTaxRate,
+              shipDate: endDate,
+              shipBarcodeDates,
             });
             if (fb.success) {
               if (hasReturns) {
@@ -514,9 +557,15 @@ export const bottleAssignmentService = {
           orderNumber,
           defaultRentalAmount,
           defaultTaxRate,
+          shipDate: endDate,
+          shipBarcodeDates,
         });
-        if (fallback.success && staleSkippedNote.length) {
-          fallback.data = { ...(fallback.data || {}), warnings: [...(fallback.data?.warnings || []), ...staleSkippedNote] };
+        if (fallback.success) {
+          fallback.data = {
+            ...(fallback.data || {}),
+            ...(staleSkippedNote.length ? { warnings: [...(fallback.data?.warnings || []), ...staleSkippedNote] } : {}),
+            stale_skipped: staleShipBarcodes.size,
+          };
         }
         return fallback;
       }

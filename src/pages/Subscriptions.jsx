@@ -47,8 +47,10 @@ import {
   buildBottleLookupMaps,
   groupBillableUnitCountsByProductCode,
   getDescendantCustomerRecords,
+  isCustomerOwnedForBilling,
   isDnsRentalExcludedFromBillableCount,
   isRentalOpen,
+  resolveBottleForRental,
   resolvedRentalProductCode,
 } from '../services/billingFromAssets';
 import {
@@ -151,7 +153,7 @@ function rowMatchesTermsFilter(row, filter) {
 }
 
 /** Deduped open-rental unit count — same basis as Customer Detail rental history header (legacy virtual rows). */
-function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = null, allCustomers = null) {
+function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = null, allCustomers = null, bottles = null) {
   const customer = row?.customer || {};
   const baseKeys = {
     customerListId: String(
@@ -167,11 +169,16 @@ function billableItemCountForRentalRow(row, openRentals, rentalsBillingIndex = n
       : mergeOpenRentalsForBillingBasis((openRentals || []).filter(isRentalOpen), keys)
   );
 
+  const { byId: bottleById, byBarcode: bottleByBarcode } = buildBottleLookupMaps(bottles || []);
   const seen = new Set();
   let count = 0;
   const countBillable = (rows) => {
     for (const r of rows || []) {
       if (isDnsRentalExcludedFromBillableCount(r)) continue;
+      // Customer-owned cylinders are the customer's own property, not company fleet on rent —
+      // must not count/bill on the Rentals page even via a stale open rental row.
+      const linkedBottle = resolveBottleForRental(r, bottleById, bottleByBarcode);
+      if (linkedBottle && isCustomerOwnedForBilling(linkedBottle)) continue;
       const id = String(r?.id || '').trim();
       if (id) {
         if (seen.has(id)) continue;
@@ -1165,6 +1172,11 @@ export default function Subscriptions() {
           const desc = String(r?.dns_description || '').toLowerCase();
           if (desc.includes('return not on balance')) return false;
           if (desc.includes('return not scanned')) return false;
+          // Customer-owned cylinders are the customer's own property, not company fleet on rent —
+          // must not appear/bill on the Rentals page even if a legacy rental row still links to one
+          // (e.g. ownership was reclassified after the rental row was created).
+          const linkedBottle = resolveBottleForRental(r, legacyBottleMaps.byId, legacyBottleMaps.byBarcode);
+          if (linkedBottle && isCustomerOwnedForBilling(linkedBottle)) return false;
           return true;
         })
         .reduce((acc, row) => {
@@ -1227,6 +1239,7 @@ export default function Subscriptions() {
           ctx.rentals,
           openRentalsBillingIndex,
           ctx.customers,
+          ctx.bottles,
         );
         return {
           id: `legacy-${g.key}`,
@@ -1393,6 +1406,7 @@ export default function Subscriptions() {
           ctx.rentals,
           openRentalsBillingIndex,
           ctx.customers,
+          ctx.bottles,
         );
         if (basisCount > 0) computedItemCount = basisCount;
       }

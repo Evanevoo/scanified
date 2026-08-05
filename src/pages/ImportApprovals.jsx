@@ -861,18 +861,6 @@ export default function ImportApprovals() {
   const [locationFilter, setLocationFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
   const [auditDialog, setAuditDialog] = useState({ open: false, logs: [], title: '' });
-  /**
-   * Org-wide "delivered scan, no renter" sweep. Scoped detection (SHIP-scanned bottles with an empty
-   * renter) + a preview step before writing, since this can touch many orders in one pass — unlike the
-   * per-order "Fix delivered assignments" button, a bad match here is harder to notice and undo.
-   */
-  const [deliverySweepDialog, setDeliverySweepDialog] = useState({
-    open: false,
-    phase: 'idle', // idle | scanning | preview | applying | done
-    candidates: [], // [{ orderNumber, barcodes: [] }]
-    results: [], // [{ orderNumber, barcodeCount, success, message }]
-    error: '',
-  });
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -4569,14 +4557,6 @@ export default function ImportApprovals() {
             Refresh
           </Button>
           <Button
-            startIcon={<PersonAddIcon />}
-            onClick={scanForMissingDeliveredAssignments}
-            variant="outlined"
-            sx={{ borderRadius: 999, textTransform: 'none' }}
-          >
-            Fix delivered assignments (org-wide)
-          </Button>
-          <Button
             startIcon={<SettingsIcon />}
             onClick={() => setSettingsDialog({ open: true })}
             variant="contained"
@@ -4587,111 +4567,6 @@ export default function ImportApprovals() {
         </Box>
       </Box>
       </Paper>
-
-      <Dialog
-        open={deliverySweepDialog.open}
-        onClose={() => {
-          if (deliverySweepDialog.phase === 'applying') return;
-          setDeliverySweepDialog({ open: false, phase: 'idle', candidates: [], results: [], error: '' });
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Fix delivered assignments (org-wide)</DialogTitle>
-        <DialogContent dividers>
-          {deliverySweepDialog.phase === 'scanning' && (
-            <Box display="flex" alignItems="center" gap={2} py={2}>
-              <CircularProgress size={20} />
-              <Typography variant="body2">Scanning bottles and scan history for this organization…</Typography>
-            </Box>
-          )}
-          {deliverySweepDialog.error && (
-            <Alert severity="error" sx={{ mb: 2 }}>{deliverySweepDialog.error}</Alert>
-          )}
-          {deliverySweepDialog.phase === 'preview' && !deliverySweepDialog.error && (
-            deliverySweepDialog.candidates.length === 0 ? (
-              <Alert severity="success">No delivered bottles are missing a renter right now.</Alert>
-            ) : (
-              <>
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  Found {deliverySweepDialog.candidates.reduce((s, c) => s + c.barcodes.length, 0)} barcode(s) across{' '}
-                  {deliverySweepDialog.candidates.length} order(s) that were delivered (SHIP scan) but never got a
-                  renter on the bottle row. Applying will re-run the same assignment logic used at approval time for
-                  each of these orders — nothing is written until you click Apply.
-                </Alert>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Order #</TableCell>
-                      <TableCell align="right">Barcodes</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {deliverySweepDialog.candidates.slice(0, 50).map((c) => (
-                      <TableRow key={c.orderNumber}>
-                        <TableCell>{c.orderNumber}</TableCell>
-                        <TableCell align="right">{c.barcodes.length}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {deliverySweepDialog.candidates.length > 50 && (
-                  <Typography variant="caption" color="text.secondary">
-                    …and {deliverySweepDialog.candidates.length - 50} more order(s).
-                  </Typography>
-                )}
-              </>
-            )
-          )}
-          {(deliverySweepDialog.phase === 'applying' || deliverySweepDialog.phase === 'done') && (
-            <>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                {deliverySweepDialog.phase === 'applying'
-                  ? `Applying… ${deliverySweepDialog.results.length}/${deliverySweepDialog.candidates.length}`
-                  : `Done — ${deliverySweepDialog.results.filter((r) => r.success).length}/${deliverySweepDialog.results.length} order(s) fixed.`}
-              </Typography>
-              {deliverySweepDialog.phase === 'applying' && (
-                <LinearProgress
-                  variant="determinate"
-                  value={(deliverySweepDialog.results.length / Math.max(1, deliverySweepDialog.candidates.length)) * 100}
-                  sx={{ mb: 2 }}
-                />
-              )}
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Order #</TableCell>
-                    <TableCell align="right">Barcodes</TableCell>
-                    <TableCell>Result</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {deliverySweepDialog.results.map((r) => (
-                    <TableRow key={r.orderNumber}>
-                      <TableCell>{r.orderNumber}</TableCell>
-                      <TableCell align="right">{r.barcodeCount}</TableCell>
-                      <TableCell sx={{ color: r.success ? 'success.main' : 'error.main' }}>{r.message}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setDeliverySweepDialog({ open: false, phase: 'idle', candidates: [], results: [], error: '' })}
-            disabled={deliverySweepDialog.phase === 'applying'}
-          >
-            {deliverySweepDialog.phase === 'done' ? 'Close' : 'Cancel'}
-          </Button>
-          {deliverySweepDialog.phase === 'preview' && deliverySweepDialog.candidates.length > 0 && (
-            <Button variant="contained" onClick={applyDeliverySweep}>
-              Apply fix to {deliverySweepDialog.candidates.length} order(s)
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
 
       {/* Statistics Dashboard */}
       <Grid container spacing={3} mb={3}>
@@ -6923,22 +6798,28 @@ return (
       
       logger.debug('🔍 Per-order approval:', { orderNumber, verifiedOrderNumbers, distinctOrderNumbers, allOrdersVerified });
       
+      // Assign bottles to customers BEFORE writing status: 'approved'. If this throws, the order
+      // must stay pending — previously the status write below ran first, so a failed/thrown
+      // assignment still left the order marked "approved" with bottles never assigned, and the
+      // only way to notice/fix it was the now-removed org-wide "Fix delivered assignments" sweep.
+      await assignBottlesToCustomer(row);
+
       const { data: updateResult, error } = await supabase
         .from(tableName)
         .update(updatePayload)
         .eq('id', recordId)
         .select();
-      
+
       if (error) {
         logger.error('❌ Error approving record:', error);
         throw new Error(`Failed to approve: ${error.message}`);
       }
-      
+
       if (!updateResult || updateResult.length === 0) {
         logger.error('❌ No records were updated! Check if ID exists:', recordId);
         throw new Error(`No records were updated. Record with ID ${recordId} may not exist.`);
       }
-      
+
       logger.debug('✅ Order approved successfully (per-order verification)');
 
       const normalizeOrderNum = (num) => {
@@ -6989,9 +6870,6 @@ return (
         }
       }
 
-      // Assign bottles to customers after approval
-      await assignBottlesToCustomer(row);
-      
       setSnackbar('Record approved successfully and bottles assigned to customers');
       await fetchData(true);
     } catch (error) {
@@ -7517,21 +7395,23 @@ return (
         verifiedBy: user?.id,
       });
 
+      // Assign bottles BEFORE writing the approved/verified status — this runs unattended, so if it
+      // throws (bad barcode, no CustomerListID, etc.) the record must stay pending for a human to see
+      // in the list, not silently sit "approved" with bottles never assigned.
+      await assignBottlesToCustomer(record);
+
       const { data: updatedRows, error } = await supabase
         .from(tableName)
         .update(updatePayload)
         .eq('id', recordId)
         .select('id');
-      
+
       if (error || !updatedRows || updatedRows.length === 0) {
         if (error) logger.error('Error auto-approving record:', error);
         else logger.debug(`Auto-approve update matched 0 rows for record ${record.id}`);
         return false;
       }
-      
-      // Trk matches Inv and record is approved — now assign bottles
-      await assignBottlesToCustomer(record);
-      
+
       return true;
     } catch (error) {
       logger.error('Error in auto-approval:', error);
@@ -7674,6 +7554,23 @@ return (
       const normalizeBarcodeAssign = (b) =>
         b == null || b === '' ? '' : String(b).trim().replace(/^0+/, '') || String(b).trim();
 
+      // Actual scan date per barcode, so rentals.rental_start_date reflects when the bottle was
+      // really delivered, not the day someone got around to approving the order. Using "today" here
+      // created a second, later-dated "Delivery" entry in movement history alongside the real scan
+      // (e.g. scanned 7/29, approved 8/3 -> two rows for the same delivery).
+      const shipDateByBarcode = {};
+      (bottleScanRows || []).forEach((scan) => {
+        const modeUpper = String(scan?.mode || '').toUpperCase();
+        if (modeUpper !== 'SHIP' && modeUpper !== 'DELIVERY') return;
+        const norm = normalizeBarcodeAssign(scan?.bottle_barcode);
+        if (!norm) return;
+        const iso = scan?.timestamp || scan?.created_at;
+        if (!iso) return;
+        const dateOnly = String(iso).slice(0, 10);
+        const existing = shipDateByBarcode[norm];
+        if (!existing || dateOnly > existing) shipDateByBarcode[norm] = dateOnly;
+      });
+
       const scanCustomerUnanimous = await getUnanimousShipScanCustomer(
         supabase,
         organization?.id,
@@ -7800,50 +7697,26 @@ return (
         returnBarcodes: returnBarcodesOnBalance,
         orderNumber: orderNumber,
         endDate: effectiveDeliveryDate,
+        shipBarcodeDates: shipDateByBarcode,
       });
 
       if (rpcResult.success) {
         const d = rpcResult.data || {};
         const shippedCount = Number(d.shipped || 0);
         const alreadyOnCustomer = Number(d.already_on_customer || 0);
+        // Barcodes intentionally skipped because a newer scan already moved them to a different order —
+        // that's correct, expected behavior (not a failure) and must not block this order's approval.
+        const staleSkipped = Number(d.stale_skipped || 0);
         logger.debug(
           `RPC assignment succeeded: ${shippedCount} shipped, ${d.returned || 0} returned, ${d.skipped || 0} skipped, ${d.created || 0} created`,
         );
-        if (shipArr.length > 0 && shippedCount === 0 && alreadyOnCustomer < shipArr.length) {
-          const warnDetail =
-            (Array.isArray(d.warnings) && d.warnings.length && d.warnings.join('; ')) ||
-            (Array.isArray(d.errors) && d.errors.length && d.errors.join('; ')) ||
-            'Check barcodes exist in Assets and the customer has a CustomerListID.';
-          logger.warn('assignBottlesToCustomer: delivery scans present but 0 bottles assigned', {
-            orderNumber,
-            shipArr,
-            warnDetail,
-          });
-          setSnackbar(
-            `Import approved, but 0 delivery bottle(s) were assigned (${warnDetail}). Open order detail and use Fix delivered assignments.`,
-          );
-        } else if (shipArr.length > 0 && shippedCount + alreadyOnCustomer < shipArr.length) {
-          // Partial: most barcodes on this order assigned fine, but at least one did not — this used to
-          // pass as a silent success (shippedCount > 0), leaving that bottle's renter empty on the asset
-          // row until someone noticed "Delivered scan(s) with no renter" on the order detail page.
-          const failedCount = shipArr.length - shippedCount - alreadyOnCustomer;
-          const warnDetail =
-            (Array.isArray(d.warnings) && d.warnings.length && d.warnings.join('; ')) ||
-            (Array.isArray(d.errors) && d.errors.length && d.errors.join('; ')) ||
-            'Check barcodes exist in Assets.';
-          logger.warn('assignBottlesToCustomer: partial assignment', {
-            orderNumber,
-            shipArr,
-            shippedCount,
-            alreadyOnCustomer,
-            warnDetail,
-          });
-          setSnackbar(
-            `Import approved, but ${failedCount} of ${shipArr.length} delivery bottle(s) were not assigned (${warnDetail}). Open order detail and use Fix delivered assignments.`,
-          );
-        }
+        const preReconcileShortfall = Math.max(0, shipArr.length - shippedCount - alreadyOnCustomer - staleSkipped);
+
         // Close any existing RNB for barcodes we just shipped (bottle back in circulation)
         if (shipArr.length > 0) await closeRNBRentalsForBarcodes(shipArr);
+        // Self-heals the most common cause of a shortfall: bottle still shows a prior customer because
+        // its return was never scanned. Must run BEFORE we decide whether to fail the approval, since
+        // it can resolve every barcode preReconcileShortfall counted as unassigned.
         const reconcileWarnings = await reconcileShippedBottleAssignments(supabase, {
           organizationId: organization?.id,
           shipBarcodes: shipArr,
@@ -7854,6 +7727,27 @@ return (
         });
         if (reconcileWarnings.length > 0) {
           logger.warn('Post-verify reassignment (prior customer / missing return):', reconcileWarnings);
+        }
+
+        const genuineShortfall = Math.max(0, preReconcileShortfall - reconcileWarnings.length);
+        if (genuineShortfall > 0) {
+          const warnDetail =
+            (Array.isArray(d.warnings) && d.warnings.length && d.warnings.join('; ')) ||
+            (Array.isArray(d.errors) && d.errors.length && d.errors.join('; ')) ||
+            'Check barcodes exist in Assets and the customer has a CustomerListID.';
+          logger.warn('assignBottlesToCustomer: delivery scan(s) could not be assigned', {
+            orderNumber,
+            shipArr,
+            genuineShortfall,
+            staleSkipped,
+            warnDetail,
+          });
+          // Throw instead of warning-and-continuing: the caller (confirmApprove /
+          // autoApproveIfQuantitiesMatch) must not mark this order approved while a delivered bottle
+          // has no renter — there is no longer an org-wide sweep to catch it after the fact.
+          throw new Error(
+            `${genuineShortfall} of ${shipArr.length} delivered bottle(s) could not be assigned to ${newCustomerName} (${warnDetail}). Fix the barcode/customer issue and try again.`,
+          );
         }
         const reconcileSuffix =
           reconcileWarnings.length > 0
@@ -7928,140 +7822,21 @@ return (
     }
   }
 
-  /**
-   * Scan the whole org for bottles whose latest scan is a delivery (SHIP/DELIVERY) but the bottle
-   * row still has no renter — the same condition Order Detail's "Delivered scan(s) with no renter"
-   * alert checks per-order, run here across every order at once so it doesn't have to be found one
-   * order at a time. Detection only; nothing is written until applyDeliverySweep runs.
-   */
-  async function scanForMissingDeliveredAssignments() {
-    if (!organization?.id) return;
-    setDeliverySweepDialog({ open: true, phase: 'scanning', candidates: [], results: [], error: '' });
-    try {
-      const PAGE_SIZE = 1000;
-      const allBottles = [];
-      for (let from = 0, page = 0; page < 50; page += 1) {
-        const { data, error } = await supabase
-          .from('bottles')
-          .select('id, barcode_number, assigned_customer, customer_uuid, customer_name')
-          .eq('organization_id', organization.id)
-          .order('id', { ascending: true })
-          .range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        allBottles.push(...(data || []));
-        if (!data || data.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-      }
-
-      const missingRenterBarcodes = allBottles
-        .filter((b) => {
-          const ac = String(b.assigned_customer || b.customer_uuid || '').trim();
-          const cn = String(b.customer_name || '').trim();
-          return !ac && !cn;
-        })
-        .map((b) => String(b.barcode_number || '').trim())
-        .filter(Boolean);
-
-      if (missingRenterBarcodes.length === 0) {
-        setDeliverySweepDialog({ open: true, phase: 'preview', candidates: [], results: [], error: '' });
-        return;
-      }
-
-      // Latest scan per barcode, chunked so the .in() filter doesn't get too large.
-      const latestScanByBarcode = new Map();
-      const CHUNK = 150;
-      for (let i = 0; i < missingRenterBarcodes.length; i += CHUNK) {
-        const slice = missingRenterBarcodes.slice(i, i + CHUNK);
-        const { data: scans, error: scanErr } = await supabase
-          .from('bottle_scans')
-          .select('bottle_barcode, order_number, mode, created_at')
-          .eq('organization_id', organization.id)
-          .in('bottle_barcode', slice);
-        if (scanErr) throw scanErr;
-        (scans || []).forEach((s) => {
-          const bc = String(s.bottle_barcode || '').trim();
-          if (!bc) return;
-          const time = new Date(s.created_at || 0).getTime();
-          const existing = latestScanByBarcode.get(bc);
-          if (!existing || time >= existing.time) {
-            latestScanByBarcode.set(bc, { mode: String(s.mode || '').toUpperCase(), orderNumber: s.order_number, time });
-          }
-        });
-      }
-
-      const byOrder = new Map();
-      latestScanByBarcode.forEach(({ mode, orderNumber }, barcode) => {
-        if (mode !== 'SHIP' && mode !== 'DELIVERY') return; // latest event was a return/pickup — not actually stuck
-        const order = String(orderNumber || '').trim();
-        if (!order) return;
-        if (!byOrder.has(order)) byOrder.set(order, []);
-        byOrder.get(order).push(barcode);
-      });
-
-      const candidates = [...byOrder.entries()]
-        .map(([orderNumber, barcodes]) => ({ orderNumber, barcodes }))
-        .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
-
-      setDeliverySweepDialog({ open: true, phase: 'preview', candidates, results: [], error: '' });
-    } catch (err) {
-      logger.error('scanForMissingDeliveredAssignments:', err);
-      setDeliverySweepDialog({
-        open: true,
-        phase: 'preview',
-        candidates: [],
-        results: [],
-        error: err?.message || 'Scan failed.',
-      });
+  // Normalizes an order/invoice date to YYYY-MM-DD, falling back to today when absent/unparseable.
+  function toIsoDateForInlineAssign(value) {
+    const today = new Date().toISOString().split('T')[0];
+    if (!value) return today;
+    const raw = String(value).trim();
+    if (!raw) return today;
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+    const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (usDate) {
+      const month = usDate[1].padStart(2, '0');
+      const day = usDate[2].padStart(2, '0');
+      return `${usDate[3]}-${month}-${day}`;
     }
-  }
-
-  /**
-   * Apply the fix for every order found by scanForMissingDeliveredAssignments, reusing the same
-   * assignBottlesToCustomer() path used for normal approve/verify (already handles RPC vs direct-ship
-   * fallback, reconcile, RNB, etc.) instead of a new bulk-write code path.
-   */
-  async function applyDeliverySweep() {
-    const { candidates } = deliverySweepDialog;
-    if (!candidates?.length) return;
-    setDeliverySweepDialog((prev) => ({ ...prev, phase: 'applying', results: [] }));
-
-    // Fetch both import tables once and index by resolved order number, instead of re-querying per order.
-    const recordByOrderNumber = new Map();
-    const [{ data: invoiceRows }, { data: receiptRows }] = await Promise.all([
-      supabase.from('imported_invoices').select('id, data, status').eq('organization_id', organization.id),
-      supabase.from('imported_sales_receipts').select('id, data, status').eq('organization_id', organization.id),
-    ]);
-    // Sales receipts indexed first so invoices (checked second) win when an order appears in both.
-    (receiptRows || []).forEach((r) => {
-      const num = resolveImportOrderNumber(parseImportDataField(r.data));
-      if (num) recordByOrderNumber.set(num, r);
-    });
-    (invoiceRows || []).forEach((r) => {
-      const num = resolveImportOrderNumber(parseImportDataField(r.data));
-      if (num) recordByOrderNumber.set(num, r);
-    });
-
-    const results = [];
-    for (const { orderNumber, barcodes } of candidates) {
-      try {
-        // Scan-only order (no import row) — assignBottlesToCustomer derives everything else from
-        // bottle_scans / getUnanimousShipScanCustomer.
-        const record = recordByOrderNumber.get(orderNumber) || { id: `scanned_${orderNumber}`, data: {} };
-        await assignBottlesToCustomer(record);
-        results.push({ orderNumber, barcodeCount: barcodes.length, success: true, message: 'Fixed' });
-      } catch (err) {
-        logger.error('applyDeliverySweep order failed:', orderNumber, err);
-        results.push({
-          orderNumber,
-          barcodeCount: barcodes.length,
-          success: false,
-          message: err?.message || 'Failed',
-        });
-      }
-      setDeliverySweepDialog((prev) => ({ ...prev, results: [...results] }));
-    }
-    setDeliverySweepDialog((prev) => ({ ...prev, phase: 'done', results }));
-    if (typeof refreshSilent === 'function') void refreshSilent();
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? today : parsed.toISOString().split('T')[0];
   }
 
   // Fallback inline bottle assignment when the RPC is unavailable
@@ -8162,14 +7937,14 @@ return (
             customer_name: newCustomerName,
             customer_id: newCustomerId || null,
             status: 'rented',
-            rental_start_date: new Date().toISOString().split('T')[0],
+            rental_start_date: toIsoDateForInlineAssign(effectiveDate),
             last_verified_order: orderNumber,
           })
           .eq('id', bottle.id);
         if (updateError) { assignmentWarnings.push(`Failed to assign bottle ${bottle.barcode_number}`); continue; }
         assignmentSuccesses.push(`Bottle ${bottle.barcode_number} assigned to ${newCustomerName}`);
         await insertDeliveryScan(bottle.barcode_number, newCustomerName, orderNumber);
-        await createRentalRecord(bottle, newCustomerName, newCustomerId, null, orderNumber);
+        await createRentalRecord(bottle, newCustomerName, newCustomerId, null, orderNumber, effectiveDate);
       } else if (isSameCustomer) {
         if (bottle.status !== 'rented') {
           await supabase.from('bottles').update({ status: 'rented', last_verified_order: orderNumber }).eq('id', bottle.id);
@@ -8264,7 +8039,7 @@ return (
   }
 
   // Create rental record for assigned bottle (orderNumber so unverify can delete by rental_order_number)
-  async function createRentalRecord(bottle, customerName, customerId, row, orderNumber = null) {
+  async function createRentalRecord(bottle, customerName, customerId, row, orderNumber = null, rentalStartDate = null) {
     try {
       if (!organization?.id) return;
       let resolvedCustomerId = customerId;
@@ -8279,6 +8054,7 @@ return (
         customerId: resolvedCustomerId || customerName,
         customerName,
         orderNumber,
+        ...(rentalStartDate ? { rentalStartDate: toIsoDateForInlineAssign(rentalStartDate) } : {}),
       });
       if (rentalResult.error) {
         logger.error('Error creating rental record:', rentalResult.error);

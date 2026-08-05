@@ -8,9 +8,11 @@
 
 import {
   buildBottleLookupMaps,
+  isCustomerOwnedForBilling,
   isDnsRentalExcludedFromBillableCount,
   isRentalOpen,
   rentalExcludedBecauseLinkedAssetLost,
+  resolveBottleForRental,
   resolvedRentalProductCode,
 } from './billingFromAssets';
 import { normalizePricingKey } from './pricingResolution';
@@ -212,6 +214,11 @@ export function summarizeMergedOpenRentalsByProduct(mergedRows, bottles) {
   for (const r of mergedRows || []) {
     if (isDnsRentalExcludedFromBillableCount(r)) continue;
     if (rentalExcludedBecauseLinkedAssetLost(r, byId, byBarcode)) continue;
+    // Customer-owned cylinders are the customer's own property, not company fleet on rent — must
+    // not count/bill on the Rentals page even if an open rental row still links to one (e.g.
+    // ownership was reclassified after the rental was created).
+    const linkedBottle = resolveBottleForRental(r, byId, byBarcode);
+    if (linkedBottle && isCustomerOwnedForBilling(linkedBottle)) continue;
     const raw = resolvedRentalProductCode(r, byId, byBarcode);
     const pkey = raw ? normalizePricingKey(raw) : '__unclassified__';
     map.set(pkey, (map.get(pkey) || 0) + 1);

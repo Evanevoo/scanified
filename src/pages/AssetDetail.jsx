@@ -1935,6 +1935,18 @@ export default function AssetDetail() {
                     action = recordMode || record.action || 'Scan';
                   }
                   
+                  // A BOTTLE_UPDATE audit that only touched the location/branch field (no status or
+                  // customer field change) is metadata housekeeping, not a return — e.g. backfilling a
+                  // missing home branch on a bottle that is still out on rent. Must not be shown as
+                  // "In-House" below, or the history implies a return that never happened.
+                  const isLocationOnlyAudit =
+                    record.history_type === 'audit' &&
+                    !!auditDetails?.field_changes?.location &&
+                    !auditDetails?.field_changes?.status &&
+                    !auditDetails?.field_changes?.assigned_customer &&
+                    !auditDetails?.field_changes?.customer_id &&
+                    !auditDetails?.field_changes?.customer_name;
+
                   // Determine resulting location (RNB still shows order customer — that is who the return was billed to on the order, not proof of an open rental row)
                   let resultingLocation = '';
                   const isSyntheticBottleStamp =
@@ -1976,6 +1988,9 @@ export default function AssetDetail() {
                     resultingLocation = isRnbRecord
                       ? `${base} · billing exception (not on open rental when approved)`
                       : base;
+                  } else if (isLocationOnlyAudit) {
+                    const byWhom = String(record.changed_by_name || '').trim();
+                    resultingLocation = `Branch/location updated: ${record.location} (assignment unchanged)${byWhom ? ` — by ${byWhom}` : ''}`;
                   } else if (record.location) {
                     resultingLocation = `In-House: ${record.location}`;
                   } else if (record.history_type === 'fill') {

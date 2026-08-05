@@ -27,6 +27,7 @@ import {
   fetchMergedAssetMovementHistory,
   formatAuditMovementLabel,
   isSyntheticMovementRow,
+  normalizeAuditDetails,
 } from '../services/assetMovementHistory';
 import {
   isPendingOrderScanRecord,
@@ -78,6 +79,17 @@ function mergedMovementToLogRows(asset, merged) {
 
     const cid = row.customer_id || row.assigned_customer || '';
     const cname = row.customer_name || '';
+    // A BOTTLE_UPDATE audit that only touched location/branch (no status or customer field change)
+    // is metadata housekeeping, not a return — must not read as "In-House" or it implies a return
+    // that never happened for a bottle that may still be out on rent.
+    const auditFieldChanges = ht === 'audit' ? (normalizeAuditDetails(row.details)?.field_changes || null) : null;
+    const isLocationOnlyAudit =
+      !!auditFieldChanges &&
+      !!auditFieldChanges.location &&
+      !auditFieldChanges.status &&
+      !auditFieldChanges.assigned_customer &&
+      !auditFieldChanges.customer_id &&
+      !auditFieldChanges.customer_name;
     const loc =
       isPendingOrderScanRecord(row)
         ? (() => {
@@ -101,6 +113,8 @@ function mergedMovementToLogRows(asset, merged) {
                 ? `${base} · billing exception (not on open rental when approved)`
                 : base;
             })()
+          : isLocationOnlyAudit
+            ? `Branch/location updated: ${row.location} (assignment unchanged)${row.changed_by_name ? ` — by ${row.changed_by_name}` : ''}`
           : row.location
             ? `In-House: ${row.location}`
           : ht === 'fill'
@@ -126,7 +140,7 @@ function mergedMovementToLogRows(asset, merged) {
       type: typeLabel,
       created_at: row.created_at || '',
       submitted_at: row.created_at || '',
-      user: row.scanned_by || row.user_name || row.user || row.user_id || '-',
+      user: row.changed_by_name || row.scanned_by || row.user_name || row.user || row.user_id || '-',
       device: row.device || row.device_id || '-',
       location: loc,
       data: dataParts.length ? dataParts.join(' | ') : '-',

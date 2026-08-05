@@ -53,8 +53,12 @@ export function postAssignmentFromAuditFieldChanges(parsedDetails) {
 export function formatAuditMovementLabel(record) {
   const d = normalizeAuditDetails(record?.details);
   const fc = d?.field_changes;
+  // Manual edit — always name who made it, even when field_changes is missing/unparseable.
+  const byWhom = String(record?.changed_by_name || '').trim()
+    ? ` (by ${String(record.changed_by_name).trim()})`
+    : '';
   if (!fc || typeof fc !== 'object') {
-    return String(record?.action || '').replace(/^AUDIT:\s*/i, '').trim() || 'Bottle update';
+    return (String(record?.action || '').replace(/^AUDIT:\s*/i, '').trim() || 'Bottle update') + byWhom;
   }
   const fmtPair = (chg) => {
     if (!chg || typeof chg !== 'object') return null;
@@ -79,7 +83,7 @@ export function formatAuditMovementLabel(record) {
     const p = fmtPair(fc.location);
     if (p) parts.push(`Location: ${p}`);
   }
-  return parts.length ? parts.join(' · ') : 'Bottle update';
+  return (parts.length ? parts.join(' · ') : 'Bottle update') + byWhom;
 }
 
 export const stringifyHistoryDetails = (details) => {
@@ -672,5 +676,38 @@ export async function fetchMergedAssetMovementHistory(supabase, {
     return String(movementHistoryDedupeKey(b)).localeCompare(String(movementHistoryDedupeKey(a)));
   });
 
-  return uniqueHistory.slice(0, Math.max(50, Math.min(maxRecords, 1000)));
+  const finalHistory = uniqueHistory.slice(0, Math.max(50, Math.min(maxRecords, 1000)));
+
+  // Manual bottle edits (BOTTLE_UPDATE audits) already record who made the change (user_id) —
+  // resolve it to a display name so movement history shows a person, not a bare UUID.
+  const manualEditUserIds = [
+    ...new Set(
+      finalHistory
+        .filter((item) => item.history_type === 'audit' && item.user_id)
+        .map((item) => String(item.user_id).trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (manualEditUserIds.length && organizationId) {
+    const profileRows = await runOptionalQuery(
+      () =>
+        supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .eq('organization_id', organizationId)
+          .in('id', manualEditUserIds),
+      'profiles_for_movement_history',
+    );
+    const nameById = new Map();
+    (profileRows || []).forEach((p) => {
+      const name = String(p.full_name || '').trim() || String(p.email || '').trim();
+      if (name) nameById.set(String(p.id), name);
+    });
+    finalHistory.forEach((item) => {
+      if (item.history_type !== 'audit' || !item.user_id) return;
+      item.changed_by_name = nameById.get(String(item.user_id).trim()) || null;
+    });
+  }
+
+  return finalHistory;
 }
