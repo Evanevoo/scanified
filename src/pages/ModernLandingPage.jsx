@@ -18,7 +18,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useAssetConfig } from '../hooks/useAssetConfig';
 import SEOHead, { SEOConfigs } from '../components/SEOHead';
-import GravityHeroBackground from '@/components/ui/gravity-hero-background';
+import ScrollScrubVideoHero from '@/components/ScrollScrubVideoHero';
 import { marketingTokens } from '../config/marketingTokens';
 import { fetchPublicSubscriptionPlans } from '../services/publicPlansService';
 
@@ -156,106 +156,75 @@ export default function ModernLandingPage() {
       </a>
       <SEOHead config={SEOConfigs.home} />
       
-      {/* Hero Section */}
-      <section id="main-content" className="relative overflow-hidden py-24 md:py-32 bg-transparent">
-        <GravityHeroBackground />
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="max-w-4xl mx-auto text-center">
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.6 }}
+      {/* Hero — a scroll-scrubbed video plane. The clip does not autoplay:
+          its timeline is bound to how far this section has travelled through
+          the viewport, so scrolling down advances it and scrolling up rewinds
+          it one-to-one. See ScrollScrubVideoHero for the progress → currentTime
+          mapping and for how the spacer height (SCRUB_SCREENS) is tuned. */}
+      <ScrollScrubVideoHero
+        eyebrow={organization?.name ? `Used by ${organization.name}` : 'Industrial gas & asset operations'}
+        headline={<>Less guesswork. More <span className="font-serif italic">visibility</span>.</>}
+        sub="Every cylinder, keg and tote followed from the scan in the yard to the line on the invoice."
+      >
+        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <Button
+            size="lg"
+            className="text-base px-8 h-12 bg-[#40B5AD] text-white hover:bg-[#379E97] border-0 shadow-lg shadow-[#40B5AD]/30"
+            onClick={(e) => { e.preventDefault(); navigate('/create-organization'); }}
+          >
+            Start Free Trial
+            <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="text-base px-8 h-12 border-2 border-white/30 bg-white/10 text-white backdrop-blur hover:bg-white/20 hover:text-white"
+            onClick={(e) => { e.preventDefault(); navigate('/demo'); }}
+          >
+            Watch Demo
+          </Button>
+        </div>
+        <p className="text-xs text-white/65">
+          No credit card required • 7-day free trial • Cancel anytime
+        </p>
+      </ScrollScrubVideoHero>
+
+      {/* Mobile apps. Lifted out of the hero on purpose — the brief was one
+          headline, one line, one CTA group over the frames, and nothing else
+          competing with them. */}
+      <section className="py-14 bg-transparent">
+        <div className="container mx-auto px-4 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-gray-700" />
+            <p className="text-sm font-semibold text-gray-700">Download Our Mobile App</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <motion.a
+              href="https://apps.apple.com/ca/app/scanified/id6749334978"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={reduceMotion ? undefined : { scale: 1.05 }}
+              whileTap={reduceMotion ? undefined : { scale: 0.95 }}
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg border-2 border-black hover:bg-gray-800 transition-colors"
             >
-              <Badge className="mb-6 border-2 border-primary bg-white text-foreground" variant="outline">
-                <Zap className="w-3 h-3 mr-1 text-primary" />
-                {organization?.name ? `Used by ${organization.name}` : 'Built for industrial gas & asset operations'}
-              </Badge>
-            </motion.div>
-            <motion.h1 
-              className="text-5xl md:text-7xl font-bold text-gray-900 mb-20 md:mb-32 leading-tight font-sans"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.2 }}
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C1.79 15.25 4.96 7.5 9.38 7.5c1.34 0 2.43.9 3.66.9 1.2 0 1.92-.89 3.25-.89 3.97 0 6.9 5.8 4.76 10.77zm-1.1-15.5c.58-.68.98-1.64.88-2.58-.85.05-1.88.57-2.5 1.28-.55.64-1.03 1.66-.9 2.65.95.07 1.92-.5 2.52-1.35z"/>
+              </svg>
+              <span className="font-semibold">App Store</span>
+            </motion.a>
+            <motion.a
+              href="https://play.google.com/store/apps/details?id=com.evanevoo.scanifiedandroid&hl=en"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={reduceMotion ? undefined : { scale: 1.05 }}
+              whileTap={reduceMotion ? undefined : { scale: 0.95 }}
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg border-2 border-black hover:bg-gray-800 transition-colors"
             >
-              Less guesswork.
-              <motion.span
-                className="block text-gray-900"
-                initial={{ opacity: 0, x: -50 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.4 }}
-              >
-                More{' '}
-                <span className="font-serif italic text-gray-900">
-                  visibility
-                </span>
-                .
-              </motion.span>
-            </motion.h1>
-            <motion.div 
-              className="flex flex-col sm:flex-row gap-4 justify-center items-center"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 0.8 }}
-            >
-              <motion.div whileHover={reduceMotion ? undefined : { scale: 1.05 }} whileTap={reduceMotion ? undefined : { scale: 0.95 }}>
-                <Button size="lg" className="text-base px-8 h-12 bg-primary text-primary-foreground hover:bg-primary/90 border-0 shadow-sm" onClick={(e) => { e.preventDefault(); navigate('/create-organization'); }}>
-                  Start Free Trial
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </motion.div>
-              <motion.div whileHover={reduceMotion ? undefined : { scale: 1.05 }} whileTap={reduceMotion ? undefined : { scale: 0.95 }}>
-                <Button size="lg" variant="outline" className="text-base px-8 h-12 border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground" onClick={(e) => { e.preventDefault(); navigate('/demo'); }}>
-                  Watch Demo
-                </Button>
-              </motion.div>
-            </motion.div>
-            <motion.p 
-              className="text-sm text-gray-600 mt-6"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 1 }}
-            >
-              No credit card required • 7-day free trial • Cancel anytime
-            </motion.p>
-            <motion.div 
-              className="flex flex-col items-center gap-4 mt-8"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.8, delay: reduceMotion ? 0 : 1.2 }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Smartphone className="w-5 h-5 text-gray-700" />
-                <p className="text-sm font-semibold text-gray-700">Download Our Mobile App</p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <motion.a
-                  href="https://apps.apple.com/ca/app/scanified/id6749334978"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  whileHover={reduceMotion ? undefined : { scale: 1.05 }}
-                  whileTap={reduceMotion ? undefined : { scale: 0.95 }}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg border-2 border-black hover:bg-gray-800 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C1.79 15.25 4.96 7.5 9.38 7.5c1.34 0 2.43.9 3.66.9 1.2 0 1.92-.89 3.25-.89 3.97 0 6.9 5.8 4.76 10.77zm-1.1-15.5c.58-.68.98-1.64.88-2.58-.85.05-1.88.57-2.5 1.28-.55.64-1.03 1.66-.9 2.65.95.07 1.92-.5 2.52-1.35z"/>
-                  </svg>
-                  <span className="font-semibold">App Store</span>
-                </motion.a>
-                <motion.a
-                  href="https://play.google.com/store/apps/details?id=com.evanevoo.scanifiedandroid&hl=en"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  whileHover={reduceMotion ? undefined : { scale: 1.05 }}
-                  whileTap={reduceMotion ? undefined : { scale: 0.95 }}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-black text-white rounded-lg border-2 border-black hover:bg-gray-800 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M3,20.5V3.5C3,2.91 3.34,2.39 3.84,2.15L13.69,12L3.84,21.85C3.34,21.6 3,21.09 3,20.5M16.81,15.12L6.05,21.34L14.54,12.85L16.81,15.12M20.16,10.81C20.5,11.08 20.75,11.5 20.75,12C20.75,12.5 20.53,12.9 20.18,13.18L17.89,14.5L15.39,12L17.89,9.5L20.16,10.81M6.05,2.66L16.81,8.88L14.54,11.15L6.05,2.66Z"/>
-                  </svg>
-                  <span className="font-semibold">Google Play</span>
-                </motion.a>
-              </div>
-            </motion.div>
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3,20.5V3.5C3,2.91 3.34,2.39 3.84,2.15L13.69,12L3.84,21.85C3.34,21.6 3,21.09 3,20.5M16.81,15.12L6.05,21.34L14.54,12.85L16.81,15.12M20.16,10.81C20.5,11.08 20.75,11.5 20.75,12C20.75,12.5 20.53,12.9 20.18,13.18L17.89,14.5L15.39,12L17.89,9.5L20.16,10.81M6.05,2.66L16.81,8.88L14.54,11.15L6.05,2.66Z"/>
+              </svg>
+              <span className="font-semibold">Google Play</span>
+            </motion.a>
           </div>
         </div>
       </section>
