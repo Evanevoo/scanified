@@ -27,6 +27,8 @@ import {
   formatCustomerHierarchyDisplayName,
 } from '../utils/customerParentConstraint';
 import { isActiveCustomerRecord as isCustomerRowActive } from '../utils/leaseCustomerMatchKeys';
+import { validateOrgCustomerId } from '../utils/orgFormatValidation';
+import * as XLSX from 'xlsx';
 
 const toolbarBtnSx = { minHeight: 40, px: 3 };
 
@@ -79,38 +81,112 @@ function CustomersErrorFallback({ error, resetErrorBoundary }) {
   );
 }
 
-function exportToCSV(customers) {
+/**
+ * Count bottles assigned to customers by CustomerListID (and legacy name / UUID matches),
+ * same mapping used by the customers table Total Assets column.
+ */
+async function buildAssetCountsForCustomers(customers, organizationId) {
+  if (!customers?.length || !organizationId) return {};
+
+  const listIdSet = new Set();
+  const nameToListId = new Map();
+  const uuidToListId = new Map();
+
+  for (const c of customers) {
+    const listId = c?.CustomerListID != null ? String(c.CustomerListID).trim() : '';
+    if (!listId) continue;
+    listIdSet.add(listId);
+    if (c.name) nameToListId.set(String(c.name).trim(), listId);
+    if (c.id) uuidToListId.set(String(c.id).trim(), listId);
+  }
+
+  if (listIdSet.size === 0) return {};
+
+  const counts = {};
+  const pageSize = 1000;
+  let from = 0;
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('bottles')
+      .select('assigned_customer')
+      .eq('organization_id', organizationId)
+      .not('assigned_customer', 'is', null)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+
+    for (const row of data) {
+      const raw = row.assigned_customer != null ? String(row.assigned_customer).trim() : '';
+      if (!raw) continue;
+      const key = listIdSet.has(raw)
+        ? raw
+        : (nameToListId.get(raw) || uuidToListId.get(raw));
+      if (!key) continue;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return counts;
+}
+
+function cellValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return value;
+}
+
+/** Build Excel rows with full customer details + assigned asset counts. */
+function buildCustomerExportRows(customers, assetCounts = {}, parentNames = {}) {
+  return customers.map((c) => {
+    const listId = c.CustomerListID != null ? String(c.CustomerListID).trim() : '';
+    return {
+      CustomerListID: cellValue(c.CustomerListID),
+      AccountNumber: cellValue(c.AccountNumber),
+      customer_number: cellValue(c.customer_number),
+      barcode: cellValue(c.barcode),
+      name: cellValue(c.name),
+      customer_type: cellValue(c.customer_type),
+      account_type: cellValue(c.account_type),
+      email: cellValue(c.email),
+      phone: cellValue(c.phone),
+      contact_details: cellValue(c.contact_details),
+      address2: cellValue(c.address2),
+      address3: cellValue(c.address3),
+      address4: cellValue(c.address4),
+      address5: cellValue(c.address5),
+      city: cellValue(c.city),
+      state: cellValue(c.state),
+      postal_code: cellValue(c.postal_code),
+      location: cellValue(c.location),
+      department: cellValue(c.department),
+      payment_terms: cellValue(c.payment_terms),
+      parent_customer_id: cellValue(c.parent_customer_id),
+      parent_name: cellValue(
+        c.parent_customer_id
+          ? (parentNames[c.parent_customer_id] || parentNames[String(c.parent_customer_id)] || '')
+          : ''
+      ),
+      is_active: cellValue(c.is_active ?? (c.archived || c.is_deleted || c.deleted_at ? false : true)),
+      notes: cellValue(c.notes),
+      total_assets: assetCounts[listId] || assetCounts[c.CustomerListID] || 0,
+      created_at: cellValue(c.created_at),
+      updated_at: cellValue(c.updated_at),
+    };
+  });
+}
+
+function exportCustomersToExcel(customers, assetCounts = {}, parentNames = {}, filenamePrefix = 'customers_export') {
   if (!customers.length) return;
-  const headers = [
-    'AccountNumber',
-    'CustomerListID',
-    'customer_number',
-    'barcode',
-    'name',
-    'contact_details',
-    'phone',
-    'total_assets'
-  ];
-  const rows = customers.map(c => [
-    c.CustomerListID,
-    c.CustomerListID,
-    c.customer_number,
-    c.barcode,
-    c.name,
-    c.contact_details,
-    c.phone,
-    c.total_assets || 0
-  ]);
-  const csvContent = [headers.join(','), ...rows.map(r => r.map(x => `"${(x ?? '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `customers_export_${new Date().toISOString().slice(0,10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const rows = buildCustomerExportRows(customers, assetCounts, parentNames);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Customers');
+  XLSX.writeFile(wb, `${filenamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 /** Distinct CustomerListIDs that have at least one bottle assigned (paginates bottle rows). */
@@ -153,22 +229,48 @@ const filterParentCustomerOptions = createFilterOptions({
     `${option?.name ?? ''} ${option?.CustomerListID ?? ''}`.trim(),
 });
 
-async function exportAllCustomersToCSV(organizationId) {
+async function exportAllCustomersToExcel(organizationId) {
   try {
-    const { data: allCustomers, error } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('organization_id', organizationId)
-      .order('name');
-    
-    if (error) throw error;
-    
-    if (!allCustomers || allCustomers.length === 0) {
+    const allCustomers = [];
+    const pageSize = 1000;
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('name')
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      if (!data?.length) break;
+      allCustomers.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+
+    if (allCustomers.length === 0) {
       alert('No customers found to export.');
       return;
     }
-    
-    exportToCSV(allCustomers);
+
+    const parentIds = [...new Set(allCustomers.map((c) => c.parent_customer_id).filter(Boolean))];
+    const parentNames = {};
+    if (parentIds.length > 0) {
+      const CHUNK = 200;
+      for (let i = 0; i < parentIds.length; i += CHUNK) {
+        const chunk = parentIds.slice(i, i + CHUNK);
+        const { data: parents } = await supabase
+          .from('customers')
+          .select('id, name')
+          .in('id', chunk);
+        (parents || []).forEach((p) => {
+          parentNames[p.id] = p.name;
+        });
+      }
+    }
+
+    const assetCounts = await buildAssetCountsForCustomers(allCustomers, organizationId);
+    exportCustomersToExcel(allCustomers, assetCounts, parentNames, 'customers_export_all');
   } catch (error) {
     logger.error('Error exporting customers:', error);
     alert('Error exporting customers: ' + error.message);
@@ -448,12 +550,17 @@ function Customers({ profile }) {
     if (!organization?.id) return;
     setError(null);
     if (!form.CustomerListID || !form.CustomerListID.trim()) {
-      setError('CustomerListID is required.');
+      setError('Customer number is required.');
+      return;
+    }
+    const idCheck = validateOrgCustomerId(form.CustomerListID.trim(), organization);
+    if (!idCheck.ok) {
+      setError(idCheck.error || 'Customer number does not match your organization format.');
       return;
     }
     if (isBranchTypeSelectedInForm(form.customer_type) && !form.parent_customer_id) {
       setError(
-        'Branch / location requires a parent account. Choose one under “Under (parent customer)”, or change type to Customer.'
+        'Branch / location requires a parent account. Choose one under â€œUnder (parent customer)â€, or change type to Customer.'
       );
       return;
     }
@@ -729,7 +836,7 @@ function Customers({ profile }) {
             </Box>
             <Button
               variant="outlined"
-              onClick={() => exportAllCustomersToCSV(organization.id)}
+              onClick={() => exportAllCustomersToExcel(organization.id)}
               sx={{ borderRadius: 2.5, textTransform: 'none', fontWeight: 700 }}
             >
               Export all customers
@@ -772,8 +879,22 @@ function Customers({ profile }) {
           useFlexGap
         >
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
-            <SecondaryButton variant="outlined" color="primary" sx={toolbarBtnSx} onClick={() => exportToCSV(customers)}>
-              Export to CSV
+            <SecondaryButton
+              variant="outlined"
+              color="primary"
+              sx={toolbarBtnSx}
+              onClick={async () => {
+                try {
+                  if (!organization?.id || !customers.length) return;
+                  const counts = await buildAssetCountsForCustomers(customers, organization.id);
+                  exportCustomersToExcel(customers, counts, parentNames);
+                } catch (err) {
+                  logger.error('Error exporting customers:', err);
+                  alert('Error exporting customers: ' + (err?.message || err));
+                }
+              }}
+            >
+              Export to Excel
             </SecondaryButton>
             <Button
               variant="outlined"
@@ -855,7 +976,6 @@ function Customers({ profile }) {
               sx={{
                 ...customersToolbarSelectSx,
                 minWidth: 168,
-                mt: 0.75,
               }}
               SelectProps={{
                 MenuProps: {
@@ -959,8 +1079,8 @@ function Customers({ profile }) {
               : `Showing ${customers.length} of ${totalCount} customers`
             }
             {locationFilter !== 'All' && ` (location: ${locationFilter})`}
-            {withAssignedAssetsOnly && ' · showing customers with at least one bottle assigned'}
-            {noPaymentTermsOnly && ' · payment terms blank or not set'}
+            {withAssignedAssetsOnly && ' Â· showing customers with at least one bottle assigned'}
+            {noPaymentTermsOnly && ' Â· payment terms blank or not set'}
           </Typography>
         </Box>
         </Paper>
@@ -1101,7 +1221,7 @@ function Customers({ profile }) {
                     />
                   </TableCell>
                   <TableCell>{c.CustomerListID}</TableCell>
-                  <TableCell>{c.parent_customer_id ? (parentNames[c.parent_customer_id] || '—') : '—'}</TableCell>
+                  <TableCell>{c.parent_customer_id ? (parentNames[c.parent_customer_id] || 'â€”') : 'â€”'}</TableCell>
                   <TableCell>{c.contact_details}</TableCell>
                   <TableCell>{c.phone}</TableCell>
                   <TableCell>
@@ -1242,7 +1362,7 @@ function Customers({ profile }) {
                     const nextType = e.target.value;
                     if (nextType === CUSTOMER_TYPE_BRANCH && !form.parent_customer_id) {
                       setError(
-                        'Select a parent customer first, or pick the parent under “Under (parent customer)” and type will switch to Branch automatically.'
+                        'Select a parent customer first, or pick the parent under â€œUnder (parent customer)â€ and type will switch to Branch automatically.'
                       );
                       return;
                     }
@@ -1279,7 +1399,7 @@ function Customers({ profile }) {
                   }));
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Under (parent customer)" placeholder="Search name or customer ID…" margin="normal" fullWidth />
+                  <TextField {...params} label="Under (parent customer)" placeholder="Search name or customer IDâ€¦" margin="normal" fullWidth />
                 )}
                 isOptionEqualToValue={(a, b) =>
                   String(a?.id ?? '') === String(b?.id ?? '')
