@@ -29,7 +29,8 @@ import {
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  History as HistoryIcon
+  History as HistoryIcon,
+  FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { clearRentalsBottleLinksForBottleIds } from '../utils/bottleDeleteHelpers';
@@ -65,6 +66,7 @@ import {
   isScanEffectiveForAssignmentReplay,
   scanRecordModeFamily,
 } from '../utils/orderScanApprovalStatus';
+import { downloadAssetHistoryCsv } from '../utils/assetExport';
 /** Exclude deleted rows only when those columns exist on the row (not selected from DB). */
 const isAssignableCustomer = (customer) => {
   if (!customer) return false;
@@ -1845,21 +1847,33 @@ export default function AssetDetail() {
 
       {/* Movement History Section */}
       <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2.5, border: '1px solid rgba(15, 23, 42, 0.08)' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1} flexWrap="wrap" gap={1}>
           <Typography variant="h6">
             Movement History
           </Typography>
-          <Button
-            variant="text"
-            size="small"
-            startIcon={<HistoryIcon />}
-            onClick={() => {
-              const historyId = asset.barcode_number || asset.serial_number || id;
-              navigate(`/assets/${historyId}/history`);
-            }}
-          >
-            View Full History
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<FileDownloadIcon />}
+              disabled={movementHistoryForDisplay.length === 0}
+              onClick={() => downloadAssetHistoryCsv(movementHistoryForDisplay, asset, 'asset-history')}
+              sx={{ textTransform: 'none' }}
+            >
+              Export History
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              startIcon={<HistoryIcon />}
+              onClick={() => {
+                const historyId = asset.barcode_number || asset.serial_number || id;
+                navigate(`/assets/${historyId}/history`);
+              }}
+            >
+              View Full History
+            </Button>
+          </Stack>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Scan, rental, fill, and audit events for this asset (chain of custody).

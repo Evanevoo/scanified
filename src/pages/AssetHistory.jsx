@@ -19,7 +19,8 @@ import {
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Edit as EditIcon
+  Edit as EditIcon,
+  FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../hooks/useAuth';
@@ -34,6 +35,7 @@ import {
   scanRecordModeFamily,
 } from '../utils/orderScanApprovalStatus';
 import { PageSearchInput } from '../components/ui/search-input-with-icon';
+import { downloadAssetHistoryCsv } from '../utils/assetExport';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -263,6 +265,19 @@ export default function AssetHistory() {
     fetchData();
   }, [id, organization?.id, profile?.organization_id]);
 
+  const filteredRecords = records.filter(r =>
+    !searchTerm ||
+    r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleExportHistory = () => {
+    downloadAssetHistoryCsv(filteredRecords, asset, 'asset-history');
+  };
+
   // Asset edit handlers
   const handleAssetEdit = () => setEditMode(true);
   const handleAssetEditChange = e => setEditForm({ ...editForm, [e.target.name]: e.target.value });
@@ -480,9 +495,20 @@ export default function AssetHistory() {
         )}
       </Paper>
 
-      <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 2 }}>
-        Asset Record Log
-      </Typography>
+      <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1} mb={2}>
+        <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
+          Asset Record Log
+        </Typography>
+        <Button
+          variant="outlined"
+          startIcon={<FileDownloadIcon />}
+          onClick={handleExportHistory}
+          disabled={filteredRecords.length === 0}
+          sx={{ textTransform: 'none' }}
+        >
+          Export History CSV
+        </Button>
+      </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Includes bottle scans, cylinder scans, rentals (delivery / return / RNB), fills, transfers, exceptions,
         audits, manual asset records, and creation updates — same timeline as the asset detail movement history.
@@ -512,15 +538,7 @@ export default function AssetHistory() {
           </TableHead>
           <TableBody>
             {(() => {
-              const filtered = records.filter(r =>
-                !searchTerm ||
-                r.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.user?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.data?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.notes?.toLowerCase().includes(searchTerm.toLowerCase())
-              );
-              if (filtered.length === 0) {
+              if (filteredRecords.length === 0) {
                 return (
                   <TableRow>
                     <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
@@ -533,7 +551,7 @@ export default function AssetHistory() {
                   </TableRow>
                 );
               }
-              return filtered.map(record => (
+              return filteredRecords.map(record => (
               <TableRow key={record._rowKey || record.id} sx={recordEditId === record.id ? { backgroundColor: '#fefce8' } : {}}>
                 {recordEditId === record.id ? (
                   <>

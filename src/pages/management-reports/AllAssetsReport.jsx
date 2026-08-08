@@ -38,6 +38,23 @@ import { useAuth } from '../../hooks/useAuth';
 import { StatsSkeleton, TableSkeleton } from '../../components/SmoothLoading';
 import { formatLocationDisplay } from '../../utils/locationDisplay';
 import { PageSearchInput } from '../../components/ui/search-input-with-icon';
+import {
+  downloadAssetsDetailCsv,
+  downloadCsv,
+  formatExportDate,
+  getDeliveredAtCustomerDate,
+  getOwnershipLabel,
+  historyRowToExportRow,
+  rowsToCsvString,
+  ASSET_HISTORY_CSV_HEADERS,
+} from '../../utils/assetExport';
+import {
+  fetchMergedAssetMovementHistory,
+  isSyntheticMovementRow,
+} from '../../services/assetMovementHistory';
+
+const HISTORY_EXPORT_MAX_ASSETS = 100;
+const HISTORY_EXPORT_CONCURRENCY = 4;
 
 export default function AllAssetsReport() {
   const navigate = useNavigate();
@@ -48,6 +65,9 @@ export default function AllAssetsReport() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [assets, setAssets] = useState([]);
   const [exportAnchorEl, setExportAnchorEl] = useState(null);
+  const [exportingHistory, setExportingHistory] = useState(false);
+  const [historyExportProgress, setHistoryExportProgress] = useState(null);
+  const [exportNotice, setExportNotice] = useState(null);
   const [summary, setSummary] = useState({
     totalAssets: 0,
     activeAssets: 0,
@@ -136,44 +156,7 @@ export default function AllAssetsReport() {
   });
 
   const exportToCSV = () => {
-    const csvData = [];
-    
-    // Add header
-    csvData.push([
-      'Asset ID', 'Barcode', 'Serial Number', 'Product Code', 'Description', 
-      'Status', 'Location', 'Assigned Customer', 'Customer Phone', 'Created Date', 'Last Updated'
-    ]);
-    
-    // Add data rows
-    filteredAssets.forEach(asset => {
-      csvData.push([
-        asset.id,
-        asset.barcode_number || 'N/A',
-        asset.serial_number || 'N/A',
-        asset.product_code || 'N/A',
-        asset.description || 'N/A',
-        asset.status || 'N/A',
-        (asset.location ? formatLocationDisplay(asset.location) : 'N/A'),
-        asset.customers?.name || 'Unassigned',
-        asset.customers?.phone || 'N/A',
-        new Date(asset.created_at).toLocaleDateString(),
-        asset.last_updated ? new Date(asset.last_updated).toLocaleDateString() : 'N/A'
-      ]);
-    });
-
-    // Convert to CSV string
-    const csvString = csvData.map(row => 
-      row.map(cell => `"${cell}"`).join(',')
-    ).join('\n');
-
-    // Download
-    const blob = new Blob([csvString], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `all-assets-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    downloadAssetsDetailCsv(filteredAssets, 'all-assets');
     setExportAnchorEl(null);
   };
 
@@ -194,6 +177,77 @@ export default function AllAssetsReport() {
     a.click();
     window.URL.revokeObjectURL(url);
     setExportAnchorEl(null);
+  };
+
+  const exportHistoryToCSV = async () => {
+    setExportAnchorEl(null);
+    if (!organization?.id) return;
+
+    const targets = filteredAssets.filter(
+      (a) => a?.barcode_number || a?.serial_number
+    );
+    if (targets.length === 0) {
+      setExportNotice({
+        severity: 'warning',
+        message: 'No assets with barcode or serial number to export history for.',
+      });
+      return;
+    }
+    if (targets.length > HISTORY_EXPORT_MAX_ASSETS) {
+      setExportNotice({
+        severity: 'warning',
+        message:
+          `History export is limited to ${HISTORY_EXPORT_MAX_ASSETS} assets at a time. ` +
+          `Filter the list (currently ${targets.length}) and try again, or open a single asset’s history page to export.`,
+      });
+      return;
+    }
+
+    setExportingHistory(true);
+    setHistoryExportProgress({ done: 0, total: targets.length });
+    setExportNotice(null);
+
+    try {
+      const allRows = [];
+      let done = 0;
+
+      for (let i = 0; i < targets.length; i += HISTORY_EXPORT_CONCURRENCY) {
+        const chunk = targets.slice(i, i + HISTORY_EXPORT_CONCURRENCY);
+        const chunkResults = await Promise.all(
+          chunk.map(async (asset) => {
+            const merged = await fetchMergedAssetMovementHistory(supabase, {
+              organizationId: organization.id,
+              asset,
+              perSourceLimit: 200,
+              maxRecords: 500,
+            });
+            return (merged || [])
+              .filter((r) => !isSyntheticMovementRow(r))
+              .map((r) => historyRowToExportRow(r, asset));
+          })
+        );
+        chunkResults.forEach((rows) => allRows.push(...rows));
+        done += chunk.length;
+        setHistoryExportProgress({ done, total: targets.length });
+      }
+
+      const csv = rowsToCsvString(ASSET_HISTORY_CSV_HEADERS, allRows);
+      const date = new Date().toISOString().split('T')[0];
+      downloadCsv(`all-assets-history-${date}.csv`, csv);
+      setExportNotice({
+        severity: 'success',
+        message: `Exported ${allRows.length} history rows for ${targets.length} assets.`,
+      });
+    } catch (err) {
+      logger.error('Error exporting asset history:', err);
+      setExportNotice({
+        severity: 'error',
+        message: `Failed to export history: ${err.message || 'Unknown error'}`,
+      });
+    } finally {
+      setExportingHistory(false);
+      setHistoryExportProgress(null);
+    }
   };
 
   if (authLoading || loading) {
@@ -258,12 +312,25 @@ export default function AllAssetsReport() {
           </Box>
           <Button
             variant="contained"
-            startIcon={<DownloadIcon />}
+            startIcon={exportingHistory ? <CircularProgress size={18} color="inherit" /> : <DownloadIcon />}
             onClick={(e) => setExportAnchorEl(e.currentTarget)}
+            disabled={exportingHistory}
           >
-            Export
+            {exportingHistory && historyExportProgress
+              ? `Exporting history ${historyExportProgress.done}/${historyExportProgress.total}`
+              : 'Export'}
           </Button>
         </Box>
+
+        {exportNotice && (
+          <Alert
+            severity={exportNotice.severity}
+            sx={{ mb: 2 }}
+            onClose={() => setExportNotice(null)}
+          >
+            {exportNotice.message}
+          </Alert>
+        )}
 
         {/* Summary Cards */}
         <Grid container spacing={3} mb={4}>
@@ -389,22 +456,28 @@ export default function AllAssetsReport() {
                 <TableCell sx={{ fontWeight: 700 }}>Asset Info</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Product Details</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Ownership</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Delivered to Customer</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Last Updated</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredAssets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={8} align="center">
                     <Typography variant="body1" color="text.secondary">
                       No assets found matching your criteria.
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredAssets.map((asset) => (
+                filteredAssets.map((asset) => {
+                  const delivered = getDeliveredAtCustomerDate(asset);
+                  const ownership = getOwnershipLabel(asset);
+                  const updatedAt = asset.updated_at || asset.last_updated || asset.created_at;
+                  return (
                   <TableRow key={asset.id} hover>
                     <TableCell>
                       <Box>
@@ -439,13 +512,18 @@ export default function AllAssetsReport() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
+                        {ownership || '—'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
                         {asset.location ? formatLocationDisplay(asset.location) : 'Not specified'}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Box>
                         <Typography variant="body2">
-                          {asset.customers?.name || 'Unassigned'}
+                          {asset.customers?.name || asset.customer_name || 'Unassigned'}
                         </Typography>
                         {asset.customers?.phone && (
                           <Typography variant="caption" color="text.secondary">
@@ -456,14 +534,17 @@ export default function AllAssetsReport() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {asset.last_updated ? 
-                          new Date(asset.last_updated).toLocaleDateString() : 
-                          new Date(asset.created_at).toLocaleDateString()
-                        }
+                        {delivered ? formatExportDate(delivered) : '—'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {updatedAt ? formatExportDate(updatedAt) : '—'}
                       </Typography>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -482,11 +563,18 @@ export default function AllAssetsReport() {
           open={Boolean(exportAnchorEl)}
           onClose={() => setExportAnchorEl(null)}
         >
-          <MenuItem onClick={exportToCSV}>
+          <MenuItem onClick={exportToCSV} disabled={exportingHistory}>
             <FileDownloadIcon sx={{ mr: 1 }} />
-            Export to CSV
+            Export assets (full details) CSV
           </MenuItem>
-          <MenuItem onClick={exportToJSON}>
+          <MenuItem onClick={exportHistoryToCSV} disabled={exportingHistory}>
+            <FileDownloadIcon sx={{ mr: 1 }} />
+            Export history CSV
+            {filteredAssets.length > HISTORY_EXPORT_MAX_ASSETS
+              ? ` (filter to ≤${HISTORY_EXPORT_MAX_ASSETS})`
+              : ` (${Math.min(filteredAssets.length, HISTORY_EXPORT_MAX_ASSETS)})`}
+          </MenuItem>
+          <MenuItem onClick={exportToJSON} disabled={exportingHistory}>
             <FileDownloadIcon sx={{ mr: 1 }} />
             Export to JSON
           </MenuItem>
